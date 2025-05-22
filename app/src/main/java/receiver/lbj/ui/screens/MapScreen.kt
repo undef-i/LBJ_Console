@@ -2,6 +2,9 @@ package receiver.lbj.ui.screens
 
 import android.Manifest
 import android.content.Context
+import receiver.lbj.R
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.drawable.Drawable
 import android.graphics.PorterDuff
@@ -71,14 +74,16 @@ fun MapScreen(
                 load(context, context.getSharedPreferences("osmdroid", Context.MODE_PRIVATE))
                 osmdroidBasePath = osmCacheDir
                 osmdroidTileCache = tileCache
-                expirationOverrideDuration = 86400000L 
+                expirationOverrideDuration = 86400000L
                 gpsWaitTime = 0L
-                tileDownloadThreads = 2
-                tileFileSystemThreads = 2
+                tileDownloadThreads = 6
+                tileFileSystemThreads = 6
+                tileFileSystemCacheTrimBytes = 1024L * 1024L * 2000
+                tileFileSystemCacheMaxBytes = 1024L * 1024L * 500L
             }
         } catch (e: Exception) {
             e.printStackTrace()
-            onLocationError("地图初始化失败：${e.localizedMessage}")
+            onLocationError("Map initialization failed: ${e.localizedMessage}")
         }
     }
     
@@ -220,11 +225,15 @@ fun MapScreen(
                             ViewGroup.LayoutParams.MATCH_PARENT
                         )
                         
-                        
                         setTileSource(TileSourceFactory.MAPNIK)
                         setMultiTouchControls(true)
-                        zoomController.setVisibility(org.osmdroid.views.CustomZoomButtonsController.Visibility.NEVER) 
+                        zoomController.setVisibility(org.osmdroid.views.CustomZoomButtonsController.Visibility.NEVER)
                         isTilesScaledToDpi = true
+                        tilesScaleFactor = ctx.resources.displayMetrics.density * 0.2f
+                        setHorizontalMapRepetitionEnabled(false)
+                        setVerticalMapRepetitionEnabled(false)
+                        isHorizontalMapRepetitionEnabled = false
+                        isVerticalMapRepetitionEnabled = false
                         setUseDataConnection(true)
                         minZoomLevel = 4.0
                         maxZoomLevel = 18.0
@@ -246,18 +255,18 @@ fun MapScreen(
                         
                         try {
                             
-                            
+
                             val railwayTileSource = XYTileSource(
-                                "OpenRailwayMap", 
-                                8, 16, 
-                                256, 
-                                ".png", 
-                                arrayOf( 
+                                "OpenRailwayMap",
+                                0, 24,  // 穷尽所有可能的缩放级别
+                                256,
+                                ".png",
+                                arrayOf(
                                     "https://a.tiles.openrailwaymap.org/standard/",
                                     "https://b.tiles.openrailwaymap.org/standard/",
                                     "https://c.tiles.openrailwaymap.org/standard/"
                                 ),
-                                "© OpenRailwayMap contributors, © OpenStreetMap contributors" 
+                                "© OpenRailwayMap contributors, © OpenStreetMap contributors"
                             )
                             
                             
@@ -269,7 +278,7 @@ fun MapScreen(
                             
                             
                             val railwayColorFilter = PorterDuffColorFilter(
-                                Color.rgb(0, 51, 153), 
+                                Color.rgb(0, 51, 153),
                                 PorterDuff.Mode.MULTIPLY
                             )
                             railwayOverlay.setColorFilter(railwayColorFilter)
@@ -288,7 +297,7 @@ fun MapScreen(
                         }
                         
                         
-                        controller.setZoom(10.0)
+                                                controller.setZoom(10.0)
                         
                         
                         try {
@@ -299,7 +308,28 @@ fun MapScreen(
                             }
                             
                             val myLocationOverlay = MyLocationNewOverlay(locationProvider, this).apply {
-                                enableMyLocation() 
+                                // 使用我们的自定义人形图标
+                                // 使用原生位置/雷达图标
+                                val personDrawable = ctx.resources.getDrawable(android.R.drawable.ic_menu_mylocation, ctx.theme)
+                                // 设置为黑色
+                                personDrawable.setTint(Color.BLACK)
+                                
+                                val bitmap = Bitmap.createBitmap(
+                                    personDrawable.intrinsicWidth,
+                                    personDrawable.intrinsicHeight,
+                                    Bitmap.Config.ARGB_8888
+                                )
+                                val canvas = Canvas(bitmap)
+                                personDrawable.setBounds(0, 0, canvas.width, canvas.height)
+                                personDrawable.draw(canvas)
+                                
+                                setPersonIcon(bitmap)
+                                // 设置中心对齐
+                                setPersonAnchor(0.5f, 0.5f)
+                                
+                                isDrawAccuracyEnabled = false
+                                
+                                enableMyLocation()
                                 
                                 runOnFirstFix {
                                     try {
@@ -335,21 +365,21 @@ fun MapScreen(
                             ScaleBarOverlay(this).apply {
                                 setCentred(false)
                                 setScaleBarOffset(5, ctx.resources.displayMetrics.heightPixels - 50)
-                                setTextSize(10.0f)
+                                setTextSize(12.0f * ctx.resources.displayMetrics.density / 2)
                                 setEnableAdjustLength(true)
                                 setAlignBottom(true)
                                 setLineWidth(2.0f)
                             }.also { overlays.add(it) }
                         } catch (e: Exception) {
                             e.printStackTrace()
-                            onLocationError("地图组件初始化失败：${e.localizedMessage}")
+                            onLocationError("Map component initialization failed: ${e.localizedMessage}")
                         }
                         
                         mapViewRef.value = this
                     }
                 } catch (e: Exception) {
                     e.printStackTrace()
-                    onLocationError("地图创建失败：${e.localizedMessage}")
+                    onLocationError("Map creation failed: ${e.localizedMessage}")
                     
                     MapView(ctx).apply {
                         layoutParams = ViewGroup.LayoutParams(

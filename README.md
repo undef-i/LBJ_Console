@@ -1,6 +1,6 @@
 # LBJ_Console
 
-LBJ_Console is an Android app designed to receive and display LBJ (Locomotive Bell Jingling) messages via BLE from the [SX1276_Receive_LBJ](https://github.com/undef-i/SX1276_Receive_LBJ) device.
+LBJ_Console is an Android app designed to receive and display LBJ messages via BLE from the [SX1276_Receive_LBJ](https://github.com/undef-i/SX1276_Receive_LBJ) device.
 
 # License
 
