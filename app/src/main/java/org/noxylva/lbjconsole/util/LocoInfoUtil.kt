@@ -1,4 +1,4 @@
-package receiver.lbj.util
+package org.noxylva.lbjconsole.util
 
 import android.content.Context
 import android.util.Log

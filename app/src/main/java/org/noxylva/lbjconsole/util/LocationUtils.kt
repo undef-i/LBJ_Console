@@ -1,8 +1,7 @@
-package receiver.lbj.util
+package org.noxylva.lbjconsole.util
 
 import android.util.Log
 import org.osmdroid.util.GeoPoint
-import kotlin.math.abs
 
 
 object LocationUtils {

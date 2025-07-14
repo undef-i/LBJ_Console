@@ -1,4 +1,4 @@
-package receiver.lbj.ui.components
+package org.noxylva.lbjconsole.ui.components
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -10,7 +10,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.material3.HorizontalDivider
-import receiver.lbj.model.TrainRecord
+import org.noxylva.lbjconsole.model.TrainRecord
 
 @Composable
 fun TrainInfoCard(

@@ -1,4 +1,4 @@
-package receiver.lbj
+package org.noxylva.lbjconsole
 
 import android.Manifest
 import android.bluetooth.BluetoothAdapter
@@ -6,7 +6,7 @@ import android.bluetooth.BluetoothDevice
 import android.content.Context
 import android.content.Intent
 import java.io.File
-import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -19,36 +19,30 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 import org.osmdroid.config.Configuration
-import receiver.lbj.model.TrainRecord
-import receiver.lbj.model.TrainRecordManager
-import receiver.lbj.ui.screens.HistoryScreen
-import receiver.lbj.ui.screens.MapScreen
-import receiver.lbj.ui.screens.SettingsScreen
-import receiver.lbj.ui.screens.MapScreen
-import receiver.lbj.ui.theme.LBJReceiverTheme
-import receiver.lbj.util.LocoInfoUtil
+import org.noxylva.lbjconsole.model.TrainRecord
+import org.noxylva.lbjconsole.model.TrainRecordManager
+import org.noxylva.lbjconsole.ui.screens.HistoryScreen
+import org.noxylva.lbjconsole.ui.screens.MapScreen
+import org.noxylva.lbjconsole.ui.screens.SettingsScreen
+import org.noxylva.lbjconsole.ui.theme.LBJReceiverTheme
+import org.noxylva.lbjconsole.util.LocoInfoUtil
 import java.util.*
 import androidx.lifecycle.lifecycleScope
-import androidx.lifecycle.viewModelScope
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
 
@@ -80,7 +74,10 @@ class MainActivity : ComponentActivity() {
     private var temporaryStatusMessage by mutableStateOf<String?>(null) 
     
     
-    private var targetDeviceName = "LBJReceiver" 
+    private var targetDeviceName = "LBJReceiver"
+    
+    
+    private val settingsPrefs by lazy { getSharedPreferences("app_settings", Context.MODE_PRIVATE) } 
     
     
     private val requestPermissions = registerForActivityResult(
@@ -133,16 +130,30 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         
         
-        requestPermissions.launch(arrayOf(
-            Manifest.permission.BLUETOOTH,
-            Manifest.permission.BLUETOOTH_ADMIN,
-            Manifest.permission.BLUETOOTH_CONNECT,
-            Manifest.permission.BLUETOOTH_SCAN,
+        loadSettings()
+        
+        
+        val permissions = mutableListOf<String>()
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            permissions.addAll(arrayOf(
+                Manifest.permission.BLUETOOTH_CONNECT,
+                Manifest.permission.BLUETOOTH_SCAN,
+                Manifest.permission.BLUETOOTH_ADVERTISE
+            ))
+        } else {
+            permissions.addAll(arrayOf(
+                Manifest.permission.BLUETOOTH,
+                Manifest.permission.BLUETOOTH_ADMIN
+            ))
+        }
+        
+        permissions.addAll(arrayOf(
             Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.ACCESS_COARSE_LOCATION,
-            Manifest.permission.WRITE_EXTERNAL_STORAGE,
-            Manifest.permission.READ_EXTERNAL_STORAGE
+            Manifest.permission.ACCESS_COARSE_LOCATION
         ))
+        
+        requestPermissions.launch(permissions.toTypedArray())
         
         
         bleClient.setTrainInfoCallback { jsonData ->
@@ -263,17 +274,36 @@ class MainActivity : ComponentActivity() {
                         deviceName = settingsDeviceName,
                         onDeviceNameChange = { newName -> settingsDeviceName = newName },
                         onApplySettings = {
-                            
-                            
+                            saveSettings()
+                            targetDeviceName = settingsDeviceName
                             Toast.makeText(this, "设备名称 '${settingsDeviceName}' 已保存，下次连接时生效", Toast.LENGTH_LONG).show()
                             Log.d(TAG, "Applied settings deviceName=${settingsDeviceName}")
                         },
                         locoInfoUtil = locoInfoUtil
                     )
                     
-                    
-
-
+                    // 显示连接对话框
+                    if (showConnectionDialog) {
+                        ConnectionDialog(
+                            isScanning = isScanning,
+                            devices = foundDevices,
+                            onDismiss = { 
+                                showConnectionDialog = false
+                                stopScan()
+                            },
+                            onScan = {
+                                if (isScanning) {
+                                    stopScan()
+                                } else {
+                                    startScan()
+                                }
+                            },
+                            onConnect = { device ->
+                                showConnectionDialog = false
+                                connectToDevice(device)
+                            }
+                        )
+                    }
                 }
             }
         }
@@ -284,13 +314,23 @@ class MainActivity : ComponentActivity() {
         deviceStatus = "正在连接..."
         Log.d(TAG, "Connecting to device name=${device.name ?: "Unknown"} address=${device.address}")
         
+        // 检查蓝牙适配器状态
+        val bluetoothAdapter = BluetoothAdapter.getDefaultAdapter()
+        if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled) {
+            deviceStatus = "蓝牙未启用"
+            Log.e(TAG, "Bluetooth adapter unavailable or disabled")
+            return
+        }
+        
         bleClient.connect(device.address) { connected ->
-            if (connected) {
-                deviceStatus = "已连接"
-                Log.d(TAG, "Connected to device name=${device.name ?: "Unknown"}")
-            } else {
-                deviceStatus = "连接失败或已断开连接"
-                Log.e(TAG, "Connection failed name=${device.name ?: "Unknown"}")
+            runOnUiThread {
+                if (connected) {
+                    deviceStatus = "已连接"
+                    Log.d(TAG, "Connected to device name=${device.name ?: "Unknown"}")
+                } else {
+                    deviceStatus = "连接失败或已断开连接"
+                    Log.e(TAG, "Connection failed name=${device.name ?: "Unknown"}")
+                }
             }
         }
         
@@ -382,6 +422,19 @@ class MainActivity : ComponentActivity() {
 
     
     private fun startScan() {
+        val bluetoothAdapter = BluetoothAdapter.getDefaultAdapter()
+        if (bluetoothAdapter == null) {
+            Log.e(TAG, "Bluetooth adapter unavailable")
+            deviceStatus = "设备不支持蓝牙"
+            return
+        }
+        
+        if (!bluetoothAdapter.isEnabled) {
+            Log.e(TAG, "Bluetooth adapter disabled")
+            deviceStatus = "请启用蓝牙"
+            return
+        }
+        
         isScanning = true
         foundDevices = emptyList()
         val targetDeviceName = settingsDeviceName.ifBlank { null } 
@@ -396,8 +449,11 @@ class MainActivity : ComponentActivity() {
                     Log.d(TAG, "Found target=$targetDeviceName, connecting")
                     stopScan() 
                     connectToDevice(device) 
-                } else if (!foundDevices.any { it.address == device.address }) {
-                    showConnectionDialog = true 
+                } else {
+                    // 如果没有指定目标设备名称，或者找到的设备不是目标设备，显示连接对话框
+                    if (targetDeviceName == null) {
+                        showConnectionDialog = true 
+                    }
                 }
             }
         }
@@ -413,6 +469,21 @@ class MainActivity : ComponentActivity() {
     
     private fun updateDeviceList() {
         foundDevices = scanResults.map { it.device }
+    }
+    
+    
+    private fun loadSettings() {
+        settingsDeviceName = settingsPrefs.getString("device_name", "LBJReceiver") ?: "LBJReceiver"
+        targetDeviceName = settingsDeviceName
+        Log.d(TAG, "Loaded settings deviceName=${settingsDeviceName}")
+    }
+    
+    
+    private fun saveSettings() {
+        settingsPrefs.edit()
+            .putString("device_name", settingsDeviceName)
+            .apply()
+        Log.d(TAG, "Saved settings deviceName=${settingsDeviceName}")
     }
 }
 
@@ -478,7 +549,7 @@ fun MainContent(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("LBJReceiver") },
+                title = { Text("LBJ Console") },
                 actions = {
                     
                     timeSinceLastUpdate.value?.let { time ->

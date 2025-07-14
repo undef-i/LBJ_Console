@@ -1,9 +1,7 @@
-package receiver.lbj.ui.screens
+package org.noxylva.lbjconsole.ui.screens
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -14,8 +12,8 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
-import receiver.lbj.model.TrainRecord
-import receiver.lbj.ui.components.TrainDetailDialog
+import org.noxylva.lbjconsole.model.TrainRecord
+import org.noxylva.lbjconsole.ui.components.TrainDetailDialog
 import java.text.SimpleDateFormat
 import java.util.*
 

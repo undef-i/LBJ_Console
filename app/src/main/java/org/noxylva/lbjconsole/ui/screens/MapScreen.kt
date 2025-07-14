@@ -1,25 +1,15 @@
-package receiver.lbj.ui.screens
+package org.noxylva.lbjconsole.ui.screens
 
-import android.Manifest
 import android.content.Context
-import receiver.lbj.R
-import android.graphics.Bitmap
-import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.drawable.Drawable
 import android.graphics.PorterDuff
 import android.graphics.PorterDuffColorFilter
-import android.location.Location
-import android.location.LocationListener
 import android.util.Log
-import android.location.LocationManager
-import android.view.View
 import android.view.ViewGroup
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material3.*
@@ -36,19 +26,15 @@ import androidx.lifecycle.LifecycleEventObserver
 import kotlinx.coroutines.launch
 import org.osmdroid.config.Configuration
 import org.osmdroid.tileprovider.MapTileProviderBasic
-import org.osmdroid.tileprovider.tilesource.OnlineTileSourceBase
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.tileprovider.tilesource.XYTileSource
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.*
-import org.osmdroid.views.overlay.compass.CompassOverlay
-import org.osmdroid.views.overlay.compass.InternalCompassOrientationProvider
 import org.osmdroid.views.overlay.mylocation.GpsMyLocationProvider
 import org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay
-import receiver.lbj.model.TrainRecord
+import org.noxylva.lbjconsole.model.TrainRecord
 import java.io.File
-import java.util.*
 
 
 @Composable
@@ -184,13 +170,7 @@ fun MapScreen(
         mapView.invalidate()
         
         
-        if (!isMapInitialized && validRecords.isNotEmpty()) {
-            validRecords.firstOrNull()?.getCoordinates()?.let { point ->
-                mapView.controller.setZoom(12.0)
-                mapView.controller.setCenter(point)
-                isMapInitialized = true
-            }
-        }
+
     }
     
     
@@ -258,7 +238,7 @@ fun MapScreen(
 
                             val railwayTileSource = XYTileSource(
                                 "OpenRailwayMap",
-                                0, 24,  // 穷尽所有可能的缩放级别
+                                0, 24,
                                 256,
                                 ".png",
                                 arrayOf(
@@ -297,7 +277,15 @@ fun MapScreen(
                         }
                         
                         
-                                                controller.setZoom(10.0)
+                                                if (validRecords.isNotEmpty()) {
+                            validRecords.lastOrNull()?.getCoordinates()?.let { lastPoint ->
+                                controller.setCenter(lastPoint)
+                                controller.setZoom(12.0)
+                            }
+                        } else {
+                            controller.setCenter(defaultPosition)
+                            controller.setZoom(10.0)
+                        }
                         
                         
                         try {
@@ -307,28 +295,8 @@ fun MapScreen(
                                 locationUpdateMinTime = 1000 
                             }
                             
+                            
                             val myLocationOverlay = MyLocationNewOverlay(locationProvider, this).apply {
-                                // 使用我们的自定义人形图标
-                                // 使用原生位置/雷达图标
-                                val personDrawable = ctx.resources.getDrawable(android.R.drawable.ic_menu_mylocation, ctx.theme)
-                                // 设置为黑色
-                                personDrawable.setTint(Color.BLACK)
-                                
-                                val bitmap = Bitmap.createBitmap(
-                                    personDrawable.intrinsicWidth,
-                                    personDrawable.intrinsicHeight,
-                                    Bitmap.Config.ARGB_8888
-                                )
-                                val canvas = Canvas(bitmap)
-                                personDrawable.setBounds(0, 0, canvas.width, canvas.height)
-                                personDrawable.draw(canvas)
-                                
-                                setPersonIcon(bitmap)
-                                // 设置中心对齐
-                                setPersonAnchor(0.5f, 0.5f)
-                                
-                                isDrawAccuracyEnabled = false
-                                
                                 enableMyLocation()
                                 
                                 runOnFirstFix {
@@ -337,21 +305,40 @@ fun MapScreen(
                                             currentLocation = GeoPoint(location.latitude, location.longitude)
                                             
                                             if (!isMapInitialized) {
-                                                controller.animateTo(location)
-                                                
-                                                isMapInitialized = true
-                                            }
+                                    controller.setCenter(location)
+                                    controller.setZoom(15.0)
+                                    isMapInitialized = true
+                                    Log.d("MapScreen", "Map initialized with GPS position: $location")
+                                }
                                         } ?: run {
-                                            
                                             if (!isMapInitialized) {
-                                                controller.animateTo(defaultPosition)
-                                            }
+                                    if (validRecords.isNotEmpty()) {
+                                        validRecords.lastOrNull()?.getCoordinates()?.let { lastPoint ->
+                                            controller.setCenter(lastPoint)
+                                            controller.setZoom(12.0)
+                                            isMapInitialized = true
+                                            Log.d("MapScreen", "Map initialized with last record position: $lastPoint")
+                                        }
+                                    } else {
+                                        controller.setCenter(defaultPosition)
+                                        isMapInitialized = true
+                                    }
+                                }
                                         }
                                     } catch (e: Exception) {
                                         e.printStackTrace()
-                                        
                                         if (!isMapInitialized) {
-                                            controller.animateTo(defaultPosition)
+                                            if (validRecords.isNotEmpty()) {
+                                                validRecords.lastOrNull()?.getCoordinates()?.let { lastPoint ->
+                                                    controller.setCenter(lastPoint)
+                                                    controller.setZoom(12.0)
+                                                    isMapInitialized = true
+                                                    Log.d("MapScreen", "Map fallback to last record position: $lastPoint")
+                                                }
+                                            } else {
+                                                controller.setCenter(defaultPosition)
+                                                isMapInitialized = true
+                                            }
                                         }
                                     }
                                 }
@@ -425,7 +412,7 @@ fun MapScreen(
                         overlay.enableFollowLocation()
                         overlay.enableMyLocation()
                         overlay.myLocation?.let { location ->
-                            mapViewRef.value?.controller?.animateTo(location)
+                            mapViewRef.value?.controller?.setCenter(location)
                         }
                     }
                 },
@@ -467,14 +454,22 @@ fun MapScreen(
             FloatingActionButton(
                 onClick = {
                     mapViewRef.value?.let { mapView ->
-                        if (validRecords.isNotEmpty()) {
-                            validRecords.firstOrNull()?.getCoordinates()?.let { point ->
-                                mapView.controller.animateTo(point)
-                                mapView.controller.setZoom(12.0)
+                        myLocationOverlayRef.value?.myLocation?.let { gpsLocation ->
+                            mapView.controller.setCenter(gpsLocation)
+                            mapView.controller.setZoom(15.0)
+                            Log.d("MapScreen", "Refresh button: GPS position used")
+                        } ?: run {
+                            if (validRecords.isNotEmpty()) {
+                                validRecords.lastOrNull()?.getCoordinates()?.let { point ->
+                                    mapView.controller.setCenter(point)
+                                    mapView.controller.setZoom(12.0)
+                                    Log.d("MapScreen", "Refresh button: last record position used")
+                                }
+                            } else {
+                                mapView.controller.setCenter(defaultPosition)
+                                mapView.controller.setZoom(10.0)
+                                Log.d("MapScreen", "Refresh button: default position used")
                             }
-                        } else {
-                            mapView.controller.animateTo(defaultPosition)
-                            mapView.controller.setZoom(10.0)
                         }
                     }
                     onCenterMap()

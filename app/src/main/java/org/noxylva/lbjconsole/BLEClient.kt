@@ -1,17 +1,22 @@
-package receiver.lbj
+package org.noxylva.lbjconsole
 
 import android.annotation.SuppressLint
 import android.bluetooth.*
+import android.bluetooth.le.BluetoothLeScanner
+import android.bluetooth.le.ScanCallback
+import android.bluetooth.le.ScanResult
 import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import androidx.core.content.ContextCompat
 import java.nio.charset.StandardCharsets
 import org.json.JSONObject
 import java.util.*
 
-class BLEClient(private val context: Context) : BluetoothGattCallback(),
-    BluetoothAdapter.LeScanCallback {
+class BLEClient(private val context: Context) : BluetoothGattCallback() {
     companion object {
         const val TAG = "LBJ_BT"
         const val SCAN_PERIOD = 10000L
@@ -35,6 +40,24 @@ class BLEClient(private val context: Context) : BluetoothGattCallback(),
     private var trainInfoCallback: ((JSONObject) -> Unit)? = null
     private var handler = Handler(Looper.getMainLooper())
     private var targetDeviceName: String? = null
+    private var bluetoothLeScanner: BluetoothLeScanner? = null
+    
+    private val leScanCallback = object : ScanCallback() {
+        override fun onScanResult(callbackType: Int, result: ScanResult) {
+            val device = result.device
+            val deviceName = device.name
+            if (targetDeviceName != null) {
+                if (deviceName == null || !deviceName.equals(targetDeviceName, ignoreCase = true)) {
+                    return
+                }
+            }
+            scanCallback?.invoke(device)
+        }
+        
+        override fun onScanFailed(errorCode: Int) {
+            Log.e(TAG, "BLE scan failed code=$errorCode")
+        }
+    }
 
 
     fun setTrainInfoCallback(callback: (JSONObject) -> Unit) {
@@ -42,8 +65,28 @@ class BLEClient(private val context: Context) : BluetoothGattCallback(),
     }
 
 
+    private fun hasBluetoothPermissions(): Boolean {
+        val bluetoothPermissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            ContextCompat.checkSelfPermission(context, android.Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED &&
+            ContextCompat.checkSelfPermission(context, android.Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
+        } else {
+            ContextCompat.checkSelfPermission(context, android.Manifest.permission.BLUETOOTH) == PackageManager.PERMISSION_GRANTED &&
+            ContextCompat.checkSelfPermission(context, android.Manifest.permission.BLUETOOTH_ADMIN) == PackageManager.PERMISSION_GRANTED
+        }
+        
+        val locationPermissions = ContextCompat.checkSelfPermission(context, android.Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+                ContextCompat.checkSelfPermission(context, android.Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        
+        return bluetoothPermissions && locationPermissions
+    }
+
     @SuppressLint("MissingPermission")
     fun scanDevices(targetDeviceName: String? = null, callback: (BluetoothDevice) -> Unit) {
+        if (!hasBluetoothPermissions()) {
+            Log.e(TAG, "Bluetooth permissions not granted")
+            return
+        }
+
         try {
             scanCallback = callback
             this.targetDeviceName = targetDeviceName
@@ -57,13 +100,19 @@ class BLEClient(private val context: Context) : BluetoothGattCallback(),
                 return
             }
 
+            bluetoothLeScanner = bluetoothAdapter.bluetoothLeScanner
+            if (bluetoothLeScanner == null) {
+                Log.e(TAG, "BluetoothLeScanner unavailable")
+                return
+            }
+
             handler.postDelayed({
                 stopScan()
             }, SCAN_PERIOD)
 
             isScanning = true
             Log.d(TAG, "Starting BLE scan target=${targetDeviceName ?: "Any"}")
-            bluetoothAdapter.startLeScan(this)
+            bluetoothLeScanner?.startScan(leScanCallback)
         } catch (e: SecurityException) {
             Log.e(TAG, "Scan security error: ${e.message}")
         } catch (e: Exception) {
@@ -75,28 +124,25 @@ class BLEClient(private val context: Context) : BluetoothGattCallback(),
     @SuppressLint("MissingPermission")
     fun stopScan() {
         if (isScanning) {
-            val bluetoothAdapter = BluetoothAdapter.getDefaultAdapter()
-            bluetoothAdapter.stopLeScan(this)
+            bluetoothLeScanner?.stopScan(leScanCallback)
             isScanning = false
         }
     }
 
 
-    override fun onLeScan(device: BluetoothDevice, rssi: Int, scanRecord: ByteArray) {
 
-        val deviceName = device.name
-        if (targetDeviceName != null) {
-
-            if (deviceName == null || !deviceName.equals(targetDeviceName, ignoreCase = true)) {
-                return
-            }
-        }
-        scanCallback?.invoke(device)
-    }
 
 
     @SuppressLint("MissingPermission")
     fun connect(address: String, onConnectionStateChange: ((Boolean) -> Unit)? = null): Boolean {
+        Log.d(TAG, "Attempting to connect to device: $address")
+        
+        if (!hasBluetoothPermissions()) {
+            Log.e(TAG, "Bluetooth permissions not granted")
+            handler.post { onConnectionStateChange?.invoke(false) }
+            return false
+        }
+
         if (address.isBlank()) {
             Log.e(TAG, "Connection failed empty address")
             handler.post { onConnectionStateChange?.invoke(false) }
@@ -108,6 +154,18 @@ class BLEClient(private val context: Context) : BluetoothGattCallback(),
                 Log.e(TAG, "Bluetooth adapter unavailable")
                 handler.post { onConnectionStateChange?.invoke(false) }
                 return false
+            }
+            
+            if (!bluetoothAdapter.isEnabled) {
+                Log.e(TAG, "Bluetooth adapter is disabled")
+                handler.post { onConnectionStateChange?.invoke(false) }
+                return false
+            }
+            
+            if (isConnected) {
+                Log.w(TAG, "Already connected to device")
+                handler.post { onConnectionStateChange?.invoke(true) }
+                return true
             }
 
 
