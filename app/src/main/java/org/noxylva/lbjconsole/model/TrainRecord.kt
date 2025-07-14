@@ -1,11 +1,10 @@
-package receiver.lbj.model
+package org.noxylva.lbjconsole.model
 
 import android.util.Log
 import org.json.JSONObject
-import java.text.SimpleDateFormat
 import java.util.*
 import org.osmdroid.util.GeoPoint
-import receiver.lbj.util.LocationUtils
+import org.noxylva.lbjconsole.util.LocationUtils
 
 class TrainRecord(jsonData: JSONObject? = null) {
     companion object {

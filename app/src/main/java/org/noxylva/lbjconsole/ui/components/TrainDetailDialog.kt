@@ -1,4 +1,4 @@
-package receiver.lbj.ui.components
+package org.noxylva.lbjconsole.ui.components
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -16,7 +16,7 @@ import androidx.compose.ui.window.DialogProperties
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
-import receiver.lbj.model.TrainRecord
+import org.noxylva.lbjconsole.model.TrainRecord
 
 @Composable
 fun TrainDetailDialog(

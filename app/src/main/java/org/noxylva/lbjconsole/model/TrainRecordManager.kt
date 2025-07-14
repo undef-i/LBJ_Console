@@ -1,4 +1,4 @@
-package receiver.lbj.model
+package org.noxylva.lbjconsole.model
 
 import android.content.Context
 import android.content.SharedPreferences

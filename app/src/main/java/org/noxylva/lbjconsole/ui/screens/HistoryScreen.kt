@@ -1,10 +1,5 @@
-package receiver.lbj.ui.screens
+package org.noxylva.lbjconsole.ui.screens
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.background
@@ -17,18 +12,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.ripple.rememberRipple
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.filled.FilterList
-import androidx.compose.material.icons.filled.SignalCellular4Bar
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.input.pointer.positionChange
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.foundation.gestures.detectTransformGestures
-import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -42,8 +30,8 @@ import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.mylocation.GpsMyLocationProvider
 import org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay
 import org.osmdroid.views.overlay.TilesOverlay
-import receiver.lbj.model.TrainRecord
-import receiver.lbj.util.LocoInfoUtil
+import org.noxylva.lbjconsole.model.TrainRecord
+import org.noxylva.lbjconsole.util.LocoInfoUtil
 import java.text.SimpleDateFormat
 import java.util.*
 

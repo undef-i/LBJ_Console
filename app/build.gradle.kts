@@ -5,13 +5,13 @@ plugins {
 }
 
 android {
-    namespace = "receiver.lbj"
+    namespace = "org.noxylva.lbjconsole"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "receiver.lbj"
+        applicationId = "org.noxylva.lbjconsole"
         minSdk = 29
-        targetSdk = 34
+        targetSdk = 35
         versionCode = 1
         versionName = "1.0"
 

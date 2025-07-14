@@ -1,4 +1,4 @@
-package receiver.lbj.ui.theme
+package org.noxylva.lbjconsole.ui.theme
 
 import androidx.compose.ui.graphics.Color
 

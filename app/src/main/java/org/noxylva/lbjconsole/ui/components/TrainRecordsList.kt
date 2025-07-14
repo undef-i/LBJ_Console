@@ -1,4 +1,4 @@
-package receiver.lbj.ui.components
+package org.noxylva.lbjconsole.ui.components
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -9,7 +9,6 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
-import androidx.compose.material3.TopAppBarDefaults.topAppBarColors
 import androidx.compose.runtime.*
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.ui.Alignment
@@ -18,7 +17,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import receiver.lbj.model.TrainRecord
+import org.noxylva.lbjconsole.model.TrainRecord
 import java.text.SimpleDateFormat
 import java.util.*
 
