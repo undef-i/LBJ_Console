@@ -6,6 +6,10 @@ on:
       - 'v*'
   workflow_dispatch:
 
+permissions:
+  contents: write
+  actions: read
+
 jobs:
   release:
     runs-on: ubuntu-latest
