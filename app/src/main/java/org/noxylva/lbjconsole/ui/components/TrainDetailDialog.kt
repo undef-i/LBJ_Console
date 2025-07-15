@@ -62,20 +62,20 @@ fun TrainDetailDialog(
                     DetailItem("方向", recordMap["direction"] ?: "未知")
                 }
                 
-                Divider(modifier = Modifier.padding(vertical = 8.dp))
+                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
                 
                 
                 DetailItem("接收时间", recordMap["timestamp"] ?: "--")
                 DetailItem("列车时间", recordMap["time"] ?: "--")
                 
-                Divider(modifier = Modifier.padding(vertical = 8.dp))
+                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
                 
                 
                 DetailItem("速度", recordMap["speed"] ?: "--")
                 DetailItem("位置", recordMap["position"] ?: "--")
                 DetailItem("位置信息", recordMap["position_info"] ?: "--")
                 
-                Divider(modifier = Modifier.padding(vertical = 8.dp))
+                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
                 
                 
                 DetailItem("机车号", recordMap["loco"] ?: "--")
@@ -89,7 +89,7 @@ fun TrainDetailDialog(
                 DetailItem("信号强度", recordMap["rssi"] ?: "--")
                 
                 if (coordinates != null) {
-                    Divider(modifier = Modifier.padding(vertical = 8.dp))
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
                     
                     DetailItem(
                         label = "经纬度",
