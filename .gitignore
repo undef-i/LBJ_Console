@@ -13,3 +13,4 @@ captures
 .cxx
 local.properties
 local.properties
+*.ps1
