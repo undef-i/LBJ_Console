@@ -11,7 +11,67 @@ permissions:
   actions: read
 
 jobs:
-  release:
+  build-universal:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '17'
+        
+    - name: Setup Android SDK
+      uses: android-actions/setup-android@v3
+      
+    - name: Create keystore
+      run: |
+        echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > keystore.jks
+      
+    - name: Cache Gradle packages
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+        restore-keys: |
+          ${{ runner.os }}-gradle-
+          
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
+      
+    - name: Build Universal APK
+      run: ./gradlew assembleRelease
+      env:
+        KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        
+    - name: Rename Universal APK
+      run: |
+        cd app/build/outputs/apk/release
+        if [[ $GITHUB_REF == refs/tags/* ]]; then
+          VERSION_TAG=${GITHUB_REF#refs/tags/}
+        else
+          VERSION_TAG="dev-${GITHUB_SHA:0:7}"
+        fi
+        BUILD_NUMBER=${GITHUB_RUN_NUMBER}
+        TIMESTAMP=$(date +"%Y%m%d_%H%M")
+        for file in *universal*.apk; do
+          mv "$file" "LBJ_Console_${VERSION_TAG}_universal_release_${BUILD_NUMBER}_${TIMESTAMP}.apk"
+        done
+        
+    - name: Upload Universal APK
+      uses: actions/upload-artifact@v4
+      with:
+        name: LBJ-Console-universal-release
+        path: app/build/outputs/apk/release/LBJ_Console_*_universal_release_*.apk
+
+  build-specific:
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -30,6 +90,10 @@ jobs:
     - name: Setup Android SDK
       uses: android-actions/setup-android@v3
       
+    - name: Create keystore
+      run: |
+        echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > keystore.jks
+      
     - name: Cache Gradle packages
       uses: actions/cache@v4
       with:
@@ -45,7 +109,8 @@ jobs:
       
     - name: Modify build.gradle for specific ABI
       run: |
-        sed -i 's/abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64")/abiFilters += listOf("${{ matrix.abi }}")/g' app/build.gradle.kts
+        sed -i 's/include("arm64-v8a", "armeabi-v7a", "x86", "x86_64")/include("${{ matrix.abi }}")/g' app/build.gradle.kts
+        sed -i 's/isUniversalApk = true/isUniversalApk = false/g' app/build.gradle.kts
       
     - name: Build Release APK for ${{ matrix.abi }}
       run: ./gradlew assembleRelease
@@ -57,18 +122,25 @@ jobs:
     - name: Rename APK with ABI suffix
       run: |
         cd app/build/outputs/apk/release
+        if [[ $GITHUB_REF == refs/tags/* ]]; then
+          VERSION_TAG=${GITHUB_REF#refs/tags/}
+        else
+          VERSION_TAG="dev-${GITHUB_SHA:0:7}"
+        fi
+        BUILD_NUMBER=${GITHUB_RUN_NUMBER}
+        TIMESTAMP=$(date +"%Y%m%d_%H%M")
         for file in *.apk; do
-          mv "$file" "${file%.apk}-${{ matrix.abi }}.apk"
+          mv "$file" "LBJ_Console_${VERSION_TAG}_${{ matrix.abi }}_release_${BUILD_NUMBER}_${TIMESTAMP}.apk"
         done
         
-    - name: Upload APK artifact
+    - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
-        name: apk-${{ matrix.abi }}
-        path: app/build/outputs/apk/release/*-${{ matrix.abi }}.apk
+        name: LBJ-Console-${{ matrix.abi }}-release
+        path: app/build/outputs/apk/release/LBJ_Console_*_${{ matrix.abi }}_release_*.apk
         
   create-release:
-    needs: release
+    needs: [build-universal, build-specific]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     
