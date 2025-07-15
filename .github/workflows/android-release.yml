@@ -13,6 +13,9 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        abi: ["arm64-v8a", "armeabi-v7a", "x86", "x86_64"]
     
     steps:
     - name: Checkout repository
@@ -40,18 +43,48 @@ jobs:
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew
       
-    - name: Build Release APK
+    - name: Modify build.gradle for specific ABI
+      run: |
+        sed -i 's/abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64")/abiFilters += listOf("${{ matrix.abi }}")/g' app/build.gradle.kts
+      
+    - name: Build Release APK for ${{ matrix.abi }}
       run: ./gradlew assembleRelease
       env:
         KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         
+    - name: Rename APK with ABI suffix
+      run: |
+        cd app/build/outputs/apk/release
+        for file in *.apk; do
+          mv "$file" "${file%.apk}-${{ matrix.abi }}.apk"
+        done
+        
+    - name: Upload APK artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: apk-${{ matrix.abi }}
+        path: app/build/outputs/apk/release/*-${{ matrix.abi }}.apk
+        
+  create-release:
+    needs: release
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    
+    steps:
+    - name: Download all APK artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: apks
+        
     - name: Create Release
-      if: startsWith(github.ref, 'refs/tags/')
       uses: softprops/action-gh-release@v1
       with:
-        files: app/build/outputs/apk/release/*.apk
+        files: |
+          apks/**/*.apk
         generate_release_notes: true
+        name: ${{ github.ref_name }}
+        body: ""
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
