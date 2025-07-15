@@ -51,8 +51,8 @@ android {
     buildFeatures {
         compose = true
     }
-    lintOptions {
-        disable("NullSafeMutableLiveData")
+    lint {
+        disable += "NullSafeMutableLiveData"
     }
 }
 
