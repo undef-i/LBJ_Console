@@ -140,7 +140,6 @@ fun TrainRecordsListWithToolbar(
     records: List<TrainRecord>,
     onRecordClick: (TrainRecord) -> Unit,
     onFilterClick: () -> Unit,
-    onExportClick: () -> Unit,
     onClearClick: () -> Unit,
     onDeleteRecords: (List<TrainRecord>) -> Unit,
     modifier: Modifier = Modifier
@@ -196,12 +195,6 @@ fun TrainRecordsListWithToolbar(
                             Icon(
                                 imageVector = Icons.Default.FilterList, 
                                 contentDescription = "筛选"
-                            )
-                        }
-                        IconButton(onClick = onExportClick) {
-                            Icon(
-                                imageVector = Icons.Default.Share,
-                                contentDescription = "导出"
                             )
                         }
                     }

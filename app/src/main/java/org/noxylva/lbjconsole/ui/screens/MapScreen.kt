@@ -33,6 +33,9 @@ import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.*
 import org.osmdroid.views.overlay.mylocation.GpsMyLocationProvider
 import org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay
+import org.osmdroid.events.MapListener
+import org.osmdroid.events.ScrollEvent
+import org.osmdroid.events.ZoomEvent
 import org.noxylva.lbjconsole.model.TrainRecord
 import java.io.File
 
@@ -41,7 +44,11 @@ import java.io.File
 fun MapScreen(
     records: List<TrainRecord>,
     onCenterMap: () -> Unit = {},
-    onLocationError: (String) -> Unit = {}
+    onLocationError: (String) -> Unit = {},
+    centerPosition: Pair<Double, Double>? = null,
+    zoomLevel: Double = 10.0,
+    railwayLayerVisible: Boolean = true,
+    onStateChange: (Pair<Double, Double>?, Double, Boolean) -> Unit = { _, _, _ -> }
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -90,7 +97,7 @@ fun MapScreen(
     var selectedRecord by remember { mutableStateOf<TrainRecord?>(null) }
     var dialogPosition by remember { mutableStateOf<GeoPoint?>(null) }
     
-    var railwayLayerVisible by remember { mutableStateOf(true) }
+    var railwayLayerVisibleState by remember(railwayLayerVisible) { mutableStateOf(railwayLayerVisible) }
     
     
     DisposableEffect(lifecycleOwner) {
@@ -277,14 +284,21 @@ fun MapScreen(
                         }
                         
                         
-                                                if (validRecords.isNotEmpty()) {
-                            validRecords.lastOrNull()?.getCoordinates()?.let { lastPoint ->
-                                controller.setCenter(lastPoint)
-                                controller.setZoom(12.0)
+                        centerPosition?.let { (lat, lon) ->
+                            controller.setCenter(GeoPoint(lat, lon))
+                            controller.setZoom(zoomLevel)
+                            isMapInitialized = true
+                            Log.d("MapScreen", "Map initialized with saved state: lat=$lat, lon=$lon, zoom=$zoomLevel")
+                        } ?: run {
+                            if (validRecords.isNotEmpty()) {
+                                validRecords.lastOrNull()?.getCoordinates()?.let { lastPoint ->
+                                    controller.setCenter(lastPoint)
+                                    controller.setZoom(12.0)
+                                }
+                            } else {
+                                controller.setCenter(defaultPosition)
+                                controller.setZoom(10.0)
                             }
-                        } else {
-                            controller.setCenter(defaultPosition)
-                            controller.setZoom(10.0)
                         }
                         
                         
@@ -304,30 +318,30 @@ fun MapScreen(
                                         myLocation?.let { location ->
                                             currentLocation = GeoPoint(location.latitude, location.longitude)
                                             
-                                            if (!isMapInitialized) {
-                                    controller.setCenter(location)
-                                    controller.setZoom(15.0)
-                                    isMapInitialized = true
-                                    Log.d("MapScreen", "Map initialized with GPS position: $location")
-                                }
+                                            if (!isMapInitialized && centerPosition == null) {
+                                                controller.setCenter(location)
+                                                controller.setZoom(15.0)
+                                                isMapInitialized = true
+                                                Log.d("MapScreen", "Map initialized with GPS position: $location")
+                                            }
                                         } ?: run {
-                                            if (!isMapInitialized) {
-                                    if (validRecords.isNotEmpty()) {
-                                        validRecords.lastOrNull()?.getCoordinates()?.let { lastPoint ->
-                                            controller.setCenter(lastPoint)
-                                            controller.setZoom(12.0)
-                                            isMapInitialized = true
-                                            Log.d("MapScreen", "Map initialized with last record position: $lastPoint")
-                                        }
-                                    } else {
-                                        controller.setCenter(defaultPosition)
-                                        isMapInitialized = true
-                                    }
-                                }
+                                            if (!isMapInitialized && centerPosition == null) {
+                                                if (validRecords.isNotEmpty()) {
+                                                    validRecords.lastOrNull()?.getCoordinates()?.let { lastPoint ->
+                                                        controller.setCenter(lastPoint)
+                                                        controller.setZoom(12.0)
+                                                        isMapInitialized = true
+                                                        Log.d("MapScreen", "Map initialized with last record position: $lastPoint")
+                                                    }
+                                                } else {
+                                                    controller.setCenter(defaultPosition)
+                                                    isMapInitialized = true
+                                                }
+                                            }
                                         }
                                     } catch (e: Exception) {
                                         e.printStackTrace()
-                                        if (!isMapInitialized) {
+                                        if (!isMapInitialized && centerPosition == null) {
                                             if (validRecords.isNotEmpty()) {
                                                 validRecords.lastOrNull()?.getCoordinates()?.let { lastPoint ->
                                                     controller.setCenter(lastPoint)
@@ -357,6 +371,31 @@ fun MapScreen(
                                 setAlignBottom(true)
                                 setLineWidth(2.0f)
                             }.also { overlays.add(it) }
+                            
+                            
+                            addMapListener(object : MapListener {
+                                override fun onScroll(event: ScrollEvent?): Boolean {
+                                    val center = mapCenter
+                                    val zoom = zoomLevelDouble
+                                    onStateChange(
+                                        center.latitude to center.longitude,
+                                        zoom,
+                                        railwayLayerVisibleState
+                                    )
+                                    return true
+                                }
+                                
+                                override fun onZoom(event: ZoomEvent?): Boolean {
+                                    val center = mapCenter
+                                    val zoom = zoomLevelDouble
+                                    onStateChange(
+                                        center.latitude to center.longitude,
+                                        zoom,
+                                        railwayLayerVisibleState
+                                    )
+                                    return true
+                                }
+                            })
                         } catch (e: Exception) {
                             e.printStackTrace()
                             onLocationError("Map component initialization failed: ${e.localizedMessage}")
@@ -381,7 +420,7 @@ fun MapScreen(
                 
                 coroutineScope.launch {
                     updateMarkers()
-                    updateRailwayLayerVisibility(railwayLayerVisible)
+                    updateRailwayLayerVisibility(railwayLayerVisibleState)
                 }
             }
         )
@@ -430,15 +469,26 @@ fun MapScreen(
             
             FloatingActionButton(
                 onClick = {
-                    railwayLayerVisible = !railwayLayerVisible
-                    updateRailwayLayerVisibility(railwayLayerVisible)
+                    railwayLayerVisibleState = !railwayLayerVisibleState
+                    updateRailwayLayerVisibility(railwayLayerVisibleState)
+                    
+                    
+                    mapViewRef.value?.let { mapView ->
+                        val center = mapView.mapCenter
+                        val zoom = mapView.zoomLevelDouble
+                        onStateChange(
+                            center.latitude to center.longitude,
+                            zoom,
+                            railwayLayerVisibleState
+                        )
+                    }
                 },
                 modifier = Modifier.size(40.dp),
-                containerColor = if (railwayLayerVisible)
+                containerColor = if (railwayLayerVisibleState)
                     MaterialTheme.colorScheme.primary.copy(alpha = 0.9f)
                 else
                     MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.9f),
-                contentColor = if (railwayLayerVisible)
+                contentColor = if (railwayLayerVisibleState)
                     MaterialTheme.colorScheme.onPrimary 
                 else
                     MaterialTheme.colorScheme.onPrimaryContainer

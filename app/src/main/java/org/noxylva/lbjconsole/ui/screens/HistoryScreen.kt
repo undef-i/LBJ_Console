@@ -7,7 +7,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.ripple.rememberRipple
 import androidx.compose.material.icons.Icons
@@ -44,18 +46,33 @@ fun HistoryScreen(
     temporaryStatusMessage: String? = null,
     locoInfoUtil: LocoInfoUtil? = null,
     onClearRecords: () -> Unit = {},
-    onExportRecords: () -> Unit = {},
     onRecordClick: (TrainRecord) -> Unit = {},
     onClearLog: () -> Unit = {},
-    onDeleteRecords: (List<TrainRecord>) -> Unit = {}
+    onDeleteRecords: (List<TrainRecord>) -> Unit = {},
+    editMode: Boolean = false,
+    selectedRecords: Set<String> = emptySet(),
+    expandedStates: Map<String, Boolean> = emptyMap(),
+    scrollPosition: Int = 0,
+    scrollOffset: Int = 0,
+    onStateChange: (Boolean, Set<String>, Map<String, Boolean>, Int, Int) -> Unit = { _, _, _, _, _ -> }
 ) {
 
     val refreshKey = latestRecord?.timestamp?.time ?: 0
 
-    var isInEditMode by remember { mutableStateOf(false) }
-    val selectedRecords = remember { mutableStateListOf<TrainRecord>() }
-
-    val expandedStates = remember { mutableStateMapOf<String, Boolean>() }
+    var isInEditMode by remember(editMode) { mutableStateOf(editMode) }
+    val selectedRecordsList = remember(selectedRecords) { 
+        mutableStateListOf<TrainRecord>().apply {
+            addAll(records.filter { selectedRecords.contains(it.timestamp.time.toString()) })
+        }
+    }
+    val expandedStatesMap = remember(expandedStates) { 
+        mutableStateMapOf<String, Boolean>().apply { putAll(expandedStates) }
+    }
+    
+    val listState = rememberLazyListState(
+        initialFirstVisibleItemIndex = scrollPosition,
+        initialFirstVisibleItemScrollOffset = scrollOffset
+    )
 
 
     val timeSinceLastUpdate = remember { mutableStateOf<String?>(null) }
@@ -79,11 +96,32 @@ fun HistoryScreen(
 
     fun exitEditMode() {
         isInEditMode = false
-        selectedRecords.clear()
+        selectedRecordsList.clear()
+        onStateChange(false, emptySet(), expandedStatesMap.toMap(), listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
     }
 
-    LaunchedEffect(selectedRecords.size) {
-        if (selectedRecords.isEmpty() && isInEditMode) {
+    LaunchedEffect(isInEditMode, selectedRecordsList.size) {
+        val selectedIds = selectedRecordsList.map { it.timestamp.time.toString() }.toSet()
+        onStateChange(isInEditMode, selectedIds, expandedStatesMap.toMap(), listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
+    }
+    
+    LaunchedEffect(expandedStatesMap.toMap()) {
+        if (!isInEditMode) {
+            val selectedIds = selectedRecordsList.map { it.timestamp.time.toString() }.toSet()
+            onStateChange(isInEditMode, selectedIds, expandedStatesMap.toMap(), listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
+        }
+    }
+    
+    LaunchedEffect(listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset) {
+        if (!isInEditMode) {
+            delay(300)
+            val selectedIds = selectedRecordsList.map { it.timestamp.time.toString() }.toSet()
+            onStateChange(isInEditMode, selectedIds, expandedStatesMap.toMap(), listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
+        }
+    }
+
+    LaunchedEffect(selectedRecordsList.size) {
+        if (selectedRecordsList.isEmpty() && isInEditMode) {
             exitEditMode()
         }
     }
@@ -126,11 +164,12 @@ fun HistoryScreen(
                     }
                 } else {
                     LazyColumn(
+                        state = listState,
                         modifier = Modifier.fillMaxSize(),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         items(filteredRecords) { record ->
-                            val isSelected = selectedRecords.contains(record)
+                            val isSelected = selectedRecordsList.contains(record)
                             val cardColor = when {
                                 isSelected -> MaterialTheme.colorScheme.primaryContainer
                                 else -> MaterialTheme.colorScheme.surface
@@ -151,14 +190,14 @@ fun HistoryScreen(
                                             onClick = {
                                                 if (isInEditMode) {
                                                     if (isSelected) {
-                                                        selectedRecords.remove(record)
+                                                        selectedRecordsList.remove(record)
                                                     } else {
-                                                        selectedRecords.add(record)
+                                                        selectedRecordsList.add(record)
                                                     }
                                                 } else {
                                                     val id = record.timestamp.time.toString()
-                                                    expandedStates[id] =
-                                                        !(expandedStates[id] ?: false)
+                                                    expandedStatesMap[id] =
+                                                        !(expandedStatesMap[id] ?: false)
                                                     if (record == latestRecord) {
                                                         onRecordClick(record)
                                                     }
@@ -167,8 +206,8 @@ fun HistoryScreen(
                                             onLongClick = {
                                                 if (!isInEditMode) {
                                                     isInEditMode = true
-                                                    selectedRecords.clear()
-                                                    selectedRecords.add(record)
+                                                    selectedRecordsList.clear()
+                                                    selectedRecordsList.add(record)
                                                 }
                                             },
                                             interactionSource = remember { MutableInteractionSource() },
@@ -180,7 +219,9 @@ fun HistoryScreen(
                                             .fillMaxWidth()
                                             .padding(16.dp)
                                     ) {
-                                        val recordMap = record.toMap()
+                                        val recordId = record.timestamp.time.toString()
+                                        val isExpanded = expandedStatesMap[recordId] == true
+                                        val recordMap = record.toMap(showDetailedTime = isExpanded)
 
                                         Row(
                                             modifier = Modifier.fillMaxWidth(),
@@ -266,7 +307,7 @@ fun HistoryScreen(
                                             recordMap["time"]?.split("\n")?.forEach { timeLine ->
                                                 Text(
                                                     text = timeLine,
-                                                    fontSize = 12.sp,
+                                                    fontSize = 10.sp,
                                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                                 )
                                             }
@@ -342,8 +383,7 @@ fun HistoryScreen(
                                             }
                                         }
 
-                                        val recordId = record.timestamp.time.toString()
-                                        if (expandedStates[recordId] == true) {
+                                        if (isExpanded) {
                                             val coordinates = remember { record.getCoordinates() }
 
                                             if (coordinates != null) {
@@ -527,15 +567,15 @@ fun HistoryScreen(
                             )
                         }
                         Text(
-                            "已选择 ${selectedRecords.size} 条记录",
+                            "已选择 ${selectedRecordsList.size} 条记录",
                             color = MaterialTheme.colorScheme.onPrimary
                         )
                     }
 
                     IconButton(
                         onClick = {
-                            if (selectedRecords.isNotEmpty()) {
-                                onDeleteRecords(selectedRecords.toList())
+                            if (selectedRecordsList.isNotEmpty()) {
+                            onDeleteRecords(selectedRecordsList.toList())
                                 exitEditMode()
                             }
                         }

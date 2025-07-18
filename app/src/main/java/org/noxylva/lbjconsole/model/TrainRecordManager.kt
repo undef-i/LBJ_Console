@@ -38,6 +38,7 @@ class TrainRecordManager(private val context: Context) {
     
     fun addRecord(jsonData: JSONObject): TrainRecord {
         val record = TrainRecord(jsonData)
+        record.receivedTimestamp = Date()
         trainRecords.add(0, record)
         
         
@@ -170,44 +171,7 @@ class TrainRecordManager(private val context: Context) {
         }
     }
     
-    
-    fun exportToCsv(records: List<TrainRecord>): File? {
-        try {
-            val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
-            val fileName = "train_records_$timeStamp.csv"
-            
-            
-            val downloadsDir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
-            val file = File(downloadsDir, fileName)
-            
-            FileWriter(file).use { writer ->
-                
-                writer.append("时间戳,列车号,列车类型,方向,速度,位置,时间,机车号,机车类型,路线,位置信息,信号强度\n")
-                
-                
-                for (record in records) {
-                    val map = record.toMap()
-                    writer.append(map["timestamp"]).append(",")
-                    writer.append(map["train"]).append(",")
-                    writer.append(map["lbj_class"]).append(",")
-                    writer.append(map["direction"]).append(",")
-                    writer.append(map["speed"]?.replace(" km/h", "") ?: "").append(",")
-                    writer.append(map["position"]?.replace(" km", "") ?: "").append(",")
-                    writer.append(map["time"]).append(",")
-                    writer.append(map["loco"]).append(",")
-                    writer.append(map["loco_type"]).append(",")
-                    writer.append(map["route"]).append(",")
-                    writer.append(map["position_info"]).append(",")
-                    writer.append(map["rssi"]?.replace(" dBm", "") ?: "").append("\n")
-                }
-            }
-            
-            return file
-        } catch (e: Exception) {
-            Log.e(TAG, "Error exporting to CSV: ${e.message}")
-            return null
-        }
-    }
+
     
     
     fun getRecordCount(): Int {

@@ -12,6 +12,7 @@ class TrainRecord(jsonData: JSONObject? = null) {
     }
     
     var timestamp: Date = Date()
+    var receivedTimestamp: Date = Date()
     var train: String = ""
     var direction: Int = 0
     var speed: String = ""
@@ -34,6 +35,17 @@ class TrainRecord(jsonData: JSONObject? = null) {
                     
                     timestamp = Date(jsonData.getLong("timestamp"))
                 }
+            
+                if (jsonData.has("receivedTimestamp")) {
+                    receivedTimestamp = Date(jsonData.getLong("receivedTimestamp"))
+                } else {
+                    receivedTimestamp = if (jsonData.has("timestamp")) {
+                        Date(jsonData.getLong("timestamp"))
+                    } else {
+                        Date()
+                    }
+                }
+                
                 updateFromJson(it)
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to initialize TrainRecord from JSON: ${e.message}")
@@ -96,7 +108,7 @@ class TrainRecord(jsonData: JSONObject? = null) {
                !trimmed.all { it == '*' }
     }
 
-    fun toMap(): Map<String, String> {
+    fun toMap(showDetailedTime: Boolean = false): Map<String, String> {
         val directionText = when (direction) {
             1 -> "下行"
             3 -> "上行"
@@ -114,12 +126,32 @@ class TrainRecord(jsonData: JSONObject? = null) {
         
         val map = mutableMapOf<String, String>()
         
+        val dateFormat = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault())
+        map["timestamp"] = dateFormat.format(timestamp)
+        map["receivedTimestamp"] = dateFormat.format(receivedTimestamp)
+        
         
         if (trainDisplay.isNotEmpty()) map["train"] = trainDisplay
         if (directionText != "未知") map["direction"] = directionText
         if (isValidValue(speed)) map["speed"] = "速度: ${speed.trim()} km/h"
         if (isValidValue(position)) map["position"] = "位置: ${position.trim()} km"
-        if (isValidValue(time)) map["time"] = "列车时间: ${time.trim()}"
+        val timeToDisplay = if (showDetailedTime) {
+            val dateFormat = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault())
+            if (isValidValue(time)) {
+                "列车时间: $time\n接收时间: ${dateFormat.format(receivedTimestamp)}"
+            } else {
+                dateFormat.format(receivedTimestamp)
+            }
+        } else {
+            val currentTime = System.currentTimeMillis()
+            val diffInSec = (currentTime - receivedTimestamp.time) / 1000
+            when {
+                diffInSec < 60 -> "${diffInSec}秒前"
+                diffInSec < 3600 -> "${diffInSec / 60}分钟前"
+                else -> "${diffInSec / 3600}小时前"
+            }
+        }
+        map["time"] = timeToDisplay
         if (isValidValue(loco)) map["loco"] = "机车号: ${loco.trim()}"
         if (isValidValue(locoType)) map["loco_type"] = "型号: ${locoType.trim()}"
         if (isValidValue(route)) map["route"] = "线路: ${route.trim()}"
@@ -135,6 +167,7 @@ class TrainRecord(jsonData: JSONObject? = null) {
     fun toJSON(): JSONObject {
         val json = JSONObject()
         json.put("timestamp", timestamp.time)  
+        json.put("receivedTimestamp", receivedTimestamp.time)
         json.put("train", train)
         json.put("dir", direction)  
         json.put("speed", speed)

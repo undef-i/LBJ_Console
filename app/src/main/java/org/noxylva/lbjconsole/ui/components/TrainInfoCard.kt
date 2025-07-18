@@ -68,7 +68,19 @@ fun TrainInfoCard(
                 }
                 
                 Text(
-                    text = recordMap["timestamp"]?.toString()?.split(" ")?.getOrNull(1) ?: "",
+                    text = run {
+                        val trainTime = trainRecord.time.trim()
+                        if (trainTime.isNotEmpty() && trainTime != "NUL" && trainTime != "<NUL>" && trainTime != "NA" && trainTime != "<NA>") {
+                            trainTime
+                        } else {
+                            val receivedTime = recordMap["receivedTimestamp"]?.toString() ?: ""
+                            if (receivedTime.contains(" ")) {
+                                receivedTime.split(" ")[1]
+                            } else {
+                                java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(trainRecord.receivedTimestamp)
+                            }
+                        }
+                    },
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -138,4 +150,4 @@ private fun CompactInfoItem(
             color = MaterialTheme.colorScheme.onSurface
         )
     }
-} 
+}
