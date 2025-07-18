@@ -72,7 +72,17 @@ class MainActivity : ComponentActivity() {
     
     
     private var settingsDeviceName by mutableStateOf("LBJReceiver") 
-    private var temporaryStatusMessage by mutableStateOf<String?>(null) 
+    private var temporaryStatusMessage by mutableStateOf<String?>(null)
+    
+    
+    private var historyEditMode by mutableStateOf(false)
+    private var historySelectedRecords by mutableStateOf<Set<String>>(emptySet())
+    private var historyExpandedStates by mutableStateOf<Map<String, Boolean>>(emptyMap())
+    private var historyScrollPosition by mutableStateOf(0)
+    private var historyScrollOffset by mutableStateOf(0)
+    private var mapCenterPosition by mutableStateOf<Pair<Double, Double>?>(null)
+    private var mapZoomLevel by mutableStateOf(10.0)
+    private var mapRailwayLayerVisible by mutableStateOf(true) 
     
     
     private var targetDeviceName = "LBJReceiver"
@@ -205,6 +215,8 @@ class MainActivity : ComponentActivity() {
             Log.e(TAG, "OSM cache config failed", e)
         }
         
+        saveSettings()
+        
         enableEdgeToEdge()
         setContent {
             LBJReceiverTheme {
@@ -216,7 +228,10 @@ class MainActivity : ComponentActivity() {
                         isConnected = bleClient.isConnected(),
                         isScanning = isScanning,
                         currentTab = currentTab,
-                        onTabChange = { tab -> currentTab = tab },
+                        onTabChange = { tab -> 
+                            currentTab = tab
+                            saveSettings()
+                        },
                         onConnectClick = { showConnectionDialog = true },
                         
                         
@@ -239,6 +254,32 @@ class MainActivity : ComponentActivity() {
                         filterTrain = filterTrain,
                         filterRoute = filterRoute,
                         filterDirection = filterDirection,
+                        
+                        
+                        historyEditMode = historyEditMode,
+                        historySelectedRecords = historySelectedRecords,
+                        historyExpandedStates = historyExpandedStates,
+                        historyScrollPosition = historyScrollPosition,
+                        historyScrollOffset = historyScrollOffset,
+                        onHistoryStateChange = { editMode, selectedRecords, expandedStates, scrollPosition, scrollOffset ->
+                            historyEditMode = editMode
+                            historySelectedRecords = selectedRecords
+                            historyExpandedStates = expandedStates
+                            historyScrollPosition = scrollPosition
+                            historyScrollOffset = scrollOffset
+                            saveSettings()
+                        },
+                        
+                        
+                        mapCenterPosition = mapCenterPosition,
+                        mapZoomLevel = mapZoomLevel,
+                        mapRailwayLayerVisible = mapRailwayLayerVisible,
+                        onMapStateChange = { centerPos, zoomLevel, railwayVisible ->
+                            mapCenterPosition = centerPos
+                            mapZoomLevel = zoomLevel
+                            mapRailwayLayerVisible = railwayVisible
+                            saveSettings()
+                        },
                         onFilterChange = { train, route, direction ->
                             filterTrain = train
                             filterRoute = route
@@ -259,11 +300,7 @@ class MainActivity : ComponentActivity() {
                                 temporaryStatusMessage = null
                             }
                         },
-                        onExportRecords = {
-                            scope.launch {
-                                exportRecordsToCSV()
-                            }
-                        },
+
                         onDeleteRecords = { records ->
                             scope.launch {
                                 val deletedCount = trainRecordManager.deleteRecords(records)
@@ -294,7 +331,6 @@ class MainActivity : ComponentActivity() {
                         locoInfoUtil = locoInfoUtil
                     )
                     
-                    // 显示连接对话框
                     if (showConnectionDialog) {
                         ConnectionDialog(
                             isScanning = isScanning,
@@ -326,7 +362,6 @@ class MainActivity : ComponentActivity() {
         deviceStatus = "正在连接..."
         Log.d(TAG, "Connecting to device name=${device.name ?: "Unknown"} address=${device.address}")
         
-        // 检查蓝牙适配器状态
         val bluetoothManager = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
         val bluetoothAdapter = bluetoothManager.adapter
         if (bluetoothAdapter == null || bluetoothAdapter.isEnabled != true) {
@@ -397,30 +432,7 @@ class MainActivity : ComponentActivity() {
     }
     
     
-    private fun exportRecordsToCSV() {
-        val records = trainRecordManager.getFilteredRecords()
-        val file = trainRecordManager.exportToCsv(records)
-        if (file != null) {
-            try {
-                
-                val uri = FileProvider.getUriForFile(
-                    this,
-                    "${applicationContext.packageName}.provider",
-                    file
-                )
-                val intent = Intent(Intent.ACTION_SEND)
-                intent.type = "text/csv"
-                intent.putExtra(Intent.EXTRA_STREAM, uri)
-                intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                startActivity(Intent.createChooser(intent, "分享CSV文件"))
-            } catch (e: Exception) {
-                Log.e(TAG, "CSV export failed: ${e.message}")
-                Toast.makeText(this, "导出失败: ${e.message}", Toast.LENGTH_SHORT).show()
-            }
-        } else {
-            Toast.makeText(this, "导出CSV文件失败", Toast.LENGTH_SHORT).show()
-        }
-    }
+
 
     
     private fun updateTemporaryStatusMessage(message: String) {
@@ -464,7 +476,6 @@ class MainActivity : ComponentActivity() {
                     stopScan() 
                     connectToDevice(device) 
                 } else {
-                    // 如果没有指定目标设备名称，或者找到的设备不是目标设备，显示连接对话框
                     if (targetDeviceName == null) {
                         showConnectionDialog = true 
                     }
@@ -489,15 +500,69 @@ class MainActivity : ComponentActivity() {
     private fun loadSettings() {
         settingsDeviceName = settingsPrefs.getString("device_name", "LBJReceiver") ?: "LBJReceiver"
         targetDeviceName = settingsDeviceName
-        Log.d(TAG, "Loaded settings deviceName=${settingsDeviceName}")
+        
+        
+        currentTab = settingsPrefs.getInt("current_tab", 0)
+        historyEditMode = settingsPrefs.getBoolean("history_edit_mode", false)
+        
+        val selectedRecordsStr = settingsPrefs.getString("history_selected_records", "")
+        historySelectedRecords = if (selectedRecordsStr.isNullOrEmpty()) {
+            emptySet()
+        } else {
+            selectedRecordsStr.split(",").toSet()
+        }
+        
+        val expandedStatesStr = settingsPrefs.getString("history_expanded_states", "")
+        historyExpandedStates = if (expandedStatesStr.isNullOrEmpty()) {
+            emptyMap()
+        } else {
+            expandedStatesStr.split(";").mapNotNull { pair ->
+                val parts = pair.split(":")
+                if (parts.size == 2) parts[0] to (parts[1] == "true") else null
+            }.toMap()
+        }
+        
+        historyScrollPosition = settingsPrefs.getInt("history_scroll_position", 0)
+        historyScrollOffset = settingsPrefs.getInt("history_scroll_offset", 0)
+        
+        val centerLat = settingsPrefs.getFloat("map_center_lat", Float.NaN)
+        val centerLon = settingsPrefs.getFloat("map_center_lon", Float.NaN)
+        mapCenterPosition = if (!centerLat.isNaN() && !centerLon.isNaN()) {
+            centerLat.toDouble() to centerLon.toDouble()
+        } else null
+        
+        mapZoomLevel = settingsPrefs.getFloat("map_zoom_level", 10.0f).toDouble()
+        mapRailwayLayerVisible = settingsPrefs.getBoolean("map_railway_visible", true)
+        
+        Log.d(TAG, "Loaded settings deviceName=${settingsDeviceName} tab=${currentTab}")
     }
     
     
     private fun saveSettings() {
-        settingsPrefs.edit()
+        val editor = settingsPrefs.edit()
             .putString("device_name", settingsDeviceName)
-            .apply()
-        Log.d(TAG, "Saved settings deviceName=${settingsDeviceName}")
+            .putInt("current_tab", currentTab)
+            .putBoolean("history_edit_mode", historyEditMode)
+            .putString("history_selected_records", historySelectedRecords.joinToString(","))
+            .putString("history_expanded_states", historyExpandedStates.map { "${it.key}:${it.value}" }.joinToString(";"))
+            .putInt("history_scroll_position", historyScrollPosition)
+            .putInt("history_scroll_offset", historyScrollOffset)
+            .putFloat("map_zoom_level", mapZoomLevel.toFloat())
+            .putBoolean("map_railway_visible", mapRailwayLayerVisible)
+            
+        mapCenterPosition?.let { (lat, lon) ->
+            editor.putFloat("map_center_lat", lat.toFloat())
+            editor.putFloat("map_center_lon", lon.toFloat())
+        }
+        
+        editor.apply()
+        Log.d(TAG, "Saved settings deviceName=${settingsDeviceName} tab=${currentTab} mapCenter=${mapCenterPosition} zoom=${mapZoomLevel}")
+    }
+    
+    override fun onPause() {
+        super.onPause()
+        saveSettings()
+        Log.d(TAG, "App paused, settings saved")
     }
 }
 
@@ -528,7 +593,7 @@ fun MainContent(
     onFilterChange: (String, String, String) -> Unit,
     onClearFilter: () -> Unit,
     onClearRecords: () -> Unit,
-    onExportRecords: () -> Unit,
+
     onDeleteRecords: (List<TrainRecord>) -> Unit,
 
     
@@ -538,7 +603,21 @@ fun MainContent(
     appVersion: String,
 
     
-    locoInfoUtil: LocoInfoUtil
+    locoInfoUtil: LocoInfoUtil,
+    
+    
+    historyEditMode: Boolean,
+    historySelectedRecords: Set<String>,
+    historyExpandedStates: Map<String, Boolean>,
+    historyScrollPosition: Int,
+    historyScrollOffset: Int,
+    onHistoryStateChange: (Boolean, Set<String>, Map<String, Boolean>, Int, Int) -> Unit,
+    
+    
+    mapCenterPosition: Pair<Double, Double>?,
+    mapZoomLevel: Double,
+    mapRailwayLayerVisible: Boolean,
+    onMapStateChange: (Pair<Double, Double>?, Double, Boolean) -> Unit
 ) {
     val statusColor = if (isConnected) Color(0xFF4CAF50) else Color(0xFFFF5722)
     
@@ -633,10 +712,16 @@ fun MainContent(
                     temporaryStatusMessage = temporaryStatusMessage,
                     locoInfoUtil = locoInfoUtil,
                     onClearRecords = onClearRecords,
-                    onExportRecords = onExportRecords,
+
                     onRecordClick = onRecordClick,
                     onClearLog = onClearMonitorLog,
-                    onDeleteRecords = onDeleteRecords
+                    onDeleteRecords = onDeleteRecords,
+                    editMode = historyEditMode,
+                    selectedRecords = historySelectedRecords,
+                    expandedStates = historyExpandedStates,
+                    scrollPosition = historyScrollPosition,
+                    scrollOffset = historyScrollOffset,
+                    onStateChange = onHistoryStateChange
                 )
                 2 -> SettingsScreen(
                     deviceName = deviceName,
@@ -646,7 +731,10 @@ fun MainContent(
                 )
                 3 -> MapScreen(
                     records = if (allRecords.isNotEmpty()) allRecords else recentRecords,
-                    onCenterMap = {}
+                    centerPosition = mapCenterPosition,
+                    zoomLevel = mapZoomLevel,
+                    railwayLayerVisible = mapRailwayLayerVisible,
+                    onStateChange = onMapStateChange
                 )
             }
         }
