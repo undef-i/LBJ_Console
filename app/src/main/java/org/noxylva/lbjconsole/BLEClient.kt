@@ -90,12 +90,13 @@ class BLEClient(private val context: Context) : BluetoothGattCallback() {
         try {
             scanCallback = callback
             this.targetDeviceName = targetDeviceName
-            val bluetoothAdapter = BluetoothAdapter.getDefaultAdapter() ?: run {
+            val bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
+            val bluetoothAdapter = bluetoothManager.adapter ?: run {
                 Log.e(TAG, "Bluetooth adapter unavailable")
                 return
             }
 
-            if (!bluetoothAdapter.isEnabled) {
+            if (bluetoothAdapter.isEnabled != true) {
                 Log.e(TAG, "Bluetooth adapter disabled")
                 return
             }
@@ -150,13 +151,14 @@ class BLEClient(private val context: Context) : BluetoothGattCallback() {
         }
 
         try {
-            val bluetoothAdapter = BluetoothAdapter.getDefaultAdapter() ?: run {
+            val bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
+            val bluetoothAdapter = bluetoothManager.adapter ?: run {
                 Log.e(TAG, "Bluetooth adapter unavailable")
                 handler.post { onConnectionStateChange?.invoke(false) }
                 return false
             }
             
-            if (!bluetoothAdapter.isEnabled) {
+            if (bluetoothAdapter.isEnabled != true) {
                 Log.e(TAG, "Bluetooth adapter is disabled")
                 handler.post { onConnectionStateChange?.invoke(false) }
                 return false

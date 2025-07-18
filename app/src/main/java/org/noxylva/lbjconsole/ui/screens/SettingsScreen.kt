@@ -14,7 +14,8 @@ import androidx.compose.ui.unit.dp
 fun SettingsScreen(
     deviceName: String,
     onDeviceNameChange: (String) -> Unit,
-    onApplySettings: () -> Unit
+    onApplySettings: () -> Unit,
+    appVersion: String = "Unknown"
 ) {
     val uriHandler = LocalUriHandler.current
     
@@ -46,7 +47,7 @@ fun SettingsScreen(
         Spacer(modifier = Modifier.weight(1f))
         
         Text(
-            text = "LBJ Console v0.0.1 by undef-i",
+            text = "LBJ Console v$appVersion by undef-i",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.clickable {
