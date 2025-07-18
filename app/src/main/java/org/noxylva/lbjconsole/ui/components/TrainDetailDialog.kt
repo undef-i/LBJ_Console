@@ -82,7 +82,7 @@ fun TrainDetailDialog(
                 DetailItem("机车类型", recordMap["loco_type"] ?: "--")
                 DetailItem("列车类型", recordMap["lbj_class"] ?: "--")
                 
-                Divider(modifier = Modifier.padding(vertical = 8.dp))
+                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
                 
                 
                 DetailItem("路线", recordMap["route"] ?: "--")

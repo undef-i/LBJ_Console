@@ -3,6 +3,7 @@ package org.noxylva.lbjconsole
 import android.Manifest
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
+import android.bluetooth.BluetoothManager
 import android.content.Context
 import android.content.Intent
 import java.io.File
@@ -77,7 +78,17 @@ class MainActivity : ComponentActivity() {
     private var targetDeviceName = "LBJReceiver"
     
     
-    private val settingsPrefs by lazy { getSharedPreferences("app_settings", Context.MODE_PRIVATE) } 
+    private val settingsPrefs by lazy { getSharedPreferences("app_settings", Context.MODE_PRIVATE) }
+    
+    private fun getAppVersion(): String {
+        return try {
+            val packageInfo = packageManager.getPackageInfo(packageName, 0)
+            packageInfo.versionName ?: "Unknown"
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to get app version", e)
+            "Unknown"
+        }
+    } 
     
     
     private val requestPermissions = registerForActivityResult(
@@ -279,6 +290,7 @@ class MainActivity : ComponentActivity() {
                             Toast.makeText(this, "设备名称 '${settingsDeviceName}' 已保存，下次连接时生效", Toast.LENGTH_LONG).show()
                             Log.d(TAG, "Applied settings deviceName=${settingsDeviceName}")
                         },
+                        appVersion = getAppVersion(),
                         locoInfoUtil = locoInfoUtil
                     )
                     
@@ -315,8 +327,9 @@ class MainActivity : ComponentActivity() {
         Log.d(TAG, "Connecting to device name=${device.name ?: "Unknown"} address=${device.address}")
         
         // 检查蓝牙适配器状态
-        val bluetoothAdapter = BluetoothAdapter.getDefaultAdapter()
-        if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled) {
+        val bluetoothManager = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
+        val bluetoothAdapter = bluetoothManager.adapter
+        if (bluetoothAdapter == null || bluetoothAdapter.isEnabled != true) {
             deviceStatus = "蓝牙未启用"
             Log.e(TAG, "Bluetooth adapter unavailable or disabled")
             return
@@ -422,7 +435,8 @@ class MainActivity : ComponentActivity() {
 
     
     private fun startScan() {
-        val bluetoothAdapter = BluetoothAdapter.getDefaultAdapter()
+        val bluetoothManager = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
+        val bluetoothAdapter = bluetoothManager.adapter
         if (bluetoothAdapter == null) {
             Log.e(TAG, "Bluetooth adapter unavailable")
             deviceStatus = "设备不支持蓝牙"
@@ -521,6 +535,7 @@ fun MainContent(
     deviceName: String,
     onDeviceNameChange: (String) -> Unit,
     onApplySettings: () -> Unit,
+    appVersion: String,
 
     
     locoInfoUtil: LocoInfoUtil
@@ -627,6 +642,7 @@ fun MainContent(
                     deviceName = deviceName,
                     onDeviceNameChange = onDeviceNameChange,
                     onApplySettings = onApplySettings,
+                    appVersion = appVersion
                 )
                 3 -> MapScreen(
                     records = if (allRecords.isNotEmpty()) allRecords else recentRecords,
