@@ -306,7 +306,7 @@ fun MapScreen(
                             
                             val locationProvider = GpsMyLocationProvider(ctx).apply {
                                 locationUpdateMinDistance = 10f 
-                                locationUpdateMinTime = 1000 
+                                locationUpdateMinTime = 5000 
                             }
                             
                             

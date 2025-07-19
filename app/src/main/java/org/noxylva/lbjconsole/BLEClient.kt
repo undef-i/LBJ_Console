@@ -18,9 +18,7 @@ import java.util.*
 
 class BLEClient(private val context: Context) : BluetoothGattCallback() {
     companion object {
-        const val TAG = "LBJ_BT"
-        const val SCAN_PERIOD = 10000L
-
+        const val TAG = "LBJ_BT"        
         val SERVICE_UUID = UUID.fromString("0000ffe0-0000-1000-8000-00805f9b34fb")
         val CHAR_UUID = UUID.fromString("0000ffe1-0000-1000-8000-00805f9b34fb")
 
@@ -42,20 +40,69 @@ class BLEClient(private val context: Context) : BluetoothGattCallback() {
     private var targetDeviceName: String? = null
     private var bluetoothLeScanner: BluetoothLeScanner? = null
     
+    private var continuousScanning = false
+    private var autoReconnect = true
+    private var lastKnownDeviceAddress: String? = null
+    private var connectionAttempts = 0
+    private var isReconnecting = false
+    
     private val leScanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
             val device = result.device
             val deviceName = device.name
-            if (targetDeviceName != null) {
-                if (deviceName == null || !deviceName.equals(targetDeviceName, ignoreCase = true)) {
-                    return
+            
+            val shouldShowDevice = when {
+                targetDeviceName != null -> {
+                    deviceName != null && deviceName.equals(targetDeviceName, ignoreCase = true)
+                }
+                else -> {
+                    deviceName != null && (
+                        deviceName.contains("LBJ", ignoreCase = true) ||
+                        deviceName.contains("Receiver", ignoreCase = true) ||
+                        deviceName.contains("Train", ignoreCase = true) ||
+                        deviceName.contains("Console", ignoreCase = true) ||
+                        deviceName.contains("ESP", ignoreCase = true) ||
+                        deviceName.contains("Arduino", ignoreCase = true) ||
+                        deviceName.contains("BLE", ignoreCase = true) ||
+                        deviceName.contains("UART", ignoreCase = true) ||
+                        deviceName.contains("Serial", ignoreCase = true)
+                    ) && !(
+                        deviceName.contains("Midea", ignoreCase = true) ||
+                        deviceName.contains("TV", ignoreCase = true) ||
+                        deviceName.contains("Phone", ignoreCase = true) ||
+                        deviceName.contains("Watch", ignoreCase = true) ||
+                        deviceName.contains("Headset", ignoreCase = true) ||
+                        deviceName.contains("Speaker", ignoreCase = true)
+                    )
                 }
             }
-            scanCallback?.invoke(device)
+            
+            if (shouldShowDevice) {
+                Log.d(TAG, "Showing filtered device: $deviceName")
+                scanCallback?.invoke(device)
+            }
+            
+            if (targetDeviceName != null && !isConnected && !isReconnecting) {
+                if (deviceName != null && deviceName.equals(targetDeviceName, ignoreCase = true)) {
+                    Log.i(TAG, "Found target device: $deviceName, auto-connecting")
+                    lastKnownDeviceAddress = device.address
+                    connectImmediately(device.address)
+                }
+            }
+            
+            if (lastKnownDeviceAddress == device.address && !isConnected && !isReconnecting) {
+                Log.i(TAG, "Found known device, reconnecting immediately")
+                connectImmediately(device.address)
+            }
         }
         
         override fun onScanFailed(errorCode: Int) {
             Log.e(TAG, "BLE scan failed code=$errorCode")
+            if (continuousScanning) {
+                handler.post {
+                    restartScan()
+                }
+            }
         }
     }
 
@@ -107,12 +154,9 @@ class BLEClient(private val context: Context) : BluetoothGattCallback() {
                 return
             }
 
-            handler.postDelayed({
-                stopScan()
-            }, SCAN_PERIOD)
-
             isScanning = true
-            Log.d(TAG, "Starting BLE scan target=${targetDeviceName ?: "Any"}")
+            continuousScanning = true
+            Log.d(TAG, "Starting continuous BLE scan target=${targetDeviceName ?: "Any"}")
             bluetoothLeScanner?.startScan(leScanCallback)
         } catch (e: SecurityException) {
             Log.e(TAG, "Scan security error: ${e.message}")
@@ -127,6 +171,40 @@ class BLEClient(private val context: Context) : BluetoothGattCallback() {
         if (isScanning) {
             bluetoothLeScanner?.stopScan(leScanCallback)
             isScanning = false
+            continuousScanning = false
+            Log.d(TAG, "Stopped BLE scan")
+        }
+    }
+    
+    @SuppressLint("MissingPermission")
+    private fun restartScan() {
+        if (!continuousScanning) return
+        
+        try {
+            bluetoothLeScanner?.stopScan(leScanCallback)
+            bluetoothLeScanner?.startScan(leScanCallback)
+            isScanning = true
+            Log.d(TAG, "Restarted BLE scan")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to restart scan: ${e.message}")
+        }
+    }
+    
+    private fun connectImmediately(address: String) {
+        if (isReconnecting) return
+        isReconnecting = true
+        
+        handler.post {
+            connect(address) { connected ->
+                isReconnecting = false
+                if (connected) {
+                    connectionAttempts = 0
+                    Log.i(TAG, "Successfully connected to $address")
+                } else {
+                    connectionAttempts++
+                    Log.w(TAG, "Connection attempt $connectionAttempts failed for $address")
+                }
+            }
         }
     }
 
@@ -183,17 +261,7 @@ class BLEClient(private val context: Context) : BluetoothGattCallback() {
             bluetoothGatt = device.connectGatt(context, false, this, BluetoothDevice.TRANSPORT_LE)
 
             Log.d(TAG, "Connecting to address=$address")
-
-
-            handler.postDelayed({
-                if (!isConnected && deviceAddress == address) {
-                    Log.e(TAG, "Connection timeout reconnecting")
-
-                    bluetoothGatt?.close()
-                    bluetoothGatt =
-                        device.connectGatt(context, false, this, BluetoothDevice.TRANSPORT_LE)
-                }
-            }, 10000)
+            
 
             return true
         } catch (e: Exception) {
@@ -286,30 +354,30 @@ class BLEClient(private val context: Context) : BluetoothGattCallback() {
         if (status != BluetoothGatt.GATT_SUCCESS) {
             Log.e(TAG, "Connection error status=$status")
             isConnected = false
-
+            isReconnecting = false
 
             if (status == 133 || status == 8) {
-                Log.e(TAG, "GATT error closing connection")
+                Log.e(TAG, "GATT error, attempting immediate reconnection")
                 try {
                     gatt.close()
                     bluetoothGatt = null
 
-
                     deviceAddress?.let { address ->
-                        handler.postDelayed({
-                            Log.d(TAG, "Reconnecting to device")
-                            val device =
-                                BluetoothAdapter.getDefaultAdapter().getRemoteDevice(address)
-                            bluetoothGatt = device.connectGatt(
-                                context,
-                                false,
-                                this,
-                                BluetoothDevice.TRANSPORT_LE
-                            )
-                        }, 2000)
+                        if (autoReconnect) {
+                            Log.d(TAG, "Immediate reconnection to device")
+                            handler.post {
+                                val device = BluetoothAdapter.getDefaultAdapter().getRemoteDevice(address)
+                                bluetoothGatt = device.connectGatt(
+                                    context,
+                                    false,
+                                    this,
+                                    BluetoothDevice.TRANSPORT_LE
+                                )
+                            }
+                        }
                     }
                 } catch (e: Exception) {
-                    Log.e(TAG, "Reconnect error: ${e.message}")
+                    Log.e(TAG, "Immediate reconnect error: ${e.message}")
                 }
             }
 
@@ -320,32 +388,34 @@ class BLEClient(private val context: Context) : BluetoothGattCallback() {
         when (newState) {
             BluetoothProfile.STATE_CONNECTED -> {
                 isConnected = true
+                isReconnecting = false
+                connectionAttempts = 0
                 Log.i(TAG, "Connected to GATT server")
 
                 handler.post { connectionStateCallback?.invoke(true) }
 
-
-                handler.postDelayed({
+                handler.post {
                     try {
                         gatt.discoverServices()
                     } catch (e: Exception) {
                         Log.e(TAG, "Service discovery failed: ${e.message}")
                     }
-                }, 500)
+                }
             }
 
             BluetoothProfile.STATE_DISCONNECTED -> {
                 isConnected = false
+                isReconnecting = false
                 Log.i(TAG, "Disconnected from GATT server")
 
                 handler.post { connectionStateCallback?.invoke(false) }
 
 
-                if (!deviceAddress.isNullOrBlank()) {
-                    handler.postDelayed({
-                        Log.d(TAG, "Reconnecting after disconnect")
+                if (!deviceAddress.isNullOrBlank() && autoReconnect) {
+                    handler.post {
+                        Log.d(TAG, "Immediate reconnection after disconnect")
                         connect(deviceAddress!!, connectionStateCallback)
-                    }, 3000)
+                    }
                 }
             }
         }
@@ -357,12 +427,14 @@ class BLEClient(private val context: Context) : BluetoothGattCallback() {
     private var lastDataTime = 0L
 
 
+    @Suppress("DEPRECATION")
     override fun onCharacteristicChanged(
         gatt: BluetoothGatt,
         characteristic: BluetoothGattCharacteristic
     ) {
         super.onCharacteristicChanged(gatt, characteristic)
 
+        @Suppress("DEPRECATION")
         val newData = characteristic.value?.let {
             String(it, StandardCharsets.UTF_8)
         } ?: return
@@ -381,17 +453,16 @@ class BLEClient(private val context: Context) : BluetoothGattCallback() {
         val bufferContent = dataBuffer.toString()
         val currentTime = System.currentTimeMillis()
 
-
-        if (lastDataTime > 0 && currentTime - lastDataTime > 5000) {
-            Log.w(TAG, "Data timeout ${(currentTime - lastDataTime) / 1000}s")
-
+        if (lastDataTime > 0) {
+            val timeDiff = currentTime - lastDataTime
+            if (timeDiff > 10000) {
+                Log.w(TAG, "Long data gap: ${timeDiff / 1000}s")
+            }
         }
 
         Log.d(TAG, "Buffer size=${dataBuffer.length} bytes")
 
-
         tryExtractJson(bufferContent)
-
 
         lastDataTime = currentTime
     }
@@ -511,9 +582,16 @@ class BLEClient(private val context: Context) : BluetoothGattCallback() {
                                 UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
                             )
                             if (descriptor != null) {
-                                descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-                                val writeResult = gatt.writeDescriptor(descriptor)
-                                Log.d(TAG, "Descriptor write result=$writeResult")
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                    val writeResult = gatt.writeDescriptor(descriptor, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
+                                    Log.d(TAG, "Descriptor write result=$writeResult")
+                                } else {
+                                    @Suppress("DEPRECATION")
+                                    descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                                    @Suppress("DEPRECATION")
+                                    val writeResult = gatt.writeDescriptor(descriptor)
+                                    Log.d(TAG, "Descriptor write result=$writeResult")
+                                }
                             } else {
                                 Log.e(TAG, "Descriptor not found")
 
@@ -540,10 +618,19 @@ class BLEClient(private val context: Context) : BluetoothGattCallback() {
 
 
     private fun requestDataAfterDelay() {
-        handler.postDelayed({
+        handler.post {
             statusCallback?.let { callback ->
                 getStatus(callback)
             }
-        }, 1000)
+        }
     }
+    
+    fun setAutoReconnect(enabled: Boolean) {
+        autoReconnect = enabled
+        Log.d(TAG, "Auto reconnect set to: $enabled")
+    }
+    
+    fun getConnectionAttempts(): Int = connectionAttempts
+    
+    fun getLastKnownDeviceAddress(): String? = lastKnownDeviceAddress
 }

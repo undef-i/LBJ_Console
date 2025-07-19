@@ -41,7 +41,8 @@ fun MonitorScreen(
                     diffInSec < 3600 -> "${diffInSec / 60}分钟前"
                     else -> "${diffInSec / 3600}小时前"
                 }
-                delay(1000) 
+                val updateInterval = if (diffInSec < 60) 500L else if (diffInSec < 3600) 30000L else 300000L
+                delay(updateInterval)
             }
         }
     }
@@ -247,4 +248,4 @@ private fun InfoItem(
             color = MaterialTheme.colorScheme.onSurface
         )
     }
-} 
+}
