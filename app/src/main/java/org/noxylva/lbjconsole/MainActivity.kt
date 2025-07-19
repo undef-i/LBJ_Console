@@ -6,6 +6,7 @@ import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import java.io.File
 import android.os.Build
 import android.os.Bundle
@@ -30,6 +31,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -109,9 +111,8 @@ class MainActivity : ComponentActivity() {
         val locationPermissionsGranted = permissions.filter { it.key.contains("LOCATION") }.all { it.value }
         
         if (bluetoothPermissionsGranted && locationPermissionsGranted) {
-            Log.d(TAG, "Permissions granted")
-            
-            startScan()
+            Log.d(TAG, "Permissions granted, starting auto scan and connect")
+            startAutoScanAndConnect()
         } else {
             Log.e(TAG, "Missing permissions: $permissions")
             deviceStatus = "需要蓝牙和位置权限"
@@ -374,16 +375,16 @@ class MainActivity : ComponentActivity() {
             runOnUiThread {
                 if (connected) {
                     deviceStatus = "已连接"
+                    temporaryStatusMessage = null
                     Log.d(TAG, "Connected to device name=${device.name ?: "Unknown"}")
                 } else {
-                    deviceStatus = "连接失败或已断开连接"
-                    Log.e(TAG, "Connection failed name=${device.name ?: "Unknown"}")
+                    deviceStatus = "连接失败，正在重试..."
+                    Log.e(TAG, "Connection failed, auto-retry enabled for name=${device.name ?: "Unknown"}")
                 }
             }
         }
         
         deviceAddress = device.address
-        stopScan()
     }
     
     
@@ -393,7 +394,8 @@ class MainActivity : ComponentActivity() {
         runOnUiThread {
             try {
                 val isTestData = jsonData.optBoolean("test_flag", false) 
-                lastUpdateTime = Date() 
+                lastUpdateTime = Date()
+                temporaryStatusMessage = null
 
                 if (isTestData) {
                     Log.i(TAG, "Received keep-alive signal")
@@ -437,14 +439,55 @@ class MainActivity : ComponentActivity() {
     
     private fun updateTemporaryStatusMessage(message: String) {
         temporaryStatusMessage = message
-        
-        Handler(Looper.getMainLooper()).postDelayed({
-            if (temporaryStatusMessage == message) {
-                temporaryStatusMessage = null
-            }
-        }, 3000)
+
     }
 
+    
+    private fun startAutoScanAndConnect() {
+        Log.d(TAG, "Starting auto scan and connect")
+        
+        if (!hasBluetoothPermissions()) {
+            Log.e(TAG, "Missing bluetooth permissions for auto scan")
+            deviceStatus = "需要蓝牙和位置权限"
+            return
+        }
+        
+        val bluetoothManager = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
+        val bluetoothAdapter = bluetoothManager.adapter
+        if (bluetoothAdapter == null) {
+            Log.e(TAG, "Bluetooth adapter unavailable")
+            deviceStatus = "设备不支持蓝牙"
+            return
+        }
+        
+        if (!bluetoothAdapter.isEnabled) {
+            Log.e(TAG, "Bluetooth adapter disabled")
+            deviceStatus = "请启用蓝牙"
+            return
+        }
+        
+        bleClient.setAutoReconnect(true)
+        
+        val targetDeviceName = if (settingsDeviceName.isNotBlank() && settingsDeviceName != "LBJReceiver") {
+            settingsDeviceName
+        } else {
+            "LBJReceiver"
+        }
+        
+        Log.d(TAG, "Auto scanning for target device: $targetDeviceName")
+        deviceStatus = "正在自动扫描连接..."
+        
+        bleClient.scanDevices(targetDeviceName) { device ->
+            val deviceName = device.name ?: "Unknown"
+            Log.d(TAG, "Auto scan found device: $deviceName")
+            
+            if (deviceName.equals(targetDeviceName, ignoreCase = true)) {
+                Log.d(TAG, "Found target device, auto connecting to: $deviceName")
+                bleClient.stopScan()
+                connectToDevice(device)
+            }
+        }
+    }
     
     private fun startScan() {
         val bluetoothManager = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
@@ -461,25 +504,21 @@ class MainActivity : ComponentActivity() {
             return
         }
         
+        bleClient.setAutoReconnect(true)
+        
         isScanning = true
         foundDevices = emptyList()
-        val targetDeviceName = settingsDeviceName.ifBlank { null } 
-        Log.d(TAG, "Starting BLE scan target=${targetDeviceName ?: "Any"}")
+        val targetDeviceName = if (settingsDeviceName.isNotBlank() && settingsDeviceName != "LBJReceiver") {
+            settingsDeviceName
+        } else {
+            null
+        }
+        Log.d(TAG, "Starting continuous BLE scan target=${targetDeviceName ?: "Any"} (settings=${settingsDeviceName})")
         
         bleClient.scanDevices(targetDeviceName) { device ->
             if (!foundDevices.any { it.address == device.address }) {
                 Log.d(TAG, "Found device name=${device.name ?: "Unknown"} address=${device.address}")
                 foundDevices = foundDevices + device
-                
-                if (targetDeviceName != null && device.name == targetDeviceName) {
-                    Log.d(TAG, "Found target=$targetDeviceName, connecting")
-                    stopScan() 
-                    connectToDevice(device) 
-                } else {
-                    if (targetDeviceName == null) {
-                        showConnectionDialog = true 
-                    }
-                }
             }
         }
     }
@@ -489,6 +528,21 @@ class MainActivity : ComponentActivity() {
         isScanning = false
         bleClient.stopScan()
         Log.d(TAG, "Stopped BLE scan")
+    }
+    
+    private fun hasBluetoothPermissions(): Boolean {
+        val bluetoothPermissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            ContextCompat.checkSelfPermission(this, android.Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED &&
+            ContextCompat.checkSelfPermission(this, android.Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
+        } else {
+            ContextCompat.checkSelfPermission(this, android.Manifest.permission.BLUETOOTH) == PackageManager.PERMISSION_GRANTED &&
+            ContextCompat.checkSelfPermission(this, android.Manifest.permission.BLUETOOTH_ADMIN) == PackageManager.PERMISSION_GRANTED
+        }
+        
+        val locationPermissions = ContextCompat.checkSelfPermission(this, android.Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+                ContextCompat.checkSelfPermission(this, android.Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        
+        return bluetoothPermissions && locationPermissions
     }
 
     
@@ -557,6 +611,16 @@ class MainActivity : ComponentActivity() {
         
         editor.apply()
         Log.d(TAG, "Saved settings deviceName=${settingsDeviceName} tab=${currentTab} mapCenter=${mapCenterPosition} zoom=${mapZoomLevel}")
+    }
+    
+    override fun onResume() {
+        super.onResume()
+        Log.d(TAG, "App resumed")
+        
+        if (hasBluetoothPermissions() && !bleClient.isConnected()) {
+            Log.d(TAG, "App resumed and not connected, starting auto scan")
+            startAutoScanAndConnect()
+        }
     }
     
     override fun onPause() {
@@ -633,7 +697,8 @@ fun MainContent(
                     diffInSec < 3600 -> "${diffInSec / 60}分钟前"
                     else -> "${diffInSec / 3600}小时前"
                 }
-                delay(1000) 
+                val updateInterval = if (diffInSec < 60) 500L else if (diffInSec < 3600) 30000L else 300000L
+                delay(updateInterval)
             }
         } else {
             timeSinceLastUpdate.value = null

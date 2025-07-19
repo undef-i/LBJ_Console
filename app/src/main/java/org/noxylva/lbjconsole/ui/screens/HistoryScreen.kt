@@ -86,7 +86,8 @@ fun HistoryScreen(
                     diffInSec < 3600 -> "${diffInSec / 60}分钟前"
                     else -> "${diffInSec / 3600}小时前"
                 }
-                delay(1000)
+                val updateInterval = if (diffInSec < 60) 500L else if (diffInSec < 3600) 30000L else 300000L
+                delay(updateInterval)
             }
         }
     }
@@ -114,7 +115,6 @@ fun HistoryScreen(
     
     LaunchedEffect(listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset) {
         if (!isInEditMode) {
-            delay(300)
             val selectedIds = selectedRecordsList.map { it.timestamp.time.toString() }.toSet()
             onStateChange(isInEditMode, selectedIds, expandedStatesMap.toMap(), listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
         }
@@ -217,11 +217,37 @@ fun HistoryScreen(
                                     Column(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .padding(16.dp)
+                                            .padding(horizontal = 16.dp, vertical = 8.dp)
                                     ) {
                                         val recordId = record.timestamp.time.toString()
                                         val isExpanded = expandedStatesMap[recordId] == true
-                                        val recordMap = record.toMap(showDetailedTime = isExpanded)
+                                        val recordMap = record.toMap(showDetailedTime = true)
+
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            if (recordMap.containsKey("time")) {
+                                                Column {
+                                                    recordMap["time"]?.split("\n")?.forEach { timeLine ->
+                                                        Text(
+                                                            text = timeLine,
+                                                            fontSize = 10.sp,
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                            
+                                            Text(
+                                                text = "${record.rssi} dBm",
+                                                fontSize = 10.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+
+                                        Spacer(modifier = Modifier.height(2.dp))
 
                                         Row(
                                             modifier = Modifier.fillMaxWidth(),
@@ -230,21 +256,6 @@ fun HistoryScreen(
                                         ) {
                                             val trainDisplay =
                                                 recordMap["train"]?.toString() ?: "未知列车"
-
-                                            val formattedInfo = when {
-                                                record.locoType.isNotEmpty() && record.loco.isNotEmpty() -> {
-                                                    val shortLoco = if (record.loco.length > 5) {
-                                                        record.loco.takeLast(5)
-                                                    } else {
-                                                        record.loco
-                                                    }
-                                                    "${record.locoType}-${shortLoco}"
-                                                }
-
-                                                record.locoType.isNotEmpty() -> record.locoType
-                                                record.loco.isNotEmpty() -> record.loco
-                                                else -> ""
-                                            }
 
                                             Row(
                                                 verticalAlignment = Alignment.CenterVertically,
@@ -284,30 +295,27 @@ fun HistoryScreen(
                                                         }
                                                     }
                                                 }
-
-                                                if (formattedInfo.isNotEmpty() && formattedInfo != "<NUL>") {
-                                                    Text(
-                                                        text = formattedInfo,
-                                                        fontSize = 14.sp,
-                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                    )
-                                                }
                                             }
 
-                                            Text(
-                                                text = "${record.rssi} dBm",
-                                                fontSize = 10.sp,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
+                                            val formattedInfo = when {
+                                                record.locoType.isNotEmpty() && record.loco.isNotEmpty() -> {
+                                                    val shortLoco = if (record.loco.length > 5) {
+                                                        record.loco.takeLast(5)
+                                                    } else {
+                                                        record.loco
+                                                    }
+                                                    "${record.locoType}-${shortLoco}"
+                                                }
 
-                                        Spacer(modifier = Modifier.height(4.dp))
-
-                                        if (recordMap.containsKey("time")) {
-                                            recordMap["time"]?.split("\n")?.forEach { timeLine ->
+                                                record.locoType.isNotEmpty() -> record.locoType
+                                                record.loco.isNotEmpty() -> record.loco
+                                                else -> ""
+                                            }
+                                            
+                                            if (formattedInfo.isNotEmpty() && formattedInfo != "<NUL>") {
                                                 Text(
-                                                    text = timeLine,
-                                                    fontSize = 10.sp,
+                                                    text = formattedInfo,
+                                                    fontSize = 14.sp,
                                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                                 )
                                             }
