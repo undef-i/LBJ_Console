@@ -95,11 +95,6 @@ fun HistoryScreen(
         records
     }
 
-    fun exitEditMode() {
-        isInEditMode = false
-        selectedRecordsList.clear()
-        onStateChange(false, emptySet(), expandedStatesMap.toMap(), listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
-    }
 
     LaunchedEffect(isInEditMode, selectedRecordsList.size) {
         val selectedIds = selectedRecordsList.map { it.timestamp.time.toString() }.toSet()
@@ -122,7 +117,8 @@ fun HistoryScreen(
 
     LaunchedEffect(selectedRecordsList.size) {
         if (selectedRecordsList.isEmpty() && isInEditMode) {
-            exitEditMode()
+            isInEditMode = false
+            onStateChange(false, emptySet(), expandedStatesMap.toMap(), listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
         }
     }
 
@@ -545,57 +541,4 @@ fun HistoryScreen(
         }
     }
     
-    if (isInEditMode) {
-        Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.TopCenter
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp)
-                    .background(MaterialTheme.colorScheme.primary)
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(16.dp)
-                    ) {
-                        IconButton(onClick = { exitEditMode() }) {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "取消",
-                                tint = MaterialTheme.colorScheme.onPrimary
-                            )
-                        }
-                        Text(
-                            "已选择 ${selectedRecordsList.size} 条记录",
-                            color = MaterialTheme.colorScheme.onPrimary
-                        )
-                    }
-
-                    IconButton(
-                        onClick = {
-                            if (selectedRecordsList.isNotEmpty()) {
-                            onDeleteRecords(selectedRecordsList.toList())
-                                exitEditMode()
-                            }
-                        }
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Delete,
-                            contentDescription = "删除所选记录",
-                            tint = MaterialTheme.colorScheme.onPrimary
-                        )
-                    }
-                }
-            }
-        }
-    }
 }

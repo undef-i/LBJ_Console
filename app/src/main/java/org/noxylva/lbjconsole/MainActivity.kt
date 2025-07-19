@@ -18,6 +18,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.graphics.toArgb
+import androidx.core.view.WindowCompat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -27,6 +29,7 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -219,6 +222,10 @@ class MainActivity : ComponentActivity() {
         saveSettings()
         
         enableEdgeToEdge()
+        
+        WindowCompat.getInsetsController(window, window.decorView).apply {
+            isAppearanceLightStatusBars = false
+        }
         setContent {
             LBJReceiverTheme {
                 val scope = rememberCoroutineScope()
@@ -707,37 +714,83 @@ fun MainContent(
     
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("LBJ Console") },
-                actions = {
-                    
-                    timeSinceLastUpdate.value?.let { time ->
-                        Text(
-                            text = time,
-                            modifier = Modifier.padding(end = 8.dp),
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
-                    
-                    Box(
-                        modifier = Modifier
-                            .size(10.dp)
-                            .background(
-                                color = statusColor,
-                                shape = CircleShape
+            Box {
+                TopAppBar(
+                    title = { Text("LBJ Console") },
+                    actions = {
+                        
+                        timeSinceLastUpdate.value?.let { time ->
+                            Text(
+                                text = time,
+                                modifier = Modifier.padding(end = 8.dp),
+                                style = MaterialTheme.typography.bodySmall
                             )
-                    )
-                    
-                    Spacer(modifier = Modifier.width(8.dp))
-                    
-                    IconButton(onClick = onConnectClick) {
-                        Icon(
-                            imageVector = Icons.Default.Bluetooth,
-                            contentDescription = "连接蓝牙设备"
+                        }
+                        
+                        Box(
+                            modifier = Modifier
+                                .size(10.dp)
+                                .background(
+                                    color = statusColor,
+                                    shape = CircleShape
+                                )
                         )
+                        
+                        Spacer(modifier = Modifier.width(8.dp))
+                        
+                        IconButton(onClick = onConnectClick) {
+                            Icon(
+                                imageVector = Icons.Default.Bluetooth,
+                                contentDescription = "连接蓝牙设备"
+                            )
+                        }
                     }
+                )
+                
+                if (historyEditMode && currentTab == 0) {
+                    TopAppBar(
+                        title = { 
+                            Text(
+                                "已选择 ${historySelectedRecords.size} 条记录",
+                                color = MaterialTheme.colorScheme.onPrimary
+                            )
+                        },
+                        navigationIcon = {
+                            IconButton(onClick = {
+                                onHistoryStateChange(false, emptySet(), historyExpandedStates, historyScrollPosition, historyScrollOffset)
+                            }) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "取消",
+                                    tint = MaterialTheme.colorScheme.onPrimary
+                                )
+                            }
+                        },
+                        actions = {
+                            IconButton(
+                                onClick = {
+                                    if (historySelectedRecords.isNotEmpty()) {
+                                        val recordsToDelete = allRecords.filter {
+                                            historySelectedRecords.contains(it.timestamp.time.toString())
+                                        }
+                                        onDeleteRecords(recordsToDelete)
+                                        onHistoryStateChange(false, emptySet(), historyExpandedStates, historyScrollPosition, historyScrollOffset)
+                                    }
+                                }
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Delete,
+                                    contentDescription = "删除所选记录",
+                                    tint = MaterialTheme.colorScheme.onPrimary
+                                )
+                            }
+                        },
+                        colors = TopAppBarDefaults.topAppBarColors(
+                             containerColor = MaterialTheme.colorScheme.primary
+                         )
+                     )
                 }
-            )
+            }
         },
         bottomBar = {
             NavigationBar {
@@ -777,7 +830,6 @@ fun MainContent(
                     temporaryStatusMessage = temporaryStatusMessage,
                     locoInfoUtil = locoInfoUtil,
                     onClearRecords = onClearRecords,
-
                     onRecordClick = onRecordClick,
                     onClearLog = onClearMonitorLog,
                     onDeleteRecords = onDeleteRecords,
