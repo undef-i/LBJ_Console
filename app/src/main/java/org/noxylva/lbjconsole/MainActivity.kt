@@ -42,9 +42,12 @@ import org.json.JSONObject
 import org.osmdroid.config.Configuration
 import org.noxylva.lbjconsole.model.TrainRecord
 import org.noxylva.lbjconsole.model.TrainRecordManager
+import org.noxylva.lbjconsole.model.MergeSettings
 import org.noxylva.lbjconsole.ui.screens.HistoryScreen
+import org.noxylva.lbjconsole.ui.screens.MergedHistoryScreen
 import org.noxylva.lbjconsole.ui.screens.MapScreen
 import org.noxylva.lbjconsole.ui.screens.SettingsScreen
+
 import org.noxylva.lbjconsole.ui.theme.LBJReceiverTheme
 import org.noxylva.lbjconsole.util.LocoInfoUtil
 import java.util.*
@@ -87,8 +90,13 @@ class MainActivity : ComponentActivity() {
     private var historyScrollOffset by mutableStateOf(0)
     private var mapCenterPosition by mutableStateOf<Pair<Double, Double>?>(null)
     private var mapZoomLevel by mutableStateOf(10.0)
-    private var mapRailwayLayerVisible by mutableStateOf(true) 
+    private var mapRailwayLayerVisible by mutableStateOf(true)
     
+    private var settingsScrollPosition by mutableStateOf(0)
+    
+    private var mergeSettings by mutableStateOf(MergeSettings())
+    
+
     
     private var targetDeviceName = "LBJReceiver"
     
@@ -236,7 +244,7 @@ class MainActivity : ComponentActivity() {
                         isConnected = bleClient.isConnected(),
                         isScanning = isScanning,
                         currentTab = currentTab,
-                        onTabChange = { tab -> 
+                        onTabChange = { tab ->
                             currentTab = tab
                             saveSettings()
                         },
@@ -256,12 +264,18 @@ class MainActivity : ComponentActivity() {
                         },
                         
                         
-                        allRecords = if (trainRecordManager.getFilteredRecords().isNotEmpty())
-                            trainRecordManager.getFilteredRecords() else trainRecordManager.getAllRecords(),
+                        allRecords = trainRecordManager.getMixedRecords(),
+                        mergedRecords = trainRecordManager.getMergedRecords(),
                         recordCount = trainRecordManager.getRecordCount(),
                         filterTrain = filterTrain,
                         filterRoute = filterRoute,
                         filterDirection = filterDirection,
+                        mergeSettings = mergeSettings,
+                        onMergeSettingsChange = { newSettings ->
+                            mergeSettings = newSettings
+                            trainRecordManager.updateMergeSettings(newSettings)
+                            saveSettings()
+                        },
                         
                         
                         historyEditMode = historyEditMode,
@@ -275,6 +289,13 @@ class MainActivity : ComponentActivity() {
                             historyExpandedStates = expandedStates
                             historyScrollPosition = scrollPosition
                             historyScrollOffset = scrollOffset
+                            saveSettings()
+                        },
+                        
+                        
+                        settingsScrollPosition = settingsScrollPosition,
+                        onSettingsScrollPositionChange = { position ->
+                            settingsScrollPosition = position
                             saveSettings()
                         },
                         
@@ -332,7 +353,6 @@ class MainActivity : ComponentActivity() {
                         onApplySettings = {
                             saveSettings()
                             targetDeviceName = settingsDeviceName
-                            Toast.makeText(this, "设备名称 '${settingsDeviceName}' 已保存，下次连接时生效", Toast.LENGTH_LONG).show()
                             Log.d(TAG, "Applied settings deviceName=${settingsDeviceName}")
                         },
                         appVersion = getAppVersion(),
@@ -343,7 +363,7 @@ class MainActivity : ComponentActivity() {
                         ConnectionDialog(
                             isScanning = isScanning,
                             devices = foundDevices,
-                            onDismiss = { 
+                            onDismiss = {
                                 showConnectionDialog = false
                                 stopScan()
                             },
@@ -360,6 +380,8 @@ class MainActivity : ComponentActivity() {
                             }
                         )
                     }
+                    
+
                 }
             }
         }
@@ -585,6 +607,7 @@ class MainActivity : ComponentActivity() {
         
         historyScrollPosition = settingsPrefs.getInt("history_scroll_position", 0)
         historyScrollOffset = settingsPrefs.getInt("history_scroll_offset", 0)
+        settingsScrollPosition = settingsPrefs.getInt("settings_scroll_position", 0)
         
         val centerLat = settingsPrefs.getFloat("map_center_lat", Float.NaN)
         val centerLon = settingsPrefs.getFloat("map_center_lon", Float.NaN)
@@ -594,6 +617,8 @@ class MainActivity : ComponentActivity() {
         
         mapZoomLevel = settingsPrefs.getFloat("map_zoom_level", 10.0f).toDouble()
         mapRailwayLayerVisible = settingsPrefs.getBoolean("map_railway_visible", true)
+        
+        mergeSettings = trainRecordManager.mergeSettings
         
         Log.d(TAG, "Loaded settings deviceName=${settingsDeviceName} tab=${currentTab}")
     }
@@ -608,6 +633,7 @@ class MainActivity : ComponentActivity() {
             .putString("history_expanded_states", historyExpandedStates.map { "${it.key}:${it.value}" }.joinToString(";"))
             .putInt("history_scroll_position", historyScrollPosition)
             .putInt("history_scroll_offset", historyScrollOffset)
+            .putInt("settings_scroll_position", settingsScrollPosition)
             .putFloat("map_zoom_level", mapZoomLevel.toFloat())
             .putBoolean("map_railway_visible", mapRailwayLayerVisible)
             
@@ -656,11 +682,14 @@ fun MainContent(
     onClearMonitorLog: () -> Unit,
     
     
-    allRecords: List<TrainRecord>,
+    allRecords: List<Any>,
+    mergedRecords: List<org.noxylva.lbjconsole.model.MergedTrainRecord>,
     recordCount: Int,
     filterTrain: String,
     filterRoute: String,
     filterDirection: String,
+    mergeSettings: MergeSettings,
+    onMergeSettingsChange: (MergeSettings) -> Unit,
     onFilterChange: (String, String, String) -> Unit,
     onClearFilter: () -> Unit,
     onClearRecords: () -> Unit,
@@ -683,6 +712,10 @@ fun MainContent(
     historyScrollPosition: Int,
     historyScrollOffset: Int,
     onHistoryStateChange: (Boolean, Set<String>, Map<String, Boolean>, Int, Int) -> Unit,
+    
+    
+    settingsScrollPosition: Int,
+    onSettingsScrollPositionChange: (Int) -> Unit,
     
     
     mapCenterPosition: Pair<Double, Double>?,
@@ -770,8 +803,22 @@ fun MainContent(
                             IconButton(
                                 onClick = {
                                     if (historySelectedRecords.isNotEmpty()) {
-                                        val recordsToDelete = allRecords.filter {
-                                            historySelectedRecords.contains(it.timestamp.time.toString())
+                                        val recordsToDelete = mutableListOf<TrainRecord>()
+                                        allRecords.forEach { item ->
+                                            when (item) {
+                                                is TrainRecord -> {
+                                                    if (historySelectedRecords.contains(item.timestamp.time.toString())) {
+                                                        recordsToDelete.add(item)
+                                                    }
+                                                }
+                                                is org.noxylva.lbjconsole.model.MergedTrainRecord -> {
+                                                    item.records.forEach { record ->
+                                                        if (historySelectedRecords.contains(record.timestamp.time.toString())) {
+                                                            recordsToDelete.add(record)
+                                                        }
+                                                    }
+                                                }
+                                            }
                                         }
                                         onDeleteRecords(recordsToDelete)
                                         onHistoryStateChange(false, emptySet(), historyExpandedStates, historyScrollPosition, historyScrollOffset)
@@ -823,31 +870,42 @@ fun MainContent(
                 .padding(paddingValues)
         ) {
             when (currentTab) {
-                0 -> HistoryScreen(
-                    records = allRecords,
-                    latestRecord = latestRecord,
-                    lastUpdateTime = lastUpdateTime,
-                    temporaryStatusMessage = temporaryStatusMessage,
-                    locoInfoUtil = locoInfoUtil,
-                    onClearRecords = onClearRecords,
-                    onRecordClick = onRecordClick,
-                    onClearLog = onClearMonitorLog,
-                    onDeleteRecords = onDeleteRecords,
-                    editMode = historyEditMode,
-                    selectedRecords = historySelectedRecords,
-                    expandedStates = historyExpandedStates,
-                    scrollPosition = historyScrollPosition,
-                    scrollOffset = historyScrollOffset,
-                    onStateChange = onHistoryStateChange
-                )
+                0 -> {
+                    HistoryScreen(
+                        records = allRecords,
+                        latestRecord = latestRecord,
+                        lastUpdateTime = lastUpdateTime,
+                        temporaryStatusMessage = temporaryStatusMessage,
+                        locoInfoUtil = locoInfoUtil,
+                        mergeSettings = mergeSettings,
+                        onClearRecords = onClearRecords,
+                        onRecordClick = onRecordClick,
+                        onClearLog = onClearMonitorLog,
+                        onDeleteRecords = onDeleteRecords,
+                        editMode = historyEditMode,
+                        selectedRecords = historySelectedRecords,
+                        expandedStates = historyExpandedStates,
+                        scrollPosition = historyScrollPosition,
+                        scrollOffset = historyScrollOffset,
+                        onStateChange = onHistoryStateChange
+                    )
+                }
                 2 -> SettingsScreen(
                     deviceName = deviceName,
                     onDeviceNameChange = onDeviceNameChange,
                     onApplySettings = onApplySettings,
-                    appVersion = appVersion
+                    appVersion = appVersion,
+                    mergeSettings = mergeSettings,
+                    onMergeSettingsChange = onMergeSettingsChange,
+                    scrollPosition = settingsScrollPosition,
+                    onScrollPositionChange = onSettingsScrollPositionChange
                 )
                 3 -> MapScreen(
-                    records = if (allRecords.isNotEmpty()) allRecords else recentRecords,
+                    records = if (allRecords.isNotEmpty()) {
+                        allRecords.filterIsInstance<TrainRecord>()
+                    } else {
+                        recentRecords
+                    },
                     centerPosition = mapCenterPosition,
                     zoomLevel = mapZoomLevel,
                     railwayLayerVisible = mapRailwayLayerVisible,

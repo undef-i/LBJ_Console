@@ -19,6 +19,7 @@ class TrainRecordManager(private val context: Context) {
         const val MAX_RECORDS = 1000
         private const val PREFS_NAME = "train_records"
         private const val KEY_RECORDS = "records"
+        private const val KEY_MERGE_SETTINGS = "merge_settings"
     }
 
     
@@ -26,8 +27,12 @@ class TrainRecordManager(private val context: Context) {
     private val recordCount = AtomicInteger(0)
     private val prefs: SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     
+    var mergeSettings = MergeSettings()
+        private set
+    
     init {
         loadRecords()
+        loadMergeSettings()
     }
     
     
@@ -176,5 +181,111 @@ class TrainRecordManager(private val context: Context) {
     
     fun getRecordCount(): Int {
         return recordCount.get()
+    }
+    
+    fun updateMergeSettings(newSettings: MergeSettings) {
+        mergeSettings = newSettings
+        saveMergeSettings()
+    }
+    
+    
+    fun getMergedRecords(): List<MergedTrainRecord> {
+        if (!mergeSettings.enabled) {
+            return emptyList()
+        }
+        
+        val records = getFilteredRecords()
+        return processRecordsForMerging(records, mergeSettings)
+    }
+    
+    fun getMixedRecords(): List<Any> {
+        if (!mergeSettings.enabled) {
+            return getFilteredRecords()
+        }
+        
+        val allRecords = getFilteredRecords()
+        val mergedRecords = processRecordsForMerging(allRecords, mergeSettings)
+        
+        val mergedRecordIds = mergedRecords.flatMap { merged ->
+            merged.records.map { it.timestamp.time.toString() }
+        }.toSet()
+        
+        val singleRecords = allRecords.filter { record ->
+            !mergedRecordIds.contains(record.timestamp.time.toString())
+        }
+        
+        val mixedList = mutableListOf<Any>()
+        mixedList.addAll(mergedRecords)
+        mixedList.addAll(singleRecords)
+        
+        return mixedList.sortedByDescending { item ->
+            when (item) {
+                is MergedTrainRecord -> item.latestRecord.timestamp
+                is TrainRecord -> item.timestamp
+                else -> Date(0)
+            }
+        }
+    }
+    
+    private fun processRecordsForMerging(records: List<TrainRecord>, settings: MergeSettings): List<MergedTrainRecord> {
+        val groupedRecords = mutableMapOf<String, MutableList<TrainRecord>>()
+        val currentTime = Date()
+        
+        records.forEach { record ->
+            val groupKey = generateGroupKey(record, settings.groupBy)
+            if (groupKey != null) {
+                val withinTimeWindow = settings.timeWindow.seconds?.let { windowSeconds ->
+                    (currentTime.time - record.timestamp.time) / 1000 <= windowSeconds
+                } ?: true
+                
+                if (withinTimeWindow) {
+                    groupedRecords.getOrPut(groupKey) { mutableListOf() }.add(record)
+                }
+            }
+        }
+        
+        return groupedRecords.mapNotNull { (groupKey, groupRecords) ->
+            if (groupRecords.size >= 2) {
+                val sortedRecords = groupRecords.sortedBy { it.timestamp }
+                val latestRecord = sortedRecords.maxByOrNull { it.timestamp }!!
+                MergedTrainRecord(
+                    groupKey = groupKey,
+                    records = sortedRecords,
+                    latestRecord = latestRecord
+                )
+            } else null
+        }.sortedByDescending { it.latestRecord.timestamp }
+    }
+    
+    private fun saveMergeSettings() {
+        try {
+            val json = JSONObject().apply {
+                put("enabled", mergeSettings.enabled)
+                put("groupBy", mergeSettings.groupBy.name)
+                put("timeWindow", mergeSettings.timeWindow.name)
+            }
+            prefs.edit().putString(KEY_MERGE_SETTINGS, json.toString()).apply()
+            Log.d(TAG, "Saved merge settings")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to save merge settings: ${e.message}")
+        }
+    }
+    
+    private fun loadMergeSettings() {
+        try {
+            val jsonStr = prefs.getString(KEY_MERGE_SETTINGS, null)
+            if (jsonStr != null) {
+                val json = JSONObject(jsonStr)
+                mergeSettings = MergeSettings(
+                    enabled = json.getBoolean("enabled"),
+                    groupBy = GroupBy.valueOf(json.getString("groupBy")),
+                    timeWindow = TimeWindow.valueOf(json.getString("timeWindow"))
+                )
+            }
+            Log.d(TAG, "Loaded merge settings: $mergeSettings")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to load merge settings: ${e.message}")
+            mergeSettings = MergeSettings()
+        }
     }
 }

@@ -33,18 +33,787 @@ import org.osmdroid.views.overlay.mylocation.GpsMyLocationProvider
 import org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay
 import org.osmdroid.views.overlay.TilesOverlay
 import org.noxylva.lbjconsole.model.TrainRecord
+import org.noxylva.lbjconsole.model.MergedTrainRecord
+import org.noxylva.lbjconsole.model.MergeSettings
+import org.noxylva.lbjconsole.model.GroupBy
 import org.noxylva.lbjconsole.util.LocoInfoUtil
 import java.text.SimpleDateFormat
 import java.util.*
 
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun TrainRecordItem(
+    record: TrainRecord,
+    isSelected: Boolean,
+    isInEditMode: Boolean,
+    expandedStatesMap: MutableMap<String, Boolean>,
+    latestRecord: TrainRecord?,
+    locoInfoUtil: LocoInfoUtil?,
+    onRecordClick: (TrainRecord) -> Unit,
+    onToggleSelection: (TrainRecord) -> Unit,
+    onLongClick: (TrainRecord) -> Unit
+) {
+    val cardColor = when {
+        isSelected -> MaterialTheme.colorScheme.primaryContainer
+        else -> MaterialTheme.colorScheme.surface
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = cardColor
+        ),
+        shape = RoundedCornerShape(8.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .combinedClickable(
+                    onClick = {
+                        if (isInEditMode) {
+                            onToggleSelection(record)
+                        } else {
+                            val id = record.timestamp.time.toString()
+                            expandedStatesMap[id] = !(expandedStatesMap[id] ?: false)
+                            if (record == latestRecord) {
+                                onRecordClick(record)
+                            }
+                        }
+                    },
+                    onLongClick = { onLongClick(record) },
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = rememberRipple(bounded = true)
+                )
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+            ) {
+                val recordId = record.timestamp.time.toString()
+                val isExpanded = expandedStatesMap[recordId] == true
+                val recordMap = record.toMap(showDetailedTime = true)
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (recordMap.containsKey("time")) {
+                        Column {
+                            recordMap["time"]?.split("\n")?.forEach { timeLine ->
+                                Text(
+                                    text = timeLine,
+                                    fontSize = 10.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                    
+                    Text(
+                        text = "${record.rssi} dBm",
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(2.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    val trainDisplay = recordMap["train"]?.toString() ?: "未知列车"
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = trainDisplay,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 20.sp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+
+                        val directionText = when (record.direction) {
+                            1 -> "下"
+                            3 -> "上"
+                            else -> ""
+                        }
+
+                        if (directionText.isNotEmpty()) {
+                            Surface(
+                                shape = RoundedCornerShape(2.dp),
+                                color = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.size(20.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = directionText,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.surface,
+                                        maxLines = 1,
+                                        modifier = Modifier.offset(y = (-2).dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    val formattedInfo = when {
+                        record.locoType.isNotEmpty() && record.loco.isNotEmpty() -> {
+                            val shortLoco = if (record.loco.length > 5) {
+                                record.loco.takeLast(5)
+                            } else {
+                                record.loco
+                            }
+                            "${record.locoType}-${shortLoco}"
+                        }
+                        record.locoType.isNotEmpty() -> record.locoType
+                        record.loco.isNotEmpty() -> record.loco
+                        else -> ""
+                    }
+                    
+                    if (formattedInfo.isNotEmpty() && formattedInfo != "<NUL>") {
+                        Text(
+                            text = formattedInfo,
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    val routeStr = record.route.trim()
+                    val isValidRoute = routeStr.isNotEmpty() && !routeStr.all { it == '*' }
+
+                    val position = record.position.trim()
+                    val isValidPosition = position.isNotEmpty() &&
+                            !position.all { it == '-' || it == '.' } &&
+                            position != "<NUL>"
+
+                    if (isValidRoute || isValidPosition) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.height(24.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            if (isValidRoute) {
+                                Text(
+                                    text = "$routeStr",
+                                    fontSize = 16.sp,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.alignByBaseline()
+                                )
+                            }
+
+                            if (isValidPosition) {
+                                Text(
+                                    text = "${position}K",
+                                    fontSize = 16.sp,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.alignByBaseline()
+                                )
+                            }
+                        }
+                    }
+
+                    val speed = record.speed.trim()
+                    val isValidSpeed = speed.isNotEmpty() &&
+                            !speed.all { it == '*' || it == '-' } &&
+                            speed != "NUL" &&
+                            speed != "<NUL>"
+                    if (isValidSpeed) {
+                        Text(
+                            text = "${speed} km/h",
+                            fontSize = 16.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+
+                if (locoInfoUtil != null && record.locoType.isNotEmpty() && record.loco.isNotEmpty()) {
+                    val locoInfoText = locoInfoUtil.getLocoInfoDisplay(
+                        record.locoType,
+                        record.loco
+                    )
+                    if (locoInfoText != null) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = locoInfoText,
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+
+                if (isExpanded) {
+                    val coordinates = remember { record.getCoordinates() }
+
+                    if (coordinates != null) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+
+                    if (coordinates != null) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(220.dp)
+                                .padding(vertical = 4.dp)
+                                .clip(RoundedCornerShape(8.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            AndroidView(
+                                modifier = Modifier.clickable(
+                                    indication = null,
+                                    interactionSource = remember { MutableInteractionSource() }
+                                ) {},
+                                factory = { context ->
+                                    MapView(context).apply {
+                                        setTileSource(TileSourceFactory.MAPNIK)
+                                        setMultiTouchControls(true)
+                                        zoomController.setVisibility(org.osmdroid.views.CustomZoomButtonsController.Visibility.NEVER)
+                                        isHorizontalMapRepetitionEnabled = false
+                                        isVerticalMapRepetitionEnabled = false
+                                        setHasTransientState(true)
+                                        setOnTouchListener { v, event ->
+                                            v.parent?.requestDisallowInterceptTouchEvent(true)
+                                            false
+                                        }
+                                        controller.setZoom(10.0)
+                                        controller.setCenter(coordinates)
+                                        this.isTilesScaledToDpi = true
+                                        this.setUseDataConnection(true)
+
+                                        try {
+                                            val railwayTileSource = XYTileSource(
+                                                "OpenRailwayMap", 8, 16, 256, ".png",
+                                                arrayOf(
+                                                    "https://a.tiles.openrailwaymap.org/standard/",
+                                                    "https://b.tiles.openrailwaymap.org/standard/",
+                                                    "https://c.tiles.openrailwaymap.org/standard/"
+                                                ),
+                                                "© OpenRailwayMap contributors, © OpenStreetMap contributors"
+                                            )
+
+                                            val railwayProvider = MapTileProviderBasic(context)
+                                            railwayProvider.tileSource = railwayTileSource
+
+                                            val railwayOverlay = TilesOverlay(railwayProvider, context)
+                                            railwayOverlay.loadingBackgroundColor = android.graphics.Color.TRANSPARENT
+                                            railwayOverlay.loadingLineColor = android.graphics.Color.TRANSPARENT
+
+                                            overlays.add(railwayOverlay)
+                                        } catch (e: Exception) {
+                                            e.printStackTrace()
+                                        }
+
+                                        try {
+                                            val locationProvider = GpsMyLocationProvider(context).apply {
+                                                locationUpdateMinDistance = 10f
+                                                locationUpdateMinTime = 1000
+                                            }
+
+                                            MyLocationNewOverlay(locationProvider, this).apply {
+                                                enableMyLocation()
+                                            }.also { overlays.add(it) }
+                                        } catch (e: Exception) {
+                                            e.printStackTrace()
+                                        }
+
+                                        val marker = Marker(this)
+                                        marker.position = coordinates
+
+                                        val latStr = String.format("%.4f", coordinates.latitude)
+                                        val lonStr = String.format("%.4f", coordinates.longitude)
+                                        val coordStr = "${latStr}°N, ${lonStr}°E"
+                                        marker.title = recordMap["train"]?.toString() ?: "列车"
+                                        marker.snippet = coordStr
+                                        marker.setInfoWindowAnchor(Marker.ANCHOR_CENTER, 0f)
+
+                                        overlays.add(marker)
+                                        marker.showInfoWindow()
+                                    }
+                                },
+                                update = { mapView -> mapView.invalidate() }
+                            )
+                        }
+                    }
+                    if (recordMap.containsKey("position_info")) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = recordMap["position_info"] ?: "",
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun MergedTrainRecordItem(
+    mergedRecord: MergedTrainRecord,
+    expandedStatesMap: MutableMap<String, Boolean>,
+    locoInfoUtil: LocoInfoUtil?,
+    mergeSettings: MergeSettings? = null,
+    isInEditMode: Boolean = false,
+    selectedRecords: List<TrainRecord> = emptyList(),
+    onToggleSelection: (TrainRecord) -> Unit = {},
+    onLongClick: (TrainRecord) -> Unit = {}
+) {
+    val recordId = mergedRecord.groupKey
+    val isExpanded = expandedStatesMap[recordId] == true
+    val latestRecord = mergedRecord.latestRecord
+    
+    val hasSelectedRecords = mergedRecord.records.any { selectedRecords.contains(it) }
+    val cardColor = when {
+        hasSelectedRecords -> MaterialTheme.colorScheme.primaryContainer
+        else -> MaterialTheme.colorScheme.surface
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = cardColor
+        ),
+        shape = RoundedCornerShape(8.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .combinedClickable(
+                    onClick = {
+                        if (isInEditMode) {
+                            if (hasSelectedRecords) {
+                                mergedRecord.records.forEach { record ->
+                                    if (selectedRecords.contains(record)) {
+                                        onToggleSelection(record)
+                                    }
+                                }
+                            } else {
+                                mergedRecord.records.forEach { record ->
+                                    if (!selectedRecords.contains(record)) {
+                                        onToggleSelection(record)
+                                    }
+                                }
+                            }
+                        } else {
+                            expandedStatesMap[recordId] = !isExpanded
+                        }
+                    },
+                    onLongClick = {
+                        if (!isInEditMode) {
+                            onLongClick(mergedRecord.records.first())
+                        }
+                    },
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = rememberRipple(bounded = true)
+                )
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+            ) {
+                val recordMap = latestRecord.toMap(showDetailedTime = true)
+                
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (recordMap.containsKey("time")) {
+                        Column {
+                            recordMap["time"]?.split("\n")?.forEach { timeLine ->
+                                Text(
+                                    text = timeLine,
+                                    fontSize = 10.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                    
+                    Text(
+                        text = "${latestRecord.rssi} dBm",
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(2.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    val trainDisplay = recordMap["train"]?.toString() ?: "未知列车"
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = trainDisplay,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 20.sp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+
+                        val directionText = when (latestRecord.direction) {
+                            1 -> "下"
+                            3 -> "上"
+                            else -> ""
+                        }
+
+                        if (directionText.isNotEmpty()) {
+                            Surface(
+                                shape = RoundedCornerShape(2.dp),
+                                color = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.size(20.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = directionText,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.surface,
+                                        maxLines = 1,
+                                        modifier = Modifier.offset(y = (-2).dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    val formattedInfo = when {
+                        latestRecord.locoType.isNotEmpty() && latestRecord.loco.isNotEmpty() -> {
+                            val shortLoco = if (latestRecord.loco.length > 5) {
+                                latestRecord.loco.takeLast(5)
+                            } else {
+                                latestRecord.loco
+                            }
+                            "${latestRecord.locoType}-${shortLoco}"
+                        }
+                        latestRecord.locoType.isNotEmpty() -> latestRecord.locoType
+                        latestRecord.loco.isNotEmpty() -> latestRecord.loco
+                        else -> ""
+                    }
+                    
+                    if (formattedInfo.isNotEmpty() && formattedInfo != "<NUL>") {
+                        Text(
+                            text = formattedInfo,
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    val routeStr = latestRecord.route.trim()
+                    val isValidRoute = routeStr.isNotEmpty() && !routeStr.all { it == '*' }
+
+                    val position = latestRecord.position.trim()
+                    val isValidPosition = position.isNotEmpty() &&
+                            !position.all { it == '-' || it == '.' } &&
+                            position != "<NUL>"
+
+                    if (isValidRoute || isValidPosition) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.height(24.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            if (isValidRoute) {
+                                Text(
+                                    text = "$routeStr",
+                                    fontSize = 16.sp,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.alignByBaseline()
+                                )
+                            }
+
+                            if (isValidPosition) {
+                                Text(
+                                    text = "${position}K",
+                                    fontSize = 16.sp,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.alignByBaseline()
+                                )
+                            }
+                        }
+                    }
+
+                    val speed = latestRecord.speed.trim()
+                    val isValidSpeed = speed.isNotEmpty() &&
+                            !speed.all { it == '*' || it == '-' } &&
+                            speed != "NUL" &&
+                            speed != "<NUL>"
+                    if (isValidSpeed) {
+                        Text(
+                            text = "${speed} km/h",
+                            fontSize = 16.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+
+                if (locoInfoUtil != null && latestRecord.locoType.isNotEmpty() && latestRecord.loco.isNotEmpty()) {
+                    val locoInfoText = locoInfoUtil.getLocoInfoDisplay(
+                        latestRecord.locoType,
+                        latestRecord.loco
+                    )
+                    if (locoInfoText != null) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = locoInfoText,
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+
+                if (isExpanded) {
+                    val coordinates = remember { latestRecord.getCoordinates() }
+
+                    if (coordinates != null) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+
+                    if (coordinates != null) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(220.dp)
+                                .padding(vertical = 4.dp)
+                                .clip(RoundedCornerShape(8.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            AndroidView(
+                                modifier = Modifier.clickable(
+                                    indication = null,
+                                    interactionSource = remember { MutableInteractionSource() }
+                                ) {},
+                                factory = { context ->
+                                    MapView(context).apply {
+                                        setTileSource(TileSourceFactory.MAPNIK)
+                                        setMultiTouchControls(true)
+                                        zoomController.setVisibility(org.osmdroid.views.CustomZoomButtonsController.Visibility.NEVER)
+                                        isHorizontalMapRepetitionEnabled = false
+                                        isVerticalMapRepetitionEnabled = false
+                                        setHasTransientState(true)
+                                        setOnTouchListener { v, event ->
+                                            v.parent?.requestDisallowInterceptTouchEvent(true)
+                                            false
+                                        }
+                                        controller.setZoom(10.0)
+                                        controller.setCenter(coordinates)
+                                        this.isTilesScaledToDpi = true
+                                        this.setUseDataConnection(true)
+
+                                        try {
+                                            val railwayTileSource = XYTileSource(
+                                                "OpenRailwayMap", 8, 16, 256, ".png",
+                                                arrayOf(
+                                                    "https://a.tiles.openrailwayMap.org/standard/",
+                                                    "https://b.tiles.openrailwaymap.org/standard/",
+                                                    "https://c.tiles.openrailwaymap.org/standard/"
+                                                ),
+                                                "© OpenRailwayMap contributors, © OpenStreetMap contributors"
+                                            )
+
+                                            val railwayProvider = MapTileProviderBasic(context)
+                                            railwayProvider.tileSource = railwayTileSource
+
+                                            val railwayOverlay = TilesOverlay(railwayProvider, context)
+                                            railwayOverlay.loadingBackgroundColor = android.graphics.Color.TRANSPARENT
+                                            railwayOverlay.loadingLineColor = android.graphics.Color.TRANSPARENT
+
+                                            overlays.add(railwayOverlay)
+                                        } catch (e: Exception) {
+                                            e.printStackTrace()
+                                        }
+
+                                        try {
+                                            val locationProvider = GpsMyLocationProvider(context).apply {
+                                                locationUpdateMinDistance = 10f
+                                                locationUpdateMinTime = 1000
+                                            }
+
+                                            MyLocationNewOverlay(locationProvider, this).apply {
+                                                enableMyLocation()
+                                            }.also { overlays.add(it) }
+                                        } catch (e: Exception) {
+                                            e.printStackTrace()
+                                        }
+
+                                        val marker = Marker(this)
+                                        marker.position = coordinates
+
+                                        val latStr = String.format("%.4f", coordinates.latitude)
+                                        val lonStr = String.format("%.4f", coordinates.longitude)
+                                        val coordStr = "${latStr}°N, ${lonStr}°E"
+                                        marker.title = recordMap["train"]?.toString() ?: "列车"
+                                        marker.snippet = coordStr
+                                        marker.setInfoWindowAnchor(Marker.ANCHOR_CENTER, 0f)
+
+                                        overlays.add(marker)
+                                        marker.showInfoWindow()
+                                    }
+                                },
+                                update = { mapView -> mapView.invalidate() }
+                            )
+                        }
+                    }
+                    if (recordMap.containsKey("position_info")) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = recordMap["position_info"] ?: "",
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                    
+                    Spacer(modifier = Modifier.height(8.dp))
+                    HorizontalDivider()
+                    Spacer(modifier = Modifier.height(8.dp))
+                    
+                    mergedRecord.records.forEach { recordItem ->
+                        val timeFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
+                        
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = timeFormat.format(recordItem.timestamp),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                
+                                val extraInfo = when (mergeSettings?.groupBy) {
+                                    GroupBy.LOCO_ONLY -> {
+                                        if (recordItem.train.isNotEmpty() && recordItem.train != "<NUL>") {
+                                            recordItem.train
+                                        } else null
+                                    }
+                                    GroupBy.TRAIN_ONLY -> {
+                                        if (recordItem.loco.isNotEmpty() && recordItem.loco != "<NUL>") {
+                                            "${recordItem.locoType}-${recordItem.loco}"
+                                        } else null
+                                    }
+                                    else -> null
+                                }
+                                
+                                if (extraInfo != null) {
+                                    Text(
+                                        text = extraInfo,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+                            
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                val locationText = buildString {
+                                    if (recordItem.route.isNotEmpty() && recordItem.route != "<NUL>") {
+                                        append(recordItem.route)
+                                    }
+                                    if (recordItem.position.isNotEmpty() && recordItem.position != "<NUL>") {
+                                        if (isNotEmpty()) append(" ")
+                                        append("${recordItem.position}K")
+                                    }
+                                }
+                                
+                                Text(
+                                    text = locationText.ifEmpty { "位置未知" },
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    val directionText = when (recordItem.direction) {
+                                        1 -> "下行"
+                                        3 -> "上行"
+                                        else -> "未知"
+                                    }
+                                    Text(
+                                        text = directionText,
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    
+                                    val speedText = if (recordItem.speed.isNotEmpty() &&
+                                                       recordItem.speed != "<NUL>" &&
+                                                       !recordItem.speed.all { it == '*' || it == '-' }) {
+                                        "${recordItem.speed}km/h"
+                                    } else {
+                                        "速度未知"
+                                    }
+                                    Text(
+                                        text = speedText,
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun HistoryScreen(
-    records: List<TrainRecord>,
+    records: List<Any>,
     latestRecord: TrainRecord?,
     lastUpdateTime: Date?,
     temporaryStatusMessage: String? = null,
     locoInfoUtil: LocoInfoUtil? = null,
+    mergeSettings: MergeSettings? = null,
     onClearRecords: () -> Unit = {},
     onRecordClick: (TrainRecord) -> Unit = {},
     onClearLog: () -> Unit = {},
@@ -62,7 +831,22 @@ fun HistoryScreen(
     var isInEditMode by remember(editMode) { mutableStateOf(editMode) }
     val selectedRecordsList = remember(selectedRecords) { 
         mutableStateListOf<TrainRecord>().apply {
-            addAll(records.filter { selectedRecords.contains(it.timestamp.time.toString()) })
+            records.forEach { item ->
+                when (item) {
+                    is TrainRecord -> {
+                        if (selectedRecords.contains(item.timestamp.time.toString())) {
+                            add(item)
+                        }
+                    }
+                    is MergedTrainRecord -> {
+                        item.records.forEach { record ->
+                            if (selectedRecords.contains(record.timestamp.time.toString())) {
+                                add(record)
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
     val expandedStatesMap = remember(expandedStates) { 
@@ -124,7 +908,6 @@ fun HistoryScreen(
 
     Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
-
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -164,374 +947,56 @@ fun HistoryScreen(
                         modifier = Modifier.fillMaxSize(),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        items(filteredRecords) { record ->
-                            val isSelected = selectedRecordsList.contains(record)
-                            val cardColor = when {
-                                isSelected -> MaterialTheme.colorScheme.primaryContainer
-                                else -> MaterialTheme.colorScheme.surface
-                            }
-
-                            Card(
-                                modifier = Modifier.fillMaxWidth(),
-                                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-                                colors = CardDefaults.cardColors(
-                                    containerColor = cardColor
-                                ),
-                                shape = RoundedCornerShape(8.dp)
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .combinedClickable(
-                                            onClick = {
-                                                if (isInEditMode) {
-                                                    if (isSelected) {
-                                                        selectedRecordsList.remove(record)
-                                                    } else {
-                                                        selectedRecordsList.add(record)
-                                                    }
-                                                } else {
-                                                    val id = record.timestamp.time.toString()
-                                                    expandedStatesMap[id] =
-                                                        !(expandedStatesMap[id] ?: false)
-                                                    if (record == latestRecord) {
-                                                        onRecordClick(record)
-                                                    }
-                                                }
-                                            },
-                                            onLongClick = {
-                                                if (!isInEditMode) {
-                                                    isInEditMode = true
-                                                    selectedRecordsList.clear()
-                                                    selectedRecordsList.add(record)
-                                                }
-                                            },
-                                            interactionSource = remember { MutableInteractionSource() },
-                                            indication = rememberRipple(bounded = true)
-                                        )
-                                ) {
-                                    Column(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(horizontal = 16.dp, vertical = 8.dp)
-                                    ) {
-                                        val recordId = record.timestamp.time.toString()
-                                        val isExpanded = expandedStatesMap[recordId] == true
-                                        val recordMap = record.toMap(showDetailedTime = true)
-
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            if (recordMap.containsKey("time")) {
-                                                Column {
-                                                    recordMap["time"]?.split("\n")?.forEach { timeLine ->
-                                                        Text(
-                                                            text = timeLine,
-                                                            fontSize = 10.sp,
-                                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                        )
-                                                    }
-                                                }
+                        items(filteredRecords) { item ->
+                            when (item) {
+                                is TrainRecord -> {
+                                    TrainRecordItem(
+                                        record = item,
+                                        isSelected = selectedRecordsList.contains(item),
+                                        isInEditMode = isInEditMode,
+                                        expandedStatesMap = expandedStatesMap,
+                                        latestRecord = latestRecord,
+                                        locoInfoUtil = locoInfoUtil,
+                                        onRecordClick = onRecordClick,
+                                        onToggleSelection = { record ->
+                                            if (selectedRecordsList.contains(record)) {
+                                                selectedRecordsList.remove(record)
+                                            } else {
+                                                selectedRecordsList.add(record)
                                             }
-                                            
-                                            Text(
-                                                text = "${record.rssi} dBm",
-                                                fontSize = 10.sp,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
-
-                                        Spacer(modifier = Modifier.height(2.dp))
-
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            val trainDisplay =
-                                                recordMap["train"]?.toString() ?: "未知列车"
-
-                                            Row(
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                            ) {
-                                                Text(
-                                                    text = trainDisplay,
-                                                    fontWeight = FontWeight.Bold,
-                                                    fontSize = 20.sp,
-                                                    color = MaterialTheme.colorScheme.primary
-                                                )
-
-                                                val directionText = when (record.direction) {
-                                                    1 -> "下"
-                                                    3 -> "上"
-                                                    else -> ""
-                                                }
-
-                                                if (directionText.isNotEmpty()) {
-                                                    Surface(
-                                                        shape = RoundedCornerShape(2.dp),
-                                                        color = MaterialTheme.colorScheme.onSurface,
-                                                        modifier = Modifier.size(20.dp)
-                                                    ) {
-                                                        Box(
-                                                            modifier = Modifier.fillMaxSize(),
-                                                            contentAlignment = Alignment.Center
-                                                        ) {
-                                                            Text(
-                                                                text = directionText,
-                                                                fontSize = 12.sp,
-                                                                fontWeight = FontWeight.Bold,
-                                                                color = MaterialTheme.colorScheme.surface,
-                                                                maxLines = 1,
-                                                                modifier = Modifier.offset(y = (-2).dp)
-                                                            )
-                                                        }
-                                                    }
-                                                }
-                                            }
-
-                                            val formattedInfo = when {
-                                                record.locoType.isNotEmpty() && record.loco.isNotEmpty() -> {
-                                                    val shortLoco = if (record.loco.length > 5) {
-                                                        record.loco.takeLast(5)
-                                                    } else {
-                                                        record.loco
-                                                    }
-                                                    "${record.locoType}-${shortLoco}"
-                                                }
-
-                                                record.locoType.isNotEmpty() -> record.locoType
-                                                record.loco.isNotEmpty() -> record.loco
-                                                else -> ""
-                                            }
-                                            
-                                            if (formattedInfo.isNotEmpty() && formattedInfo != "<NUL>") {
-                                                Text(
-                                                    text = formattedInfo,
-                                                    fontSize = 14.sp,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
+                                        },
+                                        onLongClick = { record ->
+                                            if (!isInEditMode) {
+                                                isInEditMode = true
+                                                selectedRecordsList.clear()
+                                                selectedRecordsList.add(record)
                                             }
                                         }
-
-                                        Spacer(modifier = Modifier.height(8.dp))
-
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween
-                                        ) {
-                                            val routeStr = record.route.trim()
-                                            val isValidRoute =
-                                                routeStr.isNotEmpty() && !routeStr.all { it == '*' }
-
-                                            val position = record.position.trim()
-                                            val isValidPosition = position.isNotEmpty() &&
-                                                    !position.all { it == '-' || it == '.' } &&
-                                                    position != "<NUL>"
-
-                                            if (isValidRoute || isValidPosition) {
-                                                Row(
-                                                    verticalAlignment = Alignment.CenterVertically,
-                                                    modifier = Modifier.height(24.dp),
-                                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                                ) {
-                                                    if (isValidRoute) {
-                                                        Text(
-                                                            text = "$routeStr",
-                                                            fontSize = 16.sp,
-                                                            color = MaterialTheme.colorScheme.onSurface,
-                                                            modifier = Modifier.alignByBaseline()
-                                                        )
-                                                    }
-
-                                                    if (isValidPosition) {
-                                                        Text(
-                                                            text = "${position}K",
-                                                            fontSize = 16.sp,
-                                                            color = MaterialTheme.colorScheme.onSurface,
-                                                            modifier = Modifier.alignByBaseline()
-                                                        )
-                                                    }
-                                                }
+                                    )
+                                }
+                                is MergedTrainRecord -> {
+                                    MergedTrainRecordItem(
+                                        mergedRecord = item,
+                                        expandedStatesMap = expandedStatesMap,
+                                        locoInfoUtil = locoInfoUtil,
+                                        mergeSettings = mergeSettings,
+                                        isInEditMode = isInEditMode,
+                                        selectedRecords = selectedRecordsList,
+                                        onToggleSelection = { record ->
+                                            if (selectedRecordsList.contains(record)) {
+                                                selectedRecordsList.remove(record)
+                                            } else {
+                                                selectedRecordsList.add(record)
                                             }
-
-                                            val speed = record.speed.trim()
-                                            val isValidSpeed = speed.isNotEmpty() &&
-                                                    !speed.all { it == '*' || it == '-' } &&
-                                                    speed != "NUL" &&
-                                                    speed != "<NUL>"
-                                            if (isValidSpeed) {
-                                                Text(
-                                                    text = "${speed} km/h",
-                                                    fontSize = 16.sp,
-                                                    color = MaterialTheme.colorScheme.onSurface
-                                                )
+                                        },
+                                        onLongClick = { record ->
+                                            if (!isInEditMode) {
+                                                isInEditMode = true
+                                                selectedRecordsList.clear()
+                                                selectedRecordsList.add(record)
                                             }
                                         }
-
-                                        if (locoInfoUtil != null && record.locoType.isNotEmpty() && record.loco.isNotEmpty()) {
-                                            val locoInfoText = locoInfoUtil.getLocoInfoDisplay(
-                                                record.locoType,
-                                                record.loco
-                                            )
-                                            if (locoInfoText != null) {
-                                                Spacer(modifier = Modifier.height(4.dp))
-                                                Text(
-                                                    text = locoInfoText,
-                                                    fontSize = 14.sp,
-                                                    color = MaterialTheme.colorScheme.onSurface
-                                                )
-                                            }
-                                        }
-
-                                        if (isExpanded) {
-                                            val coordinates = remember { record.getCoordinates() }
-
-                                            if (coordinates != null) {
-                                                Spacer(modifier = Modifier.height(8.dp))
-                                            }
-
-                                            if (coordinates != null) {
-
-                                                Box(
-                                                    modifier = Modifier
-                                                        .fillMaxWidth()
-                                                        .height(220.dp)
-                                                        .padding(vertical = 4.dp)
-                                                        .clip(RoundedCornerShape(8.dp)),
-                                                    contentAlignment = Alignment.Center
-                                                ) {
-                                                    AndroidView(
-                                                        modifier = Modifier.clickable(
-                                                            indication = null,
-                                                            interactionSource = remember { MutableInteractionSource() }
-                                                        ) {},
-                                                        factory = { context ->
-                                                            MapView(context).apply {
-                                                                setTileSource(TileSourceFactory.MAPNIK)
-                                                                setMultiTouchControls(true)
-                                                                zoomController.setVisibility(org.osmdroid.views.CustomZoomButtonsController.Visibility.NEVER)
-                                                                isHorizontalMapRepetitionEnabled =
-                                                                    false
-                                                                isVerticalMapRepetitionEnabled =
-                                                                    false
-                                                                setHasTransientState(true)
-                                                                setOnTouchListener { v, event ->
-                                                                    v.parent?.requestDisallowInterceptTouchEvent(
-                                                                        true
-                                                                    )
-                                                                    false
-                                                                }
-                                                                controller.setZoom(10.0)
-                                                                controller.setCenter(coordinates)
-                                                                this.isTilesScaledToDpi = true
-                                                                this.setUseDataConnection(true)
-
-                                                                try {
-                                                                    val railwayTileSource =
-                                                                        XYTileSource(
-                                                                            "OpenRailwayMap",
-                                                                            8, 16,
-                                                                            256,
-                                                                            ".png",
-                                                                            arrayOf(
-                                                                                "https://a.tiles.openrailwaymap.org/standard/",
-                                                                                "https://b.tiles.openrailwaymap.org/standard/",
-                                                                                "https://c.tiles.openrailwaymap.org/standard/"
-                                                                            ),
-                                                                            "© OpenRailwayMap contributors, © OpenStreetMap contributors"
-                                                                        )
-
-                                                                    val railwayProvider =
-                                                                        MapTileProviderBasic(context)
-                                                                    railwayProvider.tileSource =
-                                                                        railwayTileSource
-
-                                                                    val railwayOverlay =
-                                                                        TilesOverlay(
-                                                                            railwayProvider,
-                                                                            context
-                                                                        )
-                                                                    railwayOverlay.loadingBackgroundColor =
-                                                                        android.graphics.Color.TRANSPARENT
-                                                                    railwayOverlay.loadingLineColor =
-                                                                        android.graphics.Color.TRANSPARENT
-
-                                                                    overlays.add(railwayOverlay)
-                                                                } catch (e: Exception) {
-                                                                    e.printStackTrace()
-                                                                }
-
-
-                                                                try {
-                                                                    val locationProvider =
-                                                                        GpsMyLocationProvider(
-                                                                            context
-                                                                        ).apply {
-                                                                            locationUpdateMinDistance =
-                                                                                10f
-                                                                            locationUpdateMinTime =
-                                                                                1000
-                                                                        }
-
-                                                                    MyLocationNewOverlay(
-                                                                        locationProvider,
-                                                                        this
-                                                                    ).apply {
-                                                                        enableMyLocation()
-
-                                                                    }.also { overlays.add(it) }
-                                                                } catch (e: Exception) {
-                                                                    e.printStackTrace()
-                                                                }
-
-                                                                val marker = Marker(this)
-                                                                marker.position = coordinates
-
-                                                                val latStr = String.format(
-                                                                    "%.4f",
-                                                                    coordinates.latitude
-                                                                )
-                                                                val lonStr = String.format(
-                                                                    "%.4f",
-                                                                    coordinates.longitude
-                                                                )
-                                                                val coordStr =
-                                                                    "${latStr}°N, ${lonStr}°E"
-                                                                marker.title =
-                                                                    recordMap["train"]?.toString()
-                                                                        ?: "列车"
-
-                                                                marker.snippet = coordStr
-
-                                                                marker.setInfoWindowAnchor(
-                                                                    Marker.ANCHOR_CENTER,
-                                                                    0f
-                                                                )
-
-                                                                overlays.add(marker)
-                                                                marker.showInfoWindow()
-                                                            }
-                                                        },
-                                                        update = { mapView ->
-                                                            mapView.invalidate()
-                                                        }
-                                                    )
-                                                }
-                                            }
-                                            if (recordMap.containsKey("position_info")) {
-                                                Spacer(modifier = Modifier.height(8.dp))
-                                                Text(
-                                                    text = recordMap["position_info"] ?: "",
-                                                    fontSize = 14.sp,
-                                                    color = MaterialTheme.colorScheme.onSurface
-                                                )
-                                            }
-                                        }
-                                    }
+                                    )
                                 }
                             }
                         }
