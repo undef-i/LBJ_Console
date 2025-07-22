@@ -1,18 +1,26 @@
 package org.noxylva.lbjconsole.ui.components
 
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.ripple.rememberRipple
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -21,6 +29,7 @@ import org.noxylva.lbjconsole.model.TrainRecord
 import java.text.SimpleDateFormat
 import java.util.*
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun TrainRecordsList(
     records: List<TrainRecord>,
@@ -41,19 +50,52 @@ fun TrainRecordsList(
         } else {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(vertical = 4.dp, horizontal = 8.dp)
+                contentPadding = PaddingValues(vertical = 4.dp, horizontal = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                items(records) { record ->
+                itemsIndexed(records, key = { _, record -> record.uniqueId }) { index, record ->
+                    val animationDelay = (index * 30).coerceAtMost(200)
+                    var isPressed by remember { mutableStateOf(false) }
+                    
+                    val scale by animateFloatAsState(
+                        targetValue = if (isPressed) 0.98f else 1f,
+                        animationSpec = tween(durationMillis = 120)
+                    )
+            
+                    val elevation by animateDpAsState(
+                        targetValue = if (isPressed) 6.dp else 2.dp,
+                        animationSpec = tween(durationMillis = 120)
+                    )
+                     
+                     LaunchedEffect(isPressed) {
+                         if (isPressed) {
+                             kotlinx.coroutines.delay(150)
+                             isPressed = false
+                         }
+                     }
+                     
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(vertical = 2.dp)
-                            .clickable { onRecordClick(record) },
-                        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+                            .graphicsLayer {
+                                scaleX = scale
+                                scaleY = scale
+                            }
+                            .animateItemPlacement(
+                                animationSpec = tween(durationMillis = 200)
+                            ),
+                        elevation = CardDefaults.cardElevation(defaultElevation = elevation)
                     ) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = rememberRipple(bounded = true)
+                                ) {
+                                    isPressed = true
+                                    onRecordClick(record)
+                                }
                                 .padding(8.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically

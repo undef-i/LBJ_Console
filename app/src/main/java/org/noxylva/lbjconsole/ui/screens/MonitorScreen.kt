@@ -1,13 +1,18 @@
 package org.noxylva.lbjconsole.ui.screens
 
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.clickable
+
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import androidx.compose.material.ripple.rememberRipple
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
-
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -28,6 +33,20 @@ fun MonitorScreen(
 ) {
     var showDetailDialog by remember { mutableStateOf(false) }
     var selectedRecord by remember { mutableStateOf<TrainRecord?>(null) }
+    var isPressed by remember { mutableStateOf(false) }
+    
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.98f else 1f,
+        animationSpec = tween(durationMillis = 120),
+        label = "content_scale"
+    )
+    
+    LaunchedEffect(isPressed) {
+        if (isPressed) {
+            delay(100)
+            isPressed = false
+        }
+    }
     
     
     val timeSinceLastUpdate = remember { mutableStateOf<String?>(null) }
@@ -76,20 +95,57 @@ fun MonitorScreen(
                         .fillMaxWidth()
                         .weight(1f)
                 ) {
-                    if (latestRecord != null) {
+                    AnimatedContent(
+                        targetState = latestRecord,
+                        transitionSpec = {
+                            fadeIn(
+                                animationSpec = tween(
+                                    durationMillis = 300,
+                                    easing = FastOutSlowInEasing
+                                )
+                            ) + slideInVertically(
+                                initialOffsetY = { it / 4 },
+                                animationSpec = tween(
+                                    durationMillis = 300,
+                                    easing = FastOutSlowInEasing
+                                )
+                            ) togetherWith fadeOut(
+                                animationSpec = tween(
+                                    durationMillis = 150,
+                                    easing = FastOutLinearInEasing
+                                )
+                            ) + slideOutVertically(
+                                targetOffsetY = { -it / 4 },
+                                animationSpec = tween(
+                                    durationMillis = 150,
+                                    easing = FastOutLinearInEasing
+                                )
+                            )
+                        },
+                        label = "content_animation"
+                    ) { record ->
+                        if (record != null) {
                         
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(8.dp)
-                                .clickable {
-                                    selectedRecord = latestRecord
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = rememberRipple(bounded = true)
+                                ) {
+                                    isPressed = true
+                                    selectedRecord = record
                                     showDetailDialog = true
-                                    onRecordClick(latestRecord)
+                                    onRecordClick(record)
+                                }
+                                .padding(8.dp)
+                                .graphicsLayer {
+                                    scaleX = scale
+                                    scaleY = scale
                                 }
                         ) {
                             
-                            val recordMap = latestRecord.toMap()
+                            val recordMap = record.toMap()
                             
                             
                             Row(
@@ -208,6 +264,7 @@ fun MonitorScreen(
                                 }
                             }
                         }
+                    }
                     }
                 }
                 
