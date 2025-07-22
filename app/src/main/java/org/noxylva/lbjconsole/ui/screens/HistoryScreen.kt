@@ -9,6 +9,9 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.ripple.rememberRipple
@@ -19,6 +22,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -53,14 +57,41 @@ fun TrainRecordItem(
     onToggleSelection: (TrainRecord) -> Unit,
     onLongClick: (TrainRecord) -> Unit
 ) {
-    val cardColor = when {
-        isSelected -> MaterialTheme.colorScheme.primaryContainer
-        else -> MaterialTheme.colorScheme.surface
-    }
+    val recordId = record.uniqueId
+    val isExpanded = expandedStatesMap[recordId] == true
+    
+    val cardColor by animateColorAsState(
+        targetValue = when {
+            isSelected -> MaterialTheme.colorScheme.primaryContainer
+            else -> MaterialTheme.colorScheme.surface
+        },
+        animationSpec = tween(durationMillis = 200),
+        label = "cardColor"
+    )
+    
+    val cardScale by animateFloatAsState(
+        targetValue = if (isSelected) 0.98f else 1f,
+        animationSpec = tween(durationMillis = 150),
+        label = "cardScale"
+    )
+    
+    val cardElevation by animateDpAsState(
+        targetValue = if (isSelected) 6.dp else 2.dp,
+        animationSpec = tween(durationMillis = 200),
+        label = "cardElevation"
+    )
 
     Card(
-        modifier = Modifier.fillMaxWidth(),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .graphicsLayer {
+                scaleX = cardScale
+                scaleY = cardScale
+            }
+            .animateContentSize(
+                animationSpec = tween(durationMillis = 150, easing = LinearEasing)
+            ),
+        elevation = CardDefaults.cardElevation(defaultElevation = cardElevation),
         colors = CardDefaults.cardColors(
             containerColor = cardColor
         ),
@@ -260,105 +291,111 @@ fun TrainRecordItem(
                     }
                 }
 
-                if (isExpanded) {
-                    val coordinates = remember { record.getCoordinates() }
+                AnimatedVisibility(
+                    visible = isExpanded,
+                    enter = expandVertically(animationSpec = tween(durationMillis = 300)) + fadeIn(animationSpec = tween(durationMillis = 300)),
+                    exit = shrinkVertically(animationSpec = tween(durationMillis = 300)) + fadeOut(animationSpec = tween(durationMillis = 300))
+                ) {
+                    Column {
+                        val coordinates = remember { record.getCoordinates() }
 
-                    if (coordinates != null) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                    }
+                        if (coordinates != null) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                        }
 
-                    if (coordinates != null) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(220.dp)
-                                .padding(vertical = 4.dp)
-                                .clip(RoundedCornerShape(8.dp)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            AndroidView(
-                                modifier = Modifier.clickable(
-                                    indication = null,
-                                    interactionSource = remember { MutableInteractionSource() }
-                                ) {},
-                                factory = { context ->
-                                    MapView(context).apply {
-                                        setTileSource(TileSourceFactory.MAPNIK)
-                                        setMultiTouchControls(true)
-                                        zoomController.setVisibility(org.osmdroid.views.CustomZoomButtonsController.Visibility.NEVER)
-                                        isHorizontalMapRepetitionEnabled = false
-                                        isVerticalMapRepetitionEnabled = false
-                                        setHasTransientState(true)
-                                        setOnTouchListener { v, event ->
-                                            v.parent?.requestDisallowInterceptTouchEvent(true)
-                                            false
-                                        }
-                                        controller.setZoom(10.0)
-                                        controller.setCenter(coordinates)
-                                        this.isTilesScaledToDpi = true
-                                        this.setUseDataConnection(true)
+                        if (coordinates != null) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(220.dp)
+                                    .padding(vertical = 4.dp)
+                                    .clip(RoundedCornerShape(8.dp)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                AndroidView(
+                                    modifier = Modifier.clickable(
+                                        indication = null,
+                                        interactionSource = remember { MutableInteractionSource() }
+                                    ) {},
+                                    factory = { context ->
+                                        MapView(context).apply {
+                                            setTileSource(TileSourceFactory.MAPNIK)
+                                            setMultiTouchControls(true)
+                                            zoomController.setVisibility(org.osmdroid.views.CustomZoomButtonsController.Visibility.NEVER)
+                                            isHorizontalMapRepetitionEnabled = false
+                                            isVerticalMapRepetitionEnabled = false
+                                            setHasTransientState(true)
+                                            setOnTouchListener { v, event ->
+                                                v.parent?.requestDisallowInterceptTouchEvent(true)
+                                                false
+                                            }
+                                            controller.setZoom(10.0)
+                                            controller.setCenter(coordinates)
+                                            this.isTilesScaledToDpi = true
+                                            this.setUseDataConnection(true)
 
-                                        try {
-                                            val railwayTileSource = XYTileSource(
-                                                "OpenRailwayMap", 8, 16, 256, ".png",
-                                                arrayOf(
-                                                    "https://a.tiles.openrailwaymap.org/standard/",
-                                                    "https://b.tiles.openrailwaymap.org/standard/",
-                                                    "https://c.tiles.openrailwaymap.org/standard/"
-                                                ),
-                                                "© OpenRailwayMap contributors, © OpenStreetMap contributors"
-                                            )
+                                            try {
+                                                val railwayTileSource = XYTileSource(
+                                                    "OpenRailwayMap", 8, 16, 256, ".png",
+                                                    arrayOf(
+                                                        "https://a.tiles.openrailwaymap.org/standard/",
+                                                        "https://b.tiles.openrailwaymap.org/standard/",
+                                                        "https://c.tiles.openrailwaymap.org/standard/"
+                                                    ),
+                                                    "© OpenRailwayMap contributors, © OpenStreetMap contributors"
+                                                )
 
-                                            val railwayProvider = MapTileProviderBasic(context)
-                                            railwayProvider.tileSource = railwayTileSource
+                                                val railwayProvider = MapTileProviderBasic(context)
+                                                railwayProvider.tileSource = railwayTileSource
 
-                                            val railwayOverlay = TilesOverlay(railwayProvider, context)
-                                            railwayOverlay.loadingBackgroundColor = android.graphics.Color.TRANSPARENT
-                                            railwayOverlay.loadingLineColor = android.graphics.Color.TRANSPARENT
+                                                val railwayOverlay = TilesOverlay(railwayProvider, context)
+                                                railwayOverlay.loadingBackgroundColor = android.graphics.Color.TRANSPARENT
+                                                railwayOverlay.loadingLineColor = android.graphics.Color.TRANSPARENT
 
-                                            overlays.add(railwayOverlay)
-                                        } catch (e: Exception) {
-                                            e.printStackTrace()
-                                        }
-
-                                        try {
-                                            val locationProvider = GpsMyLocationProvider(context).apply {
-                                                locationUpdateMinDistance = 10f
-                                                locationUpdateMinTime = 1000
+                                                overlays.add(railwayOverlay)
+                                            } catch (e: Exception) {
+                                                e.printStackTrace()
                                             }
 
-                                            MyLocationNewOverlay(locationProvider, this).apply {
-                                                enableMyLocation()
-                                            }.also { overlays.add(it) }
-                                        } catch (e: Exception) {
-                                            e.printStackTrace()
+                                            try {
+                                                val locationProvider = GpsMyLocationProvider(context).apply {
+                                                    locationUpdateMinDistance = 10f
+                                                    locationUpdateMinTime = 1000
+                                                }
+
+                                                MyLocationNewOverlay(locationProvider, this).apply {
+                                                    enableMyLocation()
+                                                }.also { overlays.add(it) }
+                                            } catch (e: Exception) {
+                                                e.printStackTrace()
+                                            }
+
+                                            val marker = Marker(this)
+                                            marker.position = coordinates
+
+                                            val latStr = String.format("%.4f", coordinates.latitude)
+                                            val lonStr = String.format("%.4f", coordinates.longitude)
+                                            val coordStr = "${latStr}°N, ${lonStr}°E"
+                                            marker.title = recordMap["train"]?.toString() ?: "列车"
+                                            marker.snippet = coordStr
+                                            marker.setInfoWindowAnchor(Marker.ANCHOR_CENTER, 0f)
+
+                                            overlays.add(marker)
+                                            marker.showInfoWindow()
                                         }
-
-                                        val marker = Marker(this)
-                                        marker.position = coordinates
-
-                                        val latStr = String.format("%.4f", coordinates.latitude)
-                                        val lonStr = String.format("%.4f", coordinates.longitude)
-                                        val coordStr = "${latStr}°N, ${lonStr}°E"
-                                        marker.title = recordMap["train"]?.toString() ?: "列车"
-                                        marker.snippet = coordStr
-                                        marker.setInfoWindowAnchor(Marker.ANCHOR_CENTER, 0f)
-
-                                        overlays.add(marker)
-                                        marker.showInfoWindow()
-                                    }
-                                },
-                                update = { mapView -> mapView.invalidate() }
+                                    },
+                                    update = { mapView -> mapView.invalidate() }
+                                )
+                            }
+                        }
+                        if (recordMap.containsKey("position_info")) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = recordMap["position_info"] ?: "",
+                                fontSize = 14.sp,
+                                color = MaterialTheme.colorScheme.onSurface
                             )
                         }
-                    }
-                    if (recordMap.containsKey("position_info")) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = recordMap["position_info"] ?: "",
-                            fontSize = 14.sp,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
                     }
                 }
             }
@@ -383,14 +420,39 @@ fun MergedTrainRecordItem(
     val latestRecord = mergedRecord.latestRecord
     
     val hasSelectedRecords = mergedRecord.records.any { selectedRecords.contains(it) }
-    val cardColor = when {
-        hasSelectedRecords -> MaterialTheme.colorScheme.primaryContainer
-        else -> MaterialTheme.colorScheme.surface
-    }
+    
+    val cardColor by animateColorAsState(
+        targetValue = when {
+            hasSelectedRecords -> MaterialTheme.colorScheme.primaryContainer
+            else -> MaterialTheme.colorScheme.surface
+        },
+        animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
+        label = "mergedCardColor"
+    )
+    
+    val cardScale by animateFloatAsState(
+        targetValue = if (hasSelectedRecords) 0.98f else 1f,
+        animationSpec = tween(durationMillis = 150, easing = LinearEasing),
+        label = "mergedCardScale"
+    )
+    
+    val cardElevation by animateDpAsState(
+        targetValue = if (hasSelectedRecords) 6.dp else 2.dp,
+        animationSpec = tween(durationMillis = 200, easing = LinearEasing),
+        label = "mergedCardElevation"
+    )
 
     Card(
-        modifier = Modifier.fillMaxWidth(),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .graphicsLayer {
+                scaleX = cardScale
+                scaleY = cardScale
+            }
+            .animateContentSize(
+                animationSpec = tween(durationMillis = 150, easing = LinearEasing)
+            ),
+        elevation = CardDefaults.cardElevation(defaultElevation = cardElevation),
         colors = CardDefaults.cardColors(
             containerColor = cardColor
         ),
@@ -948,7 +1010,13 @@ fun HistoryScreen(
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp)
                     ) {
-                        items(filteredRecords) { item ->
+                        itemsIndexed(filteredRecords, key = { _, item -> 
+                            when (item) {
+                                is TrainRecord -> item.uniqueId
+                                is MergedTrainRecord -> item.groupKey
+                                else -> item.hashCode()
+                            }
+                        }) { index, item ->
                             when (item) {
                                 is TrainRecord -> {
                                     TrainRecordItem(
