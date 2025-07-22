@@ -207,11 +207,11 @@ class TrainRecordManager(private val context: Context) {
         val mergedRecords = processRecordsForMerging(allRecords, mergeSettings)
         
         val mergedRecordIds = mergedRecords.flatMap { merged ->
-            merged.records.map { it.timestamp.time.toString() }
+            merged.records.map { it.uniqueId }
         }.toSet()
         
         val singleRecords = allRecords.filter { record ->
-            !mergedRecordIds.contains(record.timestamp.time.toString())
+            !mergedRecordIds.contains(record.uniqueId)
         }
         
         val mixedList = mutableListOf<Any>()
