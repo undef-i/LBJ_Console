@@ -9,8 +9,15 @@ import org.noxylva.lbjconsole.util.LocationUtils
 class TrainRecord(jsonData: JSONObject? = null) {
     companion object {
         const val TAG = "TrainRecord"
+        private var nextId = 0L
+        
+        @Synchronized
+        private fun generateUniqueId(): String {
+            return "${System.currentTimeMillis()}_${++nextId}"
+        }
     }
     
+    val uniqueId: String
     var timestamp: Date = Date()
     var receivedTimestamp: Date = Date()
     var train: String = ""
@@ -29,10 +36,15 @@ class TrainRecord(jsonData: JSONObject? = null) {
     private var _coordinates: GeoPoint? = null
 
     init {
+        uniqueId = if (jsonData?.has("uniqueId") == true) {
+            jsonData.getString("uniqueId")
+        } else {
+            generateUniqueId()
+        }
+        
         jsonData?.let {
             try {
                 if (jsonData.has("timestamp")) {
-                    
                     timestamp = Date(jsonData.getLong("timestamp"))
                 }
             
@@ -166,6 +178,7 @@ class TrainRecord(jsonData: JSONObject? = null) {
     
     fun toJSON(): JSONObject {
         val json = JSONObject()
+        json.put("uniqueId", uniqueId)
         json.put("timestamp", timestamp.time)  
         json.put("receivedTimestamp", receivedTimestamp.time)
         json.put("train", train)
@@ -180,5 +193,15 @@ class TrainRecord(jsonData: JSONObject? = null) {
         json.put("position_info", positionInfo)
         json.put("rssi", rssi)
         return json
+    }
+    
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is TrainRecord) return false
+        return uniqueId == other.uniqueId
+    }
+    
+    override fun hashCode(): Int {
+        return uniqueId.hashCode()
     }
 }

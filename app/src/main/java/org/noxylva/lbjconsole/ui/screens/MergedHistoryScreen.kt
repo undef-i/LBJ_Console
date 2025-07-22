@@ -58,7 +58,7 @@ fun MergedHistoryScreen(
     val selectedRecordsList = remember(selectedRecords) { 
         mutableStateListOf<TrainRecord>().apply {
             addAll(mergedRecords.flatMap { it.records }.filter { 
-                selectedRecords.contains(it.timestamp.time.toString()) 
+                selectedRecords.contains(it.uniqueId) 
             })
         }
     }
@@ -72,7 +72,7 @@ fun MergedHistoryScreen(
     )
 
     LaunchedEffect(isInEditMode, selectedRecordsList.size) {
-        val selectedIds = selectedRecordsList.map { it.timestamp.time.toString() }.toSet()
+        val selectedIds = selectedRecordsList.map { it.uniqueId }.toSet()
         onStateChange(isInEditMode, selectedIds, expandedStatesMap.toMap(), 
                      listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
     }

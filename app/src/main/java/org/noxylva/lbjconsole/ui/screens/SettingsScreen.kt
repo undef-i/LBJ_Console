@@ -227,8 +227,7 @@ fun SettingsScreen(
             }
         }
         
-        Spacer(modifier = Modifier.height(20.dp))
-        
+
         Text(
              text = "LBJ Console v$appVersion by undef-i",
              style = MaterialTheme.typography.bodySmall,
@@ -240,7 +239,7 @@ fun SettingsScreen(
                  .clickable {
                      uriHandler.openUri("https://github.com/undef-i")
                  }
-                 .padding(16.dp)
+                 .padding(12.dp)
          )
     }
 }

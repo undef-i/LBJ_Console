@@ -99,6 +99,49 @@ fun MapScreen(
     
     var railwayLayerVisibleState by remember(railwayLayerVisible) { mutableStateOf(railwayLayerVisible) }
     
+    fun updateMarkers() {
+        val mapView = mapViewRef.value ?: return
+        
+        mapView.overlays.removeAll { it is Marker }
+        
+        validRecords.forEach { record ->
+            record.getCoordinates()?.let { point ->
+                val marker = Marker(mapView).apply {
+                    position = point
+                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                    
+                    val recordMap = record.toMap()
+                    title = recordMap["train"]?.toString() ?: "列车"
+                    
+                    val latStr = String.format("%.4f", point.latitude)
+                    val lonStr = String.format("%.4f", point.longitude)
+                    val coordStr = "${latStr}°N, ${lonStr}°E"
+                    snippet = coordStr
+                    
+                    setInfoWindowAnchor(Marker.ANCHOR_CENTER, 0f)
+                    
+                    setOnMarkerClickListener { clickedMarker, _ ->
+                        selectedRecord = record
+                        dialogPosition = point
+                        showDetailDialog = true
+                        true
+                    }
+                }
+                
+                mapView.overlays.add(marker)
+                marker.showInfoWindow()
+            }
+        }
+        
+        mapView.invalidate()
+    }
+    
+    LaunchedEffect(records) {
+        if (isMapInitialized) {
+            updateMarkers()
+        }
+    }
+    
     
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -135,50 +178,7 @@ fun MapScreen(
         }
     }
     
-    
-    fun updateMarkers() {
-        val mapView = mapViewRef.value ?: return
-        
-        
-        mapView.overlays.removeAll { it is Marker }
-        
-        
-        validRecords.forEach { record ->
-            record.getCoordinates()?.let { point ->
-                val marker = Marker(mapView).apply {
-                    position = point
 
-                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
-                    
-                    val recordMap = record.toMap()
-                    title = recordMap["train"]?.toString() ?: "列车"
-                    
-                    val latStr = String.format("%.4f", point.latitude)
-                    val lonStr = String.format("%.4f", point.longitude)
-                    val coordStr = "${latStr}°N, ${lonStr}°E"
-                    snippet = coordStr
-                    
-                    setInfoWindowAnchor(Marker.ANCHOR_CENTER, 0f)
-                    
-                    setOnMarkerClickListener { clickedMarker, _ ->
-                        selectedRecord = record
-                        dialogPosition = point
-                        showDetailDialog = true
-                        true
-                    }
-                }
-                
-                mapView.overlays.add(marker)
-                marker.showInfoWindow()
-            }
-        }
-        
-        
-        mapView.invalidate()
-        
-        
-
-    }
     
     
     fun updateRailwayLayerVisibility(visible: Boolean) {

@@ -2,10 +2,6 @@
 
 LBJ Console is an Android app designed to receive and display LBJ messages via BLE from the [SX1276_Receive_LBJ](https://github.com/undef-i/SX1276_Receive_LBJ) device.
 
-## Roadmap
-- Record filtering (train number, time range)
-- Record management page optimization
-- Optional train merge by locomotive/number
 
 # License
 

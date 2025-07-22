@@ -633,4 +633,23 @@ class BLEClient(private val context: Context) : BluetoothGattCallback() {
     fun getConnectionAttempts(): Int = connectionAttempts
     
     fun getLastKnownDeviceAddress(): String? = lastKnownDeviceAddress
+    
+    @SuppressLint("MissingPermission")
+    fun disconnectAndCleanup() {
+        isConnected = false
+        autoReconnect = false
+        bluetoothGatt?.let { gatt ->
+            try {
+                gatt.disconnect()
+                gatt.close()
+                Log.d(TAG, "GATT connection cleaned up")
+            } catch (e: Exception) {
+                Log.e(TAG, "Cleanup error: ${e.message}")
+            }
+        }
+        bluetoothGatt = null
+        deviceAddress = null
+        connectionAttempts = 0
+        Log.d(TAG, "BLE client fully disconnected and cleaned up")
+    }
 }

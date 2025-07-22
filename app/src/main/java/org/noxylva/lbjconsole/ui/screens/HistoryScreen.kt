@@ -74,7 +74,7 @@ fun TrainRecordItem(
                         if (isInEditMode) {
                             onToggleSelection(record)
                         } else {
-                            val id = record.timestamp.time.toString()
+                            val id = record.uniqueId
                             expandedStatesMap[id] = !(expandedStatesMap[id] ?: false)
                             if (record == latestRecord) {
                                 onRecordClick(record)
@@ -91,7 +91,7 @@ fun TrainRecordItem(
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 8.dp)
             ) {
-                val recordId = record.timestamp.time.toString()
+                val recordId = record.uniqueId
                 val isExpanded = expandedStatesMap[recordId] == true
                 val recordMap = record.toMap(showDetailedTime = true)
 
@@ -705,7 +705,7 @@ fun MergedTrainRecordItem(
                     HorizontalDivider()
                     Spacer(modifier = Modifier.height(8.dp))
                     
-                    mergedRecord.records.forEach { recordItem ->
+                    mergedRecord.records.filter { it != mergedRecord.latestRecord }.forEach { recordItem ->
                         val timeFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
                         
                         Column(
@@ -834,13 +834,13 @@ fun HistoryScreen(
             records.forEach { item ->
                 when (item) {
                     is TrainRecord -> {
-                        if (selectedRecords.contains(item.timestamp.time.toString())) {
+                        if (selectedRecords.contains(item.uniqueId)) {
                             add(item)
                         }
                     }
                     is MergedTrainRecord -> {
                         item.records.forEach { record ->
-                            if (selectedRecords.contains(record.timestamp.time.toString())) {
+                            if (selectedRecords.contains(record.uniqueId)) {
                                 add(record)
                             }
                         }
@@ -881,20 +881,21 @@ fun HistoryScreen(
 
 
     LaunchedEffect(isInEditMode, selectedRecordsList.size) {
-        val selectedIds = selectedRecordsList.map { it.timestamp.time.toString() }.toSet()
+        val selectedIds = selectedRecordsList.map { it.uniqueId }.toSet()
         onStateChange(isInEditMode, selectedIds, expandedStatesMap.toMap(), listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
     }
     
     LaunchedEffect(expandedStatesMap.toMap()) {
         if (!isInEditMode) {
-            val selectedIds = selectedRecordsList.map { it.timestamp.time.toString() }.toSet()
+            val selectedIds = selectedRecordsList.map { it.uniqueId }.toSet()
+            delay(50)
             onStateChange(isInEditMode, selectedIds, expandedStatesMap.toMap(), listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
         }
     }
     
     LaunchedEffect(listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset) {
         if (!isInEditMode) {
-            val selectedIds = selectedRecordsList.map { it.timestamp.time.toString() }.toSet()
+            val selectedIds = selectedRecordsList.map { it.uniqueId }.toSet()
             onStateChange(isInEditMode, selectedIds, expandedStatesMap.toMap(), listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
         }
     }
@@ -911,7 +912,6 @@ fun HistoryScreen(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(16.dp)
                     .weight(1.0f)
             ) {
                 if (filteredRecords.isEmpty()) {
@@ -945,7 +945,8 @@ fun HistoryScreen(
                     LazyColumn(
                         state = listState,
                         modifier = Modifier.fillMaxSize(),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp)
                     ) {
                         items(filteredRecords) { item ->
                             when (item) {

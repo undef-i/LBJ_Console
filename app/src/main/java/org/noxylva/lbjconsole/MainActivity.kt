@@ -274,6 +274,8 @@ class MainActivity : ComponentActivity() {
                         onMergeSettingsChange = { newSettings ->
                             mergeSettings = newSettings
                             trainRecordManager.updateMergeSettings(newSettings)
+                            historyEditMode = false
+                            historySelectedRecords = emptySet()
                             saveSettings()
                         },
                         
@@ -334,12 +336,6 @@ class MainActivity : ComponentActivity() {
                             scope.launch {
                                 val deletedCount = trainRecordManager.deleteRecords(records)
                                 if (deletedCount > 0) {
-                                    Toast.makeText(
-                                        this@MainActivity,
-                                        "已删除 $deletedCount 条记录",
-                                        Toast.LENGTH_SHORT
-                                    ).show()
-                                    
                                     if (records.contains(latestRecord)) {
                                         latestRecord = null
                                     }
@@ -659,6 +655,10 @@ class MainActivity : ComponentActivity() {
     override fun onPause() {
         super.onPause()
         saveSettings()
+        if (isFinishing) {
+            bleClient.disconnectAndCleanup()
+            Log.d(TAG, "App finishing, BLE cleaned up")
+        }
         Log.d(TAG, "App paused, settings saved")
     }
 }
@@ -783,8 +783,24 @@ fun MainContent(
                 if (historyEditMode && currentTab == 0) {
                     TopAppBar(
                         title = { 
+                            val totalSelectedCount = historySelectedRecords.sumOf { selectedId ->
+                                allRecords.find { item ->
+                                    when (item) {
+                                        is TrainRecord -> item.uniqueId == selectedId
+                                        is org.noxylva.lbjconsole.model.MergedTrainRecord -> 
+                                            item.records.any { it.uniqueId == selectedId }
+                                        else -> false
+                                    }
+                                }?.let { item ->
+                                    when (item) {
+                                        is TrainRecord -> 1
+                                        is org.noxylva.lbjconsole.model.MergedTrainRecord -> item.records.size
+                                        else -> 0
+                                    }
+                                } ?: 0
+                            }
                             Text(
-                                "已选择 ${historySelectedRecords.size} 条记录",
+                                "已选择 $totalSelectedCount 条记录",
                                 color = MaterialTheme.colorScheme.onPrimary
                             )
                         },
@@ -803,24 +819,39 @@ fun MainContent(
                             IconButton(
                                 onClick = {
                                     if (historySelectedRecords.isNotEmpty()) {
-                                        val recordsToDelete = mutableListOf<TrainRecord>()
+                                        val recordsToDelete = mutableSetOf<TrainRecord>()
+                                        val idToRecordMap = mutableMapOf<String, TrainRecord>()
+                                        val idToMergedRecordMap = mutableMapOf<String, org.noxylva.lbjconsole.model.MergedTrainRecord>()
+                                        
                                         allRecords.forEach { item ->
                                             when (item) {
                                                 is TrainRecord -> {
-                                                    if (historySelectedRecords.contains(item.timestamp.time.toString())) {
-                                                        recordsToDelete.add(item)
-                                                    }
+                                                    idToRecordMap[item.uniqueId] = item
                                                 }
                                                 is org.noxylva.lbjconsole.model.MergedTrainRecord -> {
                                                     item.records.forEach { record ->
-                                                        if (historySelectedRecords.contains(record.timestamp.time.toString())) {
-                                                            recordsToDelete.add(record)
-                                                        }
+                                                        idToRecordMap[record.uniqueId] = record
+                                                        idToMergedRecordMap[record.uniqueId] = item
                                                     }
                                                 }
                                             }
                                         }
-                                        onDeleteRecords(recordsToDelete)
+                                        
+                                        val processedMergedRecords = mutableSetOf<org.noxylva.lbjconsole.model.MergedTrainRecord>()
+                                        
+                                        historySelectedRecords.forEach { selectedId ->
+                                            val mergedRecord = idToMergedRecordMap[selectedId]
+                                            if (mergedRecord != null && !processedMergedRecords.contains(mergedRecord)) {
+                                                recordsToDelete.addAll(mergedRecord.records)
+                                                processedMergedRecords.add(mergedRecord)
+                                            } else if (mergedRecord == null) {
+                                                idToRecordMap[selectedId]?.let { record ->
+                                                    recordsToDelete.add(record)
+                                                }
+                                            }
+                                        }
+                                        
+                                        onDeleteRecords(recordsToDelete.toList())
                                         onHistoryStateChange(false, emptySet(), historyExpandedStates, historyScrollPosition, historyScrollOffset)
                                     }
                                 }
@@ -902,7 +933,16 @@ fun MainContent(
                 )
                 3 -> MapScreen(
                     records = if (allRecords.isNotEmpty()) {
-                        allRecords.filterIsInstance<TrainRecord>()
+                        val trainRecords = mutableListOf<TrainRecord>()
+                        allRecords.forEach { item ->
+                            when (item) {
+                                is TrainRecord -> trainRecords.add(item)
+                                is org.noxylva.lbjconsole.model.MergedTrainRecord -> {
+                                    trainRecords.addAll(item.records)
+                                }
+                            }
+                        }
+                        trainRecords
                     } else {
                         recentRecords
                     },
