@@ -45,6 +45,16 @@ class BLEClient(private val context: Context) : BluetoothGattCallback() {
     private var lastKnownDeviceAddress: String? = null
     private var connectionAttempts = 0
     private var isReconnecting = false
+    private var highFrequencyReconnect = true
+    private var reconnectHandler = Handler(Looper.getMainLooper())
+    private var reconnectRunnable: Runnable? = null
+    private var connectionLostCallback: (() -> Unit)? = null
+    private var connectionSuccessCallback: ((String) -> Unit)? = null
+    private var specifiedDeviceAddress: String? = null
+    private var targetDeviceAddress: String? = null
+    private var isDialogOpen = false
+    private var isManualDisconnect = false
+    private var isAutoConnectBlocked = false
     
     private val leScanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
@@ -82,17 +92,24 @@ class BLEClient(private val context: Context) : BluetoothGattCallback() {
                 scanCallback?.invoke(device)
             }
             
-            if (targetDeviceName != null && !isConnected && !isReconnecting) {
-                if (deviceName != null && deviceName.equals(targetDeviceName, ignoreCase = true)) {
-                    Log.i(TAG, "Found target device: $deviceName, auto-connecting")
-                    lastKnownDeviceAddress = device.address
-                    connectImmediately(device.address)
+            if (!isConnected && !isReconnecting && !isDialogOpen && !isAutoConnectBlocked) {
+                val deviceAddress = device.address
+                val isSpecifiedDevice = specifiedDeviceAddress == deviceAddress
+                val isTargetDevice = targetDeviceName != null && deviceName != null && deviceName.equals(targetDeviceName, ignoreCase = true)
+                val isKnownDevice = lastKnownDeviceAddress == deviceAddress
+                val isSpecificTargetAddress = targetDeviceAddress == deviceAddress
+                
+                if (isSpecificTargetAddress || isSpecifiedDevice || (specifiedDeviceAddress == null && isTargetDevice) || (specifiedDeviceAddress == null && isKnownDevice)) {
+                    val priority = when {
+                        isSpecificTargetAddress -> "specific target address"
+                        isSpecifiedDevice -> "specified device"
+                        isTargetDevice -> "target device name"
+                        else -> "known device"
+                    }
+                    Log.i(TAG, "Found device ($priority): $deviceName, auto-connecting")
+                    lastKnownDeviceAddress = deviceAddress
+                    connectImmediately(deviceAddress)
                 }
-            }
-            
-            if (lastKnownDeviceAddress == device.address && !isConnected && !isReconnecting) {
-                Log.i(TAG, "Found known device, reconnecting immediately")
-                connectImmediately(device.address)
             }
         }
         
@@ -279,7 +296,66 @@ class BLEClient(private val context: Context) : BluetoothGattCallback() {
 
     @SuppressLint("MissingPermission")
     fun disconnect() {
-        bluetoothGatt?.disconnect()
+        Log.d(TAG, "Manual disconnect initiated")
+        isConnected = false
+        isManualDisconnect = true
+        isAutoConnectBlocked = true
+        stopHighFrequencyReconnect()
+        stopScan()
+        
+        bluetoothGatt?.let { gatt ->
+            try {
+                gatt.disconnect()
+                Thread.sleep(100)
+                gatt.close()
+            } catch (e: Exception) {
+                Log.e(TAG, "Disconnect error: ${e.message}")
+            }
+        }
+        bluetoothGatt = null
+        
+        dataBuffer.clear()
+        connectionStateCallback = null
+        
+        Log.d(TAG, "Manual disconnect - auto connect blocked, deviceAddress preserved: $deviceAddress")
+    }
+    
+    @SuppressLint("MissingPermission")
+    fun connectManually(address: String, onConnectionStateChange: ((Boolean) -> Unit)? = null): Boolean {
+        Log.d(TAG, "Manual connection to device: $address")
+        
+        stopScan()
+        stopHighFrequencyReconnect()
+        
+        isManualDisconnect = false
+        isAutoConnectBlocked = false
+        autoReconnect = true
+        highFrequencyReconnect = true
+        return connect(address, onConnectionStateChange)
+    }
+    
+    @SuppressLint("MissingPermission")
+    fun closeManually() {
+        Log.d(TAG, "Manual close - will restore auto reconnect")
+        
+        isConnected = false
+        isManualDisconnect = false
+        isAutoConnectBlocked = false
+        bluetoothGatt?.let { gatt ->
+            try {
+                gatt.disconnect()
+                gatt.close()
+            } catch (e: Exception) {
+                Log.e(TAG, "Close error: ${e.message}")
+            }
+        }
+        bluetoothGatt = null
+        deviceAddress = null
+        
+        autoReconnect = true
+        highFrequencyReconnect = true
+        
+        Log.d(TAG, "Auto reconnect mechanism restored and GATT cleaned up")
     }
 
 
@@ -389,10 +465,15 @@ class BLEClient(private val context: Context) : BluetoothGattCallback() {
             BluetoothProfile.STATE_CONNECTED -> {
                 isConnected = true
                 isReconnecting = false
+                isManualDisconnect = false
                 connectionAttempts = 0
                 Log.i(TAG, "Connected to GATT server")
 
                 handler.post { connectionStateCallback?.invoke(true) }
+                
+                deviceAddress?.let { address ->
+                    handler.post { connectionSuccessCallback?.invoke(address) }
+                }
 
                 handler.post {
                     try {
@@ -406,16 +487,19 @@ class BLEClient(private val context: Context) : BluetoothGattCallback() {
             BluetoothProfile.STATE_DISCONNECTED -> {
                 isConnected = false
                 isReconnecting = false
-                Log.i(TAG, "Disconnected from GATT server")
+                Log.i(TAG, "Disconnected from GATT server, manual=$isManualDisconnect")
 
-                handler.post { connectionStateCallback?.invoke(false) }
-
-
-                if (!deviceAddress.isNullOrBlank() && autoReconnect) {
-                    handler.post {
-                        Log.d(TAG, "Immediate reconnection after disconnect")
-                        connect(deviceAddress!!, connectionStateCallback)
+                handler.post { 
+                    connectionStateCallback?.invoke(false)
+                    if (!isManualDisconnect) {
+                        connectionLostCallback?.invoke()
                     }
+                }
+
+                if (!deviceAddress.isNullOrBlank() && autoReconnect && highFrequencyReconnect && !isManualDisconnect) {
+                    startHighFrequencyReconnect(deviceAddress!!)
+                } else if (isManualDisconnect) {
+                    Log.d(TAG, "Manual disconnect - no auto reconnect")
                 }
             }
         }
@@ -630,6 +714,86 @@ class BLEClient(private val context: Context) : BluetoothGattCallback() {
         Log.d(TAG, "Auto reconnect set to: $enabled")
     }
     
+    fun setHighFrequencyReconnect(enabled: Boolean) {
+        highFrequencyReconnect = enabled
+        if (!enabled) {
+            stopHighFrequencyReconnect()
+        }
+        Log.d(TAG, "High frequency reconnect set to: $enabled")
+    }
+    
+    fun setConnectionLostCallback(callback: (() -> Unit)?) {
+        connectionLostCallback = callback
+    }
+    
+    fun setConnectionSuccessCallback(callback: ((String) -> Unit)?) {
+        connectionSuccessCallback = callback
+    }
+    
+    fun setSpecifiedDeviceAddress(address: String?) {
+        specifiedDeviceAddress = address
+        Log.d(TAG, "Set specified device address: $address")
+    }
+    
+    fun getSpecifiedDeviceAddress(): String? = specifiedDeviceAddress
+    
+    fun setDialogOpen(isOpen: Boolean) {
+        isDialogOpen = isOpen
+        Log.d(TAG, "Dialog open state set to: $isOpen")
+    }
+
+    fun setAutoConnectBlocked(blocked: Boolean) {
+        isAutoConnectBlocked = blocked
+        Log.d(TAG, "Auto connect blocked set to: $blocked")
+    }
+    
+    fun resetManualDisconnectState() {
+        isManualDisconnect = false
+        isAutoConnectBlocked = false
+        Log.d(TAG, "Manual disconnect state reset - auto reconnect enabled")
+    }
+    
+    fun setTargetDeviceAddress(address: String?) {
+        targetDeviceAddress = address
+        Log.d(TAG, "Set target device address: $address")
+    }
+    
+    fun getTargetDeviceAddress(): String? = targetDeviceAddress
+    
+    private fun startHighFrequencyReconnect(address: String) {
+        stopHighFrequencyReconnect()
+        
+        Log.d(TAG, "Starting high frequency reconnect for: $address")
+        
+        reconnectRunnable = Runnable {
+            if (!isConnected && autoReconnect && highFrequencyReconnect) {
+                Log.d(TAG, "High frequency reconnect attempt ${connectionAttempts + 1} for: $address")
+                connect(address, connectionStateCallback)
+                
+                if (!isConnected) {
+                    val delay = when {
+                        connectionAttempts < 10 -> 100L
+                        connectionAttempts < 30 -> 200L
+                        connectionAttempts < 60 -> 500L
+                        else -> 1000L
+                    }
+                    
+                    reconnectHandler.postDelayed(reconnectRunnable!!, delay)
+                }
+            }
+        }
+        
+        reconnectHandler.post(reconnectRunnable!!)
+    }
+    
+    private fun stopHighFrequencyReconnect() {
+        reconnectRunnable?.let {
+            reconnectHandler.removeCallbacks(it)
+            reconnectRunnable = null
+            Log.d(TAG, "Stopped high frequency reconnect")
+        }
+    }
+    
     fun getConnectionAttempts(): Int = connectionAttempts
     
     fun getLastKnownDeviceAddress(): String? = lastKnownDeviceAddress
@@ -638,9 +802,16 @@ class BLEClient(private val context: Context) : BluetoothGattCallback() {
     fun disconnectAndCleanup() {
         isConnected = false
         autoReconnect = false
+        highFrequencyReconnect = false
+        isManualDisconnect = false
+        isAutoConnectBlocked = false
+        stopHighFrequencyReconnect()
+        stopScan()
+        
         bluetoothGatt?.let { gatt ->
             try {
                 gatt.disconnect()
+                Thread.sleep(200)
                 gatt.close()
                 Log.d(TAG, "GATT connection cleaned up")
             } catch (e: Exception) {
@@ -650,6 +821,14 @@ class BLEClient(private val context: Context) : BluetoothGattCallback() {
         bluetoothGatt = null
         deviceAddress = null
         connectionAttempts = 0
+        
+        dataBuffer.clear()
+        connectionStateCallback = null
+        statusCallback = null
+        trainInfoCallback = null
+        connectionLostCallback = null
+        connectionSuccessCallback = null
+        
         Log.d(TAG, "BLE client fully disconnected and cleaned up")
     }
 }

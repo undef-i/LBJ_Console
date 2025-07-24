@@ -31,7 +31,10 @@ fun SettingsScreen(
     mergeSettings: MergeSettings,
     onMergeSettingsChange: (MergeSettings) -> Unit,
     scrollPosition: Int = 0,
-    onScrollPositionChange: (Int) -> Unit = {}
+    onScrollPositionChange: (Int) -> Unit = {},
+    specifiedDeviceAddress: String? = null,
+    searchOrderList: List<String> = emptyList(),
+    onSpecifiedDeviceSelected: (String?) -> Unit = {}
 ) {
     val uriHandler = LocalUriHandler.current
     val scrollState = rememberScrollState()
@@ -95,6 +98,69 @@ fun SettingsScreen(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp)
                 )
+                
+                if (searchOrderList.isNotEmpty()) {
+                    var deviceAddressExpanded by remember { mutableStateOf(false) }
+                    
+                    ExposedDropdownMenuBox(
+                        expanded = deviceAddressExpanded,
+                        onExpandedChange = { deviceAddressExpanded = !deviceAddressExpanded }
+                    ) {
+                        OutlinedTextField(
+                            value = specifiedDeviceAddress ?: "无",
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("指定设备地址") },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Default.LocationOn,
+                                    contentDescription = null
+                                )
+                            },
+                            trailingIcon = {
+                                ExposedDropdownMenuDefaults.TrailingIcon(expanded = deviceAddressExpanded)
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .menuAnchor(),
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                        ExposedDropdownMenu(
+                            expanded = deviceAddressExpanded,
+                            onDismissRequest = { deviceAddressExpanded = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("无") },
+                                onClick = {
+                                    onSpecifiedDeviceSelected(null)
+                                    deviceAddressExpanded = false
+                                }
+                            )
+                            searchOrderList.forEach { address ->
+                                DropdownMenuItem(
+                                    text = { 
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(address)
+                                            if (address == specifiedDeviceAddress) {
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                Icon(
+                                                    imageVector = Icons.Default.Check,
+                                                    contentDescription = "已指定",
+                                                    tint = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
+                                        }
+                                    },
+                                    onClick = {
+                                        onSpecifiedDeviceSelected(address)
+                                        deviceAddressExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
         
@@ -237,7 +303,7 @@ fun SettingsScreen(
                  .fillMaxWidth()
                  .clip(RoundedCornerShape(12.dp))
                  .clickable {
-                     uriHandler.openUri("https://github.com/undef-i")
+                     uriHandler.openUri("https://github.com/undef-i/LBJ_Console")
                  }
                  .padding(12.dp)
          )
