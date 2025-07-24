@@ -24,12 +24,14 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.filled.LocationOn
@@ -55,7 +57,7 @@ import org.noxylva.lbjconsole.model.TrainRecord
 import org.noxylva.lbjconsole.model.TrainRecordManager
 import org.noxylva.lbjconsole.model.MergeSettings
 import org.noxylva.lbjconsole.ui.screens.HistoryScreen
-import org.noxylva.lbjconsole.ui.screens.MergedHistoryScreen
+
 import org.noxylva.lbjconsole.ui.screens.MapScreen
 import org.noxylva.lbjconsole.ui.screens.SettingsScreen
 
@@ -74,7 +76,7 @@ class MainActivity : ComponentActivity() {
     
     
     private var deviceStatus by mutableStateOf("未连接")
-    private var deviceAddress by mutableStateOf("")
+    private var deviceAddress by mutableStateOf<String?>(null)
     private var isScanning by mutableStateOf(false)
     private var foundDevices by mutableStateOf(listOf<BluetoothDevice>())
     private var scanResults = mutableListOf<ScanResult>()
@@ -82,7 +84,7 @@ class MainActivity : ComponentActivity() {
     private var showConnectionDialog by mutableStateOf(false)
     private var lastUpdateTime by mutableStateOf<Date?>(null)
     private var latestRecord by mutableStateOf<TrainRecord?>(null)
-    private var recentRecords by mutableStateOf<List<TrainRecord>>(emptyList())
+    private var recentRecords = mutableStateListOf<TrainRecord>()
     
     
     private var filterTrain by mutableStateOf("")
@@ -110,6 +112,9 @@ class MainActivity : ComponentActivity() {
 
     
     private var targetDeviceName = "LBJReceiver"
+    private var specifiedDeviceAddress by mutableStateOf<String?>(null)
+    private var searchOrderList by mutableStateOf(listOf<String>())
+    private var showDisconnectButton by mutableStateOf(false)
     
     
     private val settingsPrefs by lazy { getSharedPreferences("app_settings", Context.MODE_PRIVATE) }
@@ -204,6 +209,27 @@ class MainActivity : ComponentActivity() {
             handleTrainInfo(jsonData)
         }
         
+        bleClient.setHighFrequencyReconnect(true)
+        bleClient.setConnectionLostCallback {
+            runOnUiThread {
+                deviceStatus = "连接丢失，正在重连..."
+                showDisconnectButton = false
+                if (showConnectionDialog) {
+                    foundDevices = emptyList()
+                    startScan()
+                }
+            }
+        }
+        
+        bleClient.setConnectionSuccessCallback { address ->
+            runOnUiThread {
+                deviceAddress = address
+                deviceStatus = "已连接"
+                showDisconnectButton = true
+                Log.d(TAG, "Connection success callback: address=$address")
+            }
+        }
+        
         
         lifecycleScope.launch {
             try {
@@ -227,8 +253,8 @@ class MainActivity : ComponentActivity() {
                 osmdroidBasePath = osmCacheDir
                 osmdroidTileCache = tileCache
                 expirationOverrideDuration = 86400000L * 7 
-                tileDownloadThreads = 2
-                tileFileSystemThreads = 2
+                tileDownloadThreads = 4
+                tileFileSystemThreads = 4
                 
                 setUserAgentValue("LBJReceiver/1.0")
             }
@@ -259,7 +285,24 @@ class MainActivity : ComponentActivity() {
                             currentTab = tab
                             saveSettings()
                         },
-                        onConnectClick = { showConnectionDialog = true },
+                        onConnectClick = { 
+                            showConnectionDialog = true
+                        },
+                        onDisconnectClick = {
+                            bleClient.disconnectAndCleanup()
+                            showDisconnectButton = false
+                            deviceStatus = "已断开连接"
+                            Log.d(TAG, "User disconnected device")
+                        },
+                        showDisconnectButton = showDisconnectButton,
+                        specifiedDeviceAddress = specifiedDeviceAddress,
+                        searchOrderList = searchOrderList,
+                        onSpecifiedDeviceSelected = { address ->
+                            specifiedDeviceAddress = address
+                            bleClient.setSpecifiedDeviceAddress(address)
+                            saveSettings()
+                            Log.d(TAG, "Set specified device address: $address")
+                        },
                         
                         
                         latestRecord = latestRecord,
@@ -270,7 +313,7 @@ class MainActivity : ComponentActivity() {
                             Log.d(TAG, "Record clicked train=${record.train}")
                         },
                         onClearMonitorLog = {
-                            recentRecords = emptyList()
+                            recentRecords.clear()
                             temporaryStatusMessage = null
                         },
                         
@@ -337,7 +380,7 @@ class MainActivity : ComponentActivity() {
                         onClearRecords = {
                             scope.launch {
                                 trainRecordManager.clearRecords()
-                                recentRecords = emptyList()
+                                recentRecords.clear()
                                 latestRecord = null
                                 temporaryStatusMessage = null
                             }
@@ -367,12 +410,24 @@ class MainActivity : ComponentActivity() {
                     )
                     
                     if (showConnectionDialog) {
+                        LaunchedEffect(showConnectionDialog) {
+                            bleClient.setDialogOpen(true)
+                            if (!bleClient.isConnected() && !isScanning) {
+                                foundDevices = emptyList()
+                                startScan()
+                            }
+                        }
+                        
                         ConnectionDialog(
                             isScanning = isScanning,
                             devices = foundDevices,
                             onDismiss = {
                                 showConnectionDialog = false
                                 stopScan()
+                                bleClient.resetManualDisconnectState()
+                                if (!bleClient.isConnected()) {
+                                    startAutoScanAndConnect()
+                                }
                             },
                             onScan = {
                                 if (isScanning) {
@@ -383,9 +438,25 @@ class MainActivity : ComponentActivity() {
                             },
                             onConnect = { device ->
                                 showConnectionDialog = false
-                                connectToDevice(device)
-                            }
+                                bleClient.setDialogOpen(false)
+                                connectToDeviceManually(device)
+                            },
+                            onDisconnect = {
+                                bleClient.disconnect()
+                                deviceStatus = "已断开连接"
+                                deviceAddress = null
+                                showDisconnectButton = false
+                                Log.d(TAG, "Disconnected from device")
+                                startScan()
+                            },
+                            isConnected = bleClient.isConnected(),
+                            targetDeviceName = settingsDeviceName,
+                            deviceAddress = deviceAddress
                         )
+                    } else {
+                        LaunchedEffect(showConnectionDialog) {
+                            bleClient.setDialogOpen(false)
+                        }
                     }
                     
 
@@ -396,6 +467,7 @@ class MainActivity : ComponentActivity() {
     
     
     private fun connectToDevice(device: BluetoothDevice) {
+        bleClient.setAutoConnectBlocked(false)
         deviceStatus = "正在连接..."
         Log.d(TAG, "Connecting to device name=${device.name ?: "Unknown"} address=${device.address}")
         
@@ -412,10 +484,55 @@ class MainActivity : ComponentActivity() {
                 if (connected) {
                     deviceStatus = "已连接"
                     temporaryStatusMessage = null
+                    showDisconnectButton = true
+                    
+                    val newOrderList = listOf(device.address) + searchOrderList.filter { it != device.address }
+                    searchOrderList = newOrderList.take(10)
+                    saveSettings()
+                    Log.d(TAG, "Updated search order list with: ${device.address}")
+                    
                     Log.d(TAG, "Connected to device name=${device.name ?: "Unknown"}")
                 } else {
                     deviceStatus = "连接失败，正在重试..."
+                    showDisconnectButton = false
                     Log.e(TAG, "Connection failed, auto-retry enabled for name=${device.name ?: "Unknown"}")
+                }
+            }
+        }
+        
+        deviceAddress = device.address
+    }
+    
+    private fun connectToDeviceManually(device: BluetoothDevice) {
+        bleClient.setAutoConnectBlocked(false)
+        deviceStatus = "正在连接..."
+        Log.d(TAG, "Manually connecting to device name=${device.name ?: "Unknown"} address=${device.address}")
+        
+        val bluetoothManager = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
+        val bluetoothAdapter = bluetoothManager.adapter
+        if (bluetoothAdapter == null || bluetoothAdapter.isEnabled != true) {
+            deviceStatus = "蓝牙未启用"
+            Log.e(TAG, "Bluetooth adapter unavailable or disabled")
+            return
+        }
+        
+        bleClient.connectManually(device.address) { connected ->
+            runOnUiThread {
+                if (connected) {
+                    deviceStatus = "已连接"
+                    temporaryStatusMessage = null
+                    showDisconnectButton = true
+                    
+                    val newOrderList = listOf(device.address) + searchOrderList.filter { it != device.address }
+                    searchOrderList = newOrderList.take(10)
+                    saveSettings()
+                    Log.d(TAG, "Updated search order list with: ${device.address}")
+                    
+                    Log.d(TAG, "Manually connected to device name=${device.name ?: "Unknown"}")
+                } else {
+                    deviceStatus = "连接失败"
+                    showDisconnectButton = false
+                    Log.e(TAG, "Manual connection failed for name=${device.name ?: "Unknown"}")
                 }
             }
         }
@@ -445,10 +562,11 @@ class MainActivity : ComponentActivity() {
                     
                     latestRecord = record
                     
-                    val newList = mutableListOf<TrainRecord>()
-                    newList.add(record)
-                    newList.addAll(recentRecords.filterNot { it.train == record.train && it.time == record.time }) 
-                    recentRecords = newList.take(10)
+                    recentRecords.removeAll { it.train == record.train && it.time == record.time }
+                    recentRecords.add(0, record)
+                    if (recentRecords.size > 10) {
+                        recentRecords.removeRange(10, recentRecords.size)
+                    }
 
                     Log.d(TAG, "Updated UI train=${record.train}")
                     forceUiRefresh()
@@ -544,17 +662,20 @@ class MainActivity : ComponentActivity() {
         
         isScanning = true
         foundDevices = emptyList()
+        
         val targetDeviceName = if (settingsDeviceName.isNotBlank() && settingsDeviceName != "LBJReceiver") {
             settingsDeviceName
         } else {
             null
         }
-        Log.d(TAG, "Starting continuous BLE scan target=${targetDeviceName ?: "Any"} (settings=${settingsDeviceName})")
+        Log.d(TAG, "Starting BLE scan target=${targetDeviceName ?: "Any"} (settings=${settingsDeviceName})")
         
         bleClient.scanDevices(targetDeviceName) { device ->
-            if (!foundDevices.any { it.address == device.address }) {
-                Log.d(TAG, "Found device name=${device.name ?: "Unknown"} address=${device.address}")
-                foundDevices = foundDevices + device
+            runOnUiThread {
+                if (!foundDevices.any { it.address == device.address }) {
+                    Log.d(TAG, "Found device name=${device.name ?: "Unknown"} address=${device.address}")
+                    foundDevices = foundDevices + device
+                }
             }
         }
     }
@@ -627,7 +748,18 @@ class MainActivity : ComponentActivity() {
         
         mergeSettings = trainRecordManager.mergeSettings
         
-        Log.d(TAG, "Loaded settings deviceName=${settingsDeviceName} tab=${currentTab}")
+        specifiedDeviceAddress = settingsPrefs.getString("specified_device_address", null)
+        
+        val searchOrderStr = settingsPrefs.getString("search_order_list", "")
+        searchOrderList = if (searchOrderStr.isNullOrEmpty()) {
+            emptyList()
+        } else {
+            searchOrderStr.split(",").filter { it.isNotBlank() }
+        }
+        
+        bleClient.setSpecifiedDeviceAddress(specifiedDeviceAddress)
+        
+        Log.d(TAG, "Loaded settings deviceName=${settingsDeviceName} tab=${currentTab} specifiedDevice=${specifiedDeviceAddress} searchOrder=${searchOrderList.size}")
     }
     
     
@@ -643,6 +775,8 @@ class MainActivity : ComponentActivity() {
             .putInt("settings_scroll_position", settingsScrollPosition)
             .putFloat("map_zoom_level", mapZoomLevel.toFloat())
             .putBoolean("map_railway_visible", mapRailwayLayerVisible)
+            .putString("specified_device_address", specifiedDeviceAddress)
+            .putString("search_order_list", searchOrderList.joinToString(","))
             
         mapCenterPosition?.let { (lat, lon) ->
             editor.putFloat("map_center_lat", lat.toFloat())
@@ -657,9 +791,14 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         Log.d(TAG, "App resumed")
         
+        bleClient.setHighFrequencyReconnect(true)
+        
         if (hasBluetoothPermissions() && !bleClient.isConnected()) {
             Log.d(TAG, "App resumed and not connected, starting auto scan")
             startAutoScanAndConnect()
+        } else if (bleClient.isConnected()) {
+            showDisconnectButton = true
+            deviceStatus = "已连接"
         }
     }
     
@@ -669,6 +808,9 @@ class MainActivity : ComponentActivity() {
         if (isFinishing) {
             bleClient.disconnectAndCleanup()
             Log.d(TAG, "App finishing, BLE cleaned up")
+        } else {
+            bleClient.setHighFrequencyReconnect(false)
+            Log.d(TAG, "App paused, reduced reconnect frequency")
         }
         Log.d(TAG, "App paused, settings saved")
     }
@@ -683,6 +825,11 @@ fun MainContent(
     currentTab: Int,
     onTabChange: (Int) -> Unit,
     onConnectClick: () -> Unit,
+    onDisconnectClick: () -> Unit,
+    showDisconnectButton: Boolean,
+    specifiedDeviceAddress: String?,
+        searchOrderList: List<String>,
+        onSpecifiedDeviceSelected: (String?) -> Unit,
     
     
     latestRecord: TrainRecord?,
@@ -794,22 +941,31 @@ fun MainContent(
                 if (historyEditMode && currentTab == 0) {
                     TopAppBar(
                         title = { 
-                            val totalSelectedCount = historySelectedRecords.sumOf { selectedId ->
-                                allRecords.find { item ->
-                                    when (item) {
-                                        is TrainRecord -> item.uniqueId == selectedId
-                                        is org.noxylva.lbjconsole.model.MergedTrainRecord -> 
-                                            item.records.any { it.uniqueId == selectedId }
-                                        else -> false
-                                    }
-                                }?.let { item ->
-                                    when (item) {
-                                        is TrainRecord -> 1
-                                        is org.noxylva.lbjconsole.model.MergedTrainRecord -> item.records.size
-                                        else -> 0
-                                    }
-                                } ?: 0
+                            val totalSelectedCount = run {
+                val processedMergedRecords = mutableSetOf<String>()
+                var count = 0
+                
+                historySelectedRecords.forEach { selectedId ->
+                    val foundItem = allRecords.find { item ->
+                        when (item) {
+                            is TrainRecord -> item.uniqueId == selectedId
+                            is org.noxylva.lbjconsole.model.MergedTrainRecord -> item.records.any { it.uniqueId == selectedId }
+                            else -> false
+                        }
+                    }
+                    
+                    when (foundItem) {
+                        is TrainRecord -> count += 1
+                        is org.noxylva.lbjconsole.model.MergedTrainRecord -> {
+                            if (!processedMergedRecords.contains(foundItem.groupKey)) {
+                                count += foundItem.records.size
+                                processedMergedRecords.add(foundItem.groupKey)
                             }
+                        }
+                    }
+                }
+                count
+            }
                             Text(
                                 "已选择 $totalSelectedCount 条记录",
                                 color = MaterialTheme.colorScheme.onPrimary
@@ -833,34 +989,34 @@ fun MainContent(
                                         val recordsToDelete = mutableSetOf<TrainRecord>()
                                         val idToRecordMap = mutableMapOf<String, TrainRecord>()
                                         val idToMergedRecordMap = mutableMapOf<String, org.noxylva.lbjconsole.model.MergedTrainRecord>()
-                                        
-                                        allRecords.forEach { item ->
-                                            when (item) {
-                                                is TrainRecord -> {
-                                                    idToRecordMap[item.uniqueId] = item
-                                                }
-                                                is org.noxylva.lbjconsole.model.MergedTrainRecord -> {
-                                                    item.records.forEach { record ->
-                                                        idToRecordMap[record.uniqueId] = record
-                                                        idToMergedRecordMap[record.uniqueId] = item
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        
-                                        val processedMergedRecords = mutableSetOf<org.noxylva.lbjconsole.model.MergedTrainRecord>()
-                                        
-                                        historySelectedRecords.forEach { selectedId ->
-                                            val mergedRecord = idToMergedRecordMap[selectedId]
-                                            if (mergedRecord != null && !processedMergedRecords.contains(mergedRecord)) {
-                                                recordsToDelete.addAll(mergedRecord.records)
-                                                processedMergedRecords.add(mergedRecord)
-                                            } else if (mergedRecord == null) {
-                                                idToRecordMap[selectedId]?.let { record ->
-                                                    recordsToDelete.add(record)
-                                                }
-                                            }
-                                        }
+                        
+                        allRecords.forEach { item ->
+                            when (item) {
+                                is TrainRecord -> {
+                                    idToRecordMap[item.uniqueId] = item
+                                }
+                                is org.noxylva.lbjconsole.model.MergedTrainRecord -> {
+                                    item.records.forEach { record ->
+                                        idToRecordMap[record.uniqueId] = record
+                                        idToMergedRecordMap[record.uniqueId] = item
+                                    }
+                                }
+                            }
+                        }
+                        
+                        val processedMergedRecordKeys = mutableSetOf<String>()
+                        
+                        historySelectedRecords.forEach { selectedId ->
+                            val mergedRecord = idToMergedRecordMap[selectedId]
+                            if (mergedRecord != null && !processedMergedRecordKeys.contains(mergedRecord.groupKey)) {
+                                recordsToDelete.addAll(mergedRecord.records)
+                                processedMergedRecordKeys.add(mergedRecord.groupKey)
+                            } else if (mergedRecord == null) {
+                                idToRecordMap[selectedId]?.let { record ->
+                                    recordsToDelete.add(record)
+                                }
+                            }
+                        }
                                         
                                         onDeleteRecords(recordsToDelete.toList())
                                         onHistoryStateChange(false, emptySet(), historyExpandedStates, historyScrollPosition, historyScrollOffset)
@@ -940,7 +1096,10 @@ fun MainContent(
                     mergeSettings = mergeSettings,
                     onMergeSettingsChange = onMergeSettingsChange,
                     scrollPosition = settingsScrollPosition,
-                    onScrollPositionChange = onSettingsScrollPositionChange
+                    onScrollPositionChange = onSettingsScrollPositionChange,
+                    specifiedDeviceAddress = specifiedDeviceAddress,
+                    searchOrderList = searchOrderList,
+                    onSpecifiedDeviceSelected = onSpecifiedDeviceSelected
                 )
                 3 -> MapScreen(
                     records = if (allRecords.isNotEmpty()) {
@@ -973,7 +1132,11 @@ fun ConnectionDialog(
     devices: List<BluetoothDevice>,
     onDismiss: () -> Unit,
     onScan: () -> Unit,
-    onConnect: (BluetoothDevice) -> Unit
+    onConnect: (BluetoothDevice) -> Unit,
+    onDisconnect: () -> Unit = {},
+    isConnected: Boolean = false,
+    targetDeviceName: String = "LBJReceiver",
+    deviceAddress: String? = null
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -987,39 +1150,41 @@ fun ConnectionDialog(
             Column(
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Button(
-                    onClick = onScan,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (isScanning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
-                    )
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                if (!isConnected) {
+                    Button(
+                        onClick = onScan,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isScanning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                        )
                     ) {
-                        if (isScanning) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(16.dp),
-                                strokeWidth = 2.dp,
-                                color = MaterialTheme.colorScheme.onPrimary
-                            )
-                        } else {
-                            Icon(
-                                imageVector = Icons.Default.Search,
-                                contentDescription = null
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            if (isScanning) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.onPrimary
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Default.Search,
+                                    contentDescription = null
+                                )
+                            }
+                            Text(
+                                text = "扫描设备",
+                                fontWeight = FontWeight.Medium
                             )
                         }
-                        Text(
-                            text = if (isScanning) "扫描中..." else "扫描设备",
-                            fontWeight = FontWeight.Medium
-                        )
                     }
                 }
                 
                 Spacer(modifier = Modifier.height(16.dp))
                 
-                if (devices.isNotEmpty()) {
+                if (devices.isNotEmpty() && !isConnected) {
                     Text(
                         text = "发现 ${devices.size} 个设备",
                         style = MaterialTheme.typography.titleSmall,
@@ -1031,20 +1196,39 @@ fun ConnectionDialog(
                         modifier = Modifier.heightIn(max = 200.dp),
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        items(devices) { device ->
+                        items(devices.filter { !isConnected }) { device ->
                             var isPressed by remember { mutableStateOf(false) }
+                            var isHovered by remember { mutableStateOf(false) }
                             
                             val cardScale by animateFloatAsState(
-                                targetValue = if (isPressed) 0.98f else 1f,
+                                targetValue = when {
+                                    isPressed -> 0.96f
+                                    isHovered -> 1.02f
+                                    else -> 1f
+                                },
+                                animationSpec = spring(
+                                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                                    stiffness = Spring.StiffnessLow
+                                ),
+                                label = "cardScale"
+                            )
+                            
+                            val cardElevation by animateDpAsState(
+                                targetValue = when {
+                                    isPressed -> 1.dp
+                                    isHovered -> 6.dp
+                                    else -> 2.dp
+                                },
                                 animationSpec = tween(
-                                    durationMillis = 120,
-                                    easing = LinearEasing
-                                )
+                                    durationMillis = 150,
+                                    easing = FastOutSlowInEasing
+                                ),
+                                label = "cardElevation"
                             )
                             
                             LaunchedEffect(isPressed) {
                                 if (isPressed) {
-                                    delay(100)
+                                    delay(120)
                                     isPressed = false
                                 }
                             }
@@ -1055,8 +1239,18 @@ fun ConnectionDialog(
                                     .graphicsLayer {
                                         scaleX = cardScale
                                         scaleY = cardScale
+                                    }
+                                    .pointerInput(Unit) {
+                                        detectTapGestures(
+                                            onPress = {
+                                                isPressed = true
+                                                isHovered = true
+                                                tryAwaitRelease()
+                                                isHovered = false
+                                            }
+                                        )
                                     },
-                                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                                elevation = CardDefaults.cardElevation(defaultElevation = cardElevation)
                             ) {
                                 Row(
                                     modifier = Modifier
@@ -1098,7 +1292,9 @@ fun ConnectionDialog(
                             }
                         }
                     }
-                } else if (!isScanning) {
+                } else if (isScanning && !isConnected) {
+
+                } else {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1109,25 +1305,51 @@ fun ConnectionDialog(
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             Icon(
-                                imageVector = Icons.Default.BluetoothSearching,
+                                imageVector = if (isConnected) Icons.Default.Bluetooth else Icons.Default.BluetoothSearching,
                                 contentDescription = null,
                                 modifier = Modifier.size(48.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                tint = if (isConnected) 
+                                    MaterialTheme.colorScheme.primary 
+                                else 
+                                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                             )
                             Spacer(modifier = Modifier.height(16.dp))
                             Text(
-                                text = "未发现设备",
+                                text = if (isConnected) "设备已连接" else "未发现设备",
                                 style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = if (isConnected) 
+                                    MaterialTheme.colorScheme.primary 
+                                else 
+                                    MaterialTheme.colorScheme.onSurfaceVariant,
                                 textAlign = TextAlign.Center
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                text = "请确保设备已开启并处于可发现状态",
+                                text = if (isConnected) 
+                                    deviceAddress?.ifEmpty { "未知地址" } ?: "未知地址"
+                                else 
+                                    "请确保设备已开启并处于可发现状态",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                                 textAlign = TextAlign.Center
                             )
+                            if (isConnected) {
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Button(
+                                    onClick = onDisconnect,
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.error
+                                    )
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.BluetoothDisabled,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("断开连接")
+                                }
+                            }
                         }
                     }
                 }

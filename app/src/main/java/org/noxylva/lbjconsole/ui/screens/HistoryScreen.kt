@@ -55,42 +55,28 @@ fun TrainRecordItem(
     locoInfoUtil: LocoInfoUtil?,
     onRecordClick: (TrainRecord) -> Unit,
     onToggleSelection: (TrainRecord) -> Unit,
-    onLongClick: (TrainRecord) -> Unit
+    onLongClick: (TrainRecord) -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val recordId = record.uniqueId
     val isExpanded = expandedStatesMap[recordId] == true
     
-    val cardColor by animateColorAsState(
-        targetValue = when {
-            isSelected -> MaterialTheme.colorScheme.primaryContainer
-            else -> MaterialTheme.colorScheme.surface
-        },
-        animationSpec = tween(durationMillis = 200),
-        label = "cardColor"
-    )
+    val cardColor = when {
+        isSelected -> MaterialTheme.colorScheme.primaryContainer
+        else -> MaterialTheme.colorScheme.surface
+    }
     
-    val cardScale by animateFloatAsState(
-        targetValue = if (isSelected) 0.98f else 1f,
-        animationSpec = tween(durationMillis = 150),
-        label = "cardScale"
-    )
+    val cardScale = if (isSelected) 0.98f else 1f
     
-    val cardElevation by animateDpAsState(
-        targetValue = if (isSelected) 6.dp else 2.dp,
-        animationSpec = tween(durationMillis = 200),
-        label = "cardElevation"
-    )
+    val cardElevation = if (isSelected) 6.dp else 2.dp
 
     Card(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .graphicsLayer {
                 scaleX = cardScale
                 scaleY = cardScale
-            }
-            .animateContentSize(
-                animationSpec = tween(durationMillis = 150, easing = LinearEasing)
-            ),
+            },
         elevation = CardDefaults.cardElevation(defaultElevation = cardElevation),
         colors = CardDefaults.cardColors(
             containerColor = cardColor
@@ -290,18 +276,15 @@ fun TrainRecordItem(
                         )
                     }
                 }
-
+                Spacer(modifier = Modifier.height(8.dp))
                 AnimatedVisibility(
                     visible = isExpanded,
-                    enter = expandVertically(animationSpec = tween(durationMillis = 300)) + fadeIn(animationSpec = tween(durationMillis = 300)),
-                    exit = shrinkVertically(animationSpec = tween(durationMillis = 300)) + fadeOut(animationSpec = tween(durationMillis = 300))
+                    enter = expandVertically(animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)) + fadeIn(animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)),
+                    exit = shrinkVertically(animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)) + fadeOut(animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow))
                 ) {
                     Column {
                         val coordinates = remember { record.getCoordinates() }
 
-                        if (coordinates != null) {
-                            Spacer(modifier = Modifier.height(8.dp))
-                        }
 
                         if (coordinates != null) {
                             Box(
@@ -413,7 +396,8 @@ fun MergedTrainRecordItem(
     isInEditMode: Boolean = false,
     selectedRecords: List<TrainRecord> = emptyList(),
     onToggleSelection: (TrainRecord) -> Unit = {},
-    onLongClick: (TrainRecord) -> Unit = {}
+    onLongClick: (TrainRecord) -> Unit = {},
+    modifier: Modifier = Modifier
 ) {
     val recordId = mergedRecord.groupKey
     val isExpanded = expandedStatesMap[recordId] == true
@@ -421,37 +405,22 @@ fun MergedTrainRecordItem(
     
     val hasSelectedRecords = mergedRecord.records.any { selectedRecords.contains(it) }
     
-    val cardColor by animateColorAsState(
-        targetValue = when {
-            hasSelectedRecords -> MaterialTheme.colorScheme.primaryContainer
-            else -> MaterialTheme.colorScheme.surface
-        },
-        animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
-        label = "mergedCardColor"
-    )
+    val cardColor = when {
+        hasSelectedRecords -> MaterialTheme.colorScheme.primaryContainer
+        else -> MaterialTheme.colorScheme.surface
+    }
     
-    val cardScale by animateFloatAsState(
-        targetValue = if (hasSelectedRecords) 0.98f else 1f,
-        animationSpec = tween(durationMillis = 150, easing = LinearEasing),
-        label = "mergedCardScale"
-    )
+    val cardScale = if (hasSelectedRecords) 0.98f else 1f
     
-    val cardElevation by animateDpAsState(
-        targetValue = if (hasSelectedRecords) 6.dp else 2.dp,
-        animationSpec = tween(durationMillis = 200, easing = LinearEasing),
-        label = "mergedCardElevation"
-    )
+    val cardElevation = if (hasSelectedRecords) 6.dp else 2.dp
 
     Card(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .graphicsLayer {
                 scaleX = cardScale
                 scaleY = cardScale
-            }
-            .animateContentSize(
-                animationSpec = tween(durationMillis = 150, easing = LinearEasing)
-            ),
+            },
         elevation = CardDefaults.cardElevation(defaultElevation = cardElevation),
         colors = CardDefaults.cardColors(
             containerColor = cardColor
@@ -661,15 +630,18 @@ fun MergedTrainRecordItem(
                         )
                     }
                 }
+                Spacer(modifier = Modifier.height(8.dp))
+                AnimatedVisibility(
+                    visible = isExpanded,
+                    enter = expandVertically(animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)) + fadeIn(animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)),
+                    exit = shrinkVertically(animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)) + fadeOut(animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow))
+                ) {
+                    Column {
+                        val coordinates = remember { latestRecord.getCoordinates() }
 
-                if (isExpanded) {
-                    val coordinates = remember { latestRecord.getCoordinates() }
 
-                    if (coordinates != null) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                    }
 
-                    if (coordinates != null) {
+                        if (coordinates != null) {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -752,22 +724,22 @@ fun MergedTrainRecordItem(
                                 },
                                 update = { mapView -> mapView.invalidate() }
                             )
+                            }
                         }
-                    }
-                    if (recordMap.containsKey("position_info")) {
+                        if (recordMap.containsKey("position_info")) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = recordMap["position_info"] ?: "",
+                                fontSize = 14.sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        
                         Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = recordMap["position_info"] ?: "",
-                            fontSize = 14.sp,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                    
-                    Spacer(modifier = Modifier.height(8.dp))
-                    HorizontalDivider()
-                    Spacer(modifier = Modifier.height(8.dp))
-                    
-                    mergedRecord.records.filter { it != mergedRecord.latestRecord }.forEach { recordItem ->
+                        HorizontalDivider()
+                        Spacer(modifier = Modifier.height(8.dp))
+                        
+                        mergedRecord.records.filter { it != mergedRecord.latestRecord }.forEach { recordItem ->
                         val timeFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
                         
                         Column(
@@ -857,6 +829,7 @@ fun MergedTrainRecordItem(
                                         fontSize = 11.sp,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
+                                }
                                 }
                             }
                         }
@@ -1020,6 +993,7 @@ fun HistoryScreen(
                             when (item) {
                                 is TrainRecord -> {
                                     TrainRecordItem(
+                                        modifier = Modifier,
                                         record = item,
                                         isSelected = selectedRecordsList.contains(item),
                                         isInEditMode = isInEditMode,
@@ -1045,6 +1019,7 @@ fun HistoryScreen(
                                 }
                                 is MergedTrainRecord -> {
                                     MergedTrainRecordItem(
+                                        modifier = Modifier,
                                         mergedRecord = item,
                                         expandedStatesMap = expandedStatesMap,
                                         locoInfoUtil = locoInfoUtil,

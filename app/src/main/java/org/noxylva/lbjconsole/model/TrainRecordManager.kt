@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.os.Environment
 import android.util.Log
+import kotlinx.coroutines.*
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -26,13 +27,16 @@ class TrainRecordManager(private val context: Context) {
     private val trainRecords = CopyOnWriteArrayList<TrainRecord>()
     private val recordCount = AtomicInteger(0)
     private val prefs: SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    private val ioScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     
     var mergeSettings = MergeSettings()
         private set
     
     init {
-        loadRecords()
-        loadMergeSettings()
+        ioScope.launch {
+            loadRecords()
+            loadMergeSettings()
+        }
     }
     
     
@@ -145,15 +149,17 @@ class TrainRecordManager(private val context: Context) {
     }
     
     private fun saveRecords() {
-        try {
-            val jsonArray = JSONArray()
-            for (record in trainRecords) {
-                jsonArray.put(record.toJSON())
+        ioScope.launch {
+            try {
+                val jsonArray = JSONArray()
+                for (record in trainRecords) {
+                    jsonArray.put(record.toJSON())
+                }
+                prefs.edit().putString(KEY_RECORDS, jsonArray.toString()).apply()
+                Log.d(TAG, "Saved ${trainRecords.size} records")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to save records: ${e.message}")
             }
-            prefs.edit().putString(KEY_RECORDS, jsonArray.toString()).apply()
-            Log.d(TAG, "Saved ${trainRecords.size} records")
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to save records: ${e.message}")
         }
     }
     
@@ -258,16 +264,18 @@ class TrainRecordManager(private val context: Context) {
     }
     
     private fun saveMergeSettings() {
-        try {
-            val json = JSONObject().apply {
-                put("enabled", mergeSettings.enabled)
-                put("groupBy", mergeSettings.groupBy.name)
-                put("timeWindow", mergeSettings.timeWindow.name)
+        ioScope.launch {
+            try {
+                val json = JSONObject().apply {
+                    put("enabled", mergeSettings.enabled)
+                    put("groupBy", mergeSettings.groupBy.name)
+                    put("timeWindow", mergeSettings.timeWindow.name)
+                }
+                prefs.edit().putString(KEY_MERGE_SETTINGS, json.toString()).apply()
+                Log.d(TAG, "Saved merge settings")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to save merge settings: ${e.message}")
             }
-            prefs.edit().putString(KEY_MERGE_SETTINGS, json.toString()).apply()
-            Log.d(TAG, "Saved merge settings")
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to save merge settings: ${e.message}")
         }
     }
     
