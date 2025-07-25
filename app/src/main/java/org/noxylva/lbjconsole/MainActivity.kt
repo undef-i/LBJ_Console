@@ -639,10 +639,10 @@ class MainActivity : ComponentActivity() {
         
         bleClient.setAutoReconnect(true)
         
-        val targetDeviceName = if (settingsDeviceName.isNotBlank() && settingsDeviceName != "LBJReceiver") {
+        val targetDeviceName = if (settingsDeviceName.isNotBlank()) {
             settingsDeviceName
         } else {
-            "LBJReceiver"
+            null
         }
         
         Log.d(TAG, "Auto scanning for target device: $targetDeviceName")
@@ -680,7 +680,7 @@ class MainActivity : ComponentActivity() {
         isScanning = true
         foundDevices = emptyList()
         
-        val targetDeviceName = if (settingsDeviceName.isNotBlank() && settingsDeviceName != "LBJReceiver") {
+        val targetDeviceName = if (settingsDeviceName.isNotBlank()) {
             settingsDeviceName
         } else {
             null
