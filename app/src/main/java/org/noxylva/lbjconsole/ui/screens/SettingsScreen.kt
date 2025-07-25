@@ -20,6 +20,7 @@ import org.noxylva.lbjconsole.model.GroupBy
 import org.noxylva.lbjconsole.model.TimeWindow
 import org.noxylva.lbjconsole.SettingsActivity
 import org.noxylva.lbjconsole.BackgroundService
+import org.noxylva.lbjconsole.NotificationService
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.LaunchedEffect
@@ -199,6 +200,11 @@ fun SettingsScreen(
                     mutableStateOf(SettingsActivity.isBackgroundServiceEnabled(context))
                 }
                 
+                val notificationService = remember { NotificationService(context) }
+                var notificationEnabled by remember {
+                    mutableStateOf(notificationService.isNotificationEnabled())
+                }
+                
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -227,6 +233,32 @@ fun SettingsScreen(
                             } else {
                                 BackgroundService.stopService(context)
                             }
+                        }
+                    )
+                }
+                
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            "LBJ消息通知",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Text(
+                            "实时接收列车LBJ消息通知",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = notificationEnabled,
+                        onCheckedChange = { enabled ->
+                            notificationEnabled = enabled
+                            notificationService.setNotificationEnabled(enabled)
                         }
                     )
                 }
