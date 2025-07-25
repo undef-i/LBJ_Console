@@ -74,6 +74,7 @@ class MainActivity : ComponentActivity() {
     private val bleClient by lazy { BLEClient(this) }
     private val trainRecordManager by lazy { TrainRecordManager(this) }
     private val locoInfoUtil by lazy { LocoInfoUtil(this) }
+    private val notificationService by lazy { NotificationService(this) }
     
     
     private var deviceStatus by mutableStateOf("未连接")
@@ -202,6 +203,10 @@ class MainActivity : ComponentActivity() {
             Manifest.permission.ACCESS_FINE_LOCATION,
             Manifest.permission.ACCESS_COARSE_LOCATION
         ))
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            permissions.add(Manifest.permission.POST_NOTIFICATIONS)
+        }
         
         requestPermissions.launch(permissions.toTypedArray())
         
@@ -568,6 +573,9 @@ class MainActivity : ComponentActivity() {
                     val record = trainRecordManager.addRecord(jsonData) 
                     Log.d(TAG, "Added record train=${record.train} direction=${record.direction}")
 
+                    if (notificationService.isNotificationEnabled()) {
+                        notificationService.showTrainNotification(record)
+                    }
                     
                     latestRecord = record
                     
