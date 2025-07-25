@@ -66,24 +66,7 @@ class BLEClient(private val context: Context) : BluetoothGattCallback() {
                     deviceName != null && deviceName.equals(targetDeviceName, ignoreCase = true)
                 }
                 else -> {
-                    deviceName != null && (
-                        deviceName.contains("LBJ", ignoreCase = true) ||
-                        deviceName.contains("Receiver", ignoreCase = true) ||
-                        deviceName.contains("Train", ignoreCase = true) ||
-                        deviceName.contains("Console", ignoreCase = true) ||
-                        deviceName.contains("ESP", ignoreCase = true) ||
-                        deviceName.contains("Arduino", ignoreCase = true) ||
-                        deviceName.contains("BLE", ignoreCase = true) ||
-                        deviceName.contains("UART", ignoreCase = true) ||
-                        deviceName.contains("Serial", ignoreCase = true)
-                    ) && !(
-                        deviceName.contains("Midea", ignoreCase = true) ||
-                        deviceName.contains("TV", ignoreCase = true) ||
-                        deviceName.contains("Phone", ignoreCase = true) ||
-                        deviceName.contains("Watch", ignoreCase = true) ||
-                        deviceName.contains("Headset", ignoreCase = true) ||
-                        deviceName.contains("Speaker", ignoreCase = true)
-                    )
+                    true
                 }
             }
             
