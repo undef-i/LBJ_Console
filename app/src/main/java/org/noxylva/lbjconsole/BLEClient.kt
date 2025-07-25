@@ -437,6 +437,7 @@ class BLEClient(private val context: Context) : BluetoothGattCallback() {
                 try {
                     gatt.close()
                     bluetoothGatt = null
+                    bluetoothLeScanner = null
 
                     deviceAddress?.let { address ->
                         if (autoReconnect) {
@@ -819,6 +820,7 @@ class BLEClient(private val context: Context) : BluetoothGattCallback() {
             }
         }
         bluetoothGatt = null
+        bluetoothLeScanner = null
         deviceAddress = null
         connectionAttempts = 0
         
