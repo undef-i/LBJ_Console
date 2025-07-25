@@ -47,6 +47,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import kotlinx.coroutines.delay
@@ -61,7 +62,7 @@ import org.noxylva.lbjconsole.ui.screens.HistoryScreen
 import org.noxylva.lbjconsole.ui.screens.MapScreen
 import org.noxylva.lbjconsole.ui.screens.SettingsScreen
 
-import org.noxylva.lbjconsole.ui.theme.LBJReceiverTheme
+import org.noxylva.lbjconsole.ui.theme.LBJConsoleTheme
 import org.noxylva.lbjconsole.util.LocoInfoUtil
 import java.util.*
 import androidx.lifecycle.lifecycleScope
@@ -256,7 +257,7 @@ class MainActivity : ComponentActivity() {
                 tileDownloadThreads = 4
                 tileFileSystemThreads = 4
                 
-                setUserAgentValue("LBJReceiver/1.0")
+                setUserAgentValue("LBJConsole/1.0")
             }
             
             Log.d(TAG, "OSM cache configured")
@@ -266,13 +267,17 @@ class MainActivity : ComponentActivity() {
         
         saveSettings()
         
+        if (SettingsActivity.isBackgroundServiceEnabled(this)) {
+            BackgroundService.startService(this)
+        }
+        
         enableEdgeToEdge()
         
         WindowCompat.getInsetsController(window, window.decorView).apply {
             isAppearanceLightStatusBars = false
         }
         setContent {
-            LBJReceiverTheme {
+            LBJConsoleTheme {
                 val scope = rememberCoroutineScope()
                 
                 Surface(modifier = Modifier.fillMaxSize()) {
@@ -406,7 +411,11 @@ class MainActivity : ComponentActivity() {
                             Log.d(TAG, "Applied settings deviceName=${settingsDeviceName}")
                         },
                         appVersion = getAppVersion(),
-                        locoInfoUtil = locoInfoUtil
+                        locoInfoUtil = locoInfoUtil,
+                        onOpenSettings = {
+                            val intent = Intent(this@MainActivity, SettingsActivity::class.java)
+                            startActivity(intent)
+                        }
                     )
                     
                     if (showConnectionDialog) {
@@ -879,7 +888,9 @@ fun MainContent(
     mapCenterPosition: Pair<Double, Double>?,
     mapZoomLevel: Double,
     mapRailwayLayerVisible: Boolean,
-    onMapStateChange: (Pair<Double, Double>?, Double, Boolean) -> Unit
+    onMapStateChange: (Pair<Double, Double>?, Double, Boolean) -> Unit,
+    
+    onOpenSettings: () -> Unit
 ) {
     val statusColor = if (isConnected) Color(0xFF4CAF50) else Color(0xFFFF5722)
     

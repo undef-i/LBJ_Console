@@ -81,7 +81,7 @@ dependencies {
     debugImplementation(libs.androidx.ui.test.manifest)
     implementation("org.json:json:20231013")
     implementation("androidx.compose.material:material-icons-extended:1.5.4")
-    
+    implementation("androidx.appcompat:appcompat:1.6.1")
     
     implementation("org.osmdroid:osmdroid-android:6.1.16")
     implementation("org.osmdroid:osmdroid-mapsforge:6.1.16")

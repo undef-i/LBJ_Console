@@ -10,6 +10,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -17,6 +18,8 @@ import androidx.compose.ui.unit.dp
 import org.noxylva.lbjconsole.model.MergeSettings
 import org.noxylva.lbjconsole.model.GroupBy
 import org.noxylva.lbjconsole.model.TimeWindow
+import org.noxylva.lbjconsole.SettingsActivity
+import org.noxylva.lbjconsole.BackgroundService
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.LaunchedEffect
@@ -160,6 +163,72 @@ fun SettingsScreen(
                             }
                         }
                     }
+                }
+            }
+        }
+        
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+            ),
+            shape = RoundedCornerShape(16.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Settings,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        "应用设置",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+                
+                val context = LocalContext.current
+                var backgroundServiceEnabled by remember {
+                    mutableStateOf(SettingsActivity.isBackgroundServiceEnabled(context))
+                }
+                
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            "后台保活服务",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Text(
+                            "保持应用在后台运行",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = backgroundServiceEnabled,
+                        onCheckedChange = { enabled ->
+                            backgroundServiceEnabled = enabled
+                            SettingsActivity.setBackgroundServiceEnabled(context, enabled)
+                            
+                            if (enabled) {
+                                BackgroundService.startService(context)
+                            } else {
+                                BackgroundService.stopService(context)
+                            }
+                        }
+                    )
                 }
             }
         }

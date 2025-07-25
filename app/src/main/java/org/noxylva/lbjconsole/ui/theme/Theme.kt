@@ -24,7 +24,7 @@ private val LightColorScheme = lightColorScheme(
 )
 
 @Composable
-fun LBJReceiverTheme(
+fun LBJConsoleTheme(
     darkTheme: Boolean = true, 
     
     dynamicColor: Boolean = true,
