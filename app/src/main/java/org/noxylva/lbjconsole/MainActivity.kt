@@ -117,6 +117,7 @@ class MainActivity : ComponentActivity() {
     private var specifiedDeviceAddress by mutableStateOf<String?>(null)
     private var searchOrderList by mutableStateOf(listOf<String>())
     private var showDisconnectButton by mutableStateOf(false)
+    private var autoConnectEnabled by mutableStateOf(true)
     
     
     private val settingsPrefs by lazy { getSharedPreferences("app_settings", Context.MODE_PRIVATE) }
@@ -312,6 +313,12 @@ class MainActivity : ComponentActivity() {
                             bleClient.setSpecifiedDeviceAddress(address)
                             saveSettings()
                             Log.d(TAG, "Set specified device address: $address")
+                        },
+                        autoConnectEnabled = autoConnectEnabled,
+                        onAutoConnectEnabledChange = { enabled ->
+                            autoConnectEnabled = enabled
+                            saveSettings()
+                            Log.d(TAG, "Auto connect enabled: $enabled")
                         },
                         
                         
@@ -615,6 +622,11 @@ class MainActivity : ComponentActivity() {
 
     
     private fun startAutoScanAndConnect() {
+        if (!autoConnectEnabled) {
+            Log.d(TAG, "Auto connect disabled, skipping auto scan")
+            return
+        }
+        
         Log.d(TAG, "Starting auto scan and connect")
         
         if (!hasBluetoothPermissions()) {
@@ -774,9 +786,11 @@ class MainActivity : ComponentActivity() {
             searchOrderStr.split(",").filter { it.isNotBlank() }
         }
         
+        autoConnectEnabled = settingsPrefs.getBoolean("auto_connect_enabled", true)
+        
         bleClient.setSpecifiedDeviceAddress(specifiedDeviceAddress)
         
-        Log.d(TAG, "Loaded settings deviceName=${settingsDeviceName} tab=${currentTab} specifiedDevice=${specifiedDeviceAddress} searchOrder=${searchOrderList.size}")
+        Log.d(TAG, "Loaded settings deviceName=${settingsDeviceName} tab=${currentTab} specifiedDevice=${specifiedDeviceAddress} searchOrder=${searchOrderList.size} autoConnect=${autoConnectEnabled}")
     }
     
     
@@ -794,6 +808,7 @@ class MainActivity : ComponentActivity() {
             .putBoolean("map_railway_visible", mapRailwayLayerVisible)
             .putString("specified_device_address", specifiedDeviceAddress)
             .putString("search_order_list", searchOrderList.joinToString(","))
+            .putBoolean("auto_connect_enabled", autoConnectEnabled)
             
         mapCenterPosition?.let { (lat, lon) ->
             editor.putFloat("map_center_lat", lat.toFloat())
@@ -810,7 +825,7 @@ class MainActivity : ComponentActivity() {
         
         bleClient.setHighFrequencyReconnect(true)
         
-        if (hasBluetoothPermissions() && !bleClient.isConnected()) {
+        if (hasBluetoothPermissions() && !bleClient.isConnected() && autoConnectEnabled) {
             Log.d(TAG, "App resumed and not connected, starting auto scan")
             startAutoScanAndConnect()
         } else if (bleClient.isConnected()) {
@@ -847,6 +862,8 @@ fun MainContent(
     specifiedDeviceAddress: String?,
         searchOrderList: List<String>,
         onSpecifiedDeviceSelected: (String?) -> Unit,
+    autoConnectEnabled: Boolean,
+    onAutoConnectEnabledChange: (Boolean) -> Unit,
     
     
     latestRecord: TrainRecord?,
@@ -1118,7 +1135,9 @@ fun MainContent(
                     onScrollPositionChange = onSettingsScrollPositionChange,
                     specifiedDeviceAddress = specifiedDeviceAddress,
                     searchOrderList = searchOrderList,
-                    onSpecifiedDeviceSelected = onSpecifiedDeviceSelected
+                    onSpecifiedDeviceSelected = onSpecifiedDeviceSelected,
+                    autoConnectEnabled = autoConnectEnabled,
+                    onAutoConnectEnabledChange = onAutoConnectEnabledChange
                 )
                 3 -> MapScreen(
                     records = if (allRecords.isNotEmpty()) {

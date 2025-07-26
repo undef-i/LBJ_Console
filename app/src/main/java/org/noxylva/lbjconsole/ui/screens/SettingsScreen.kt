@@ -38,7 +38,9 @@ fun SettingsScreen(
     onScrollPositionChange: (Int) -> Unit = {},
     specifiedDeviceAddress: String? = null,
     searchOrderList: List<String> = emptyList(),
-    onSpecifiedDeviceSelected: (String?) -> Unit = {}
+    onSpecifiedDeviceSelected: (String?) -> Unit = {},
+    autoConnectEnabled: Boolean = true,
+    onAutoConnectEnabledChange: (Boolean) -> Unit = {}
 ) {
     val uriHandler = LocalUriHandler.current
     val scrollState = rememberScrollState()
@@ -260,6 +262,29 @@ fun SettingsScreen(
                             notificationEnabled = enabled
                             notificationService.setNotificationEnabled(enabled)
                         }
+                    )
+                }
+                
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            "自动连接",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Text(
+                            "自动连接蓝牙设备",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = autoConnectEnabled,
+                        onCheckedChange = onAutoConnectEnabledChange
                     )
                 }
             }
