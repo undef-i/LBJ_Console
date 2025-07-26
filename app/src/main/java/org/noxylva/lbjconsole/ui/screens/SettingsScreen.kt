@@ -15,6 +15,7 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
 import org.noxylva.lbjconsole.model.MergeSettings
 import org.noxylva.lbjconsole.model.GroupBy
 import org.noxylva.lbjconsole.model.TimeWindow
@@ -46,15 +47,14 @@ fun SettingsScreen(
     val scrollState = rememberScrollState()
     
     LaunchedEffect(scrollPosition) {
-        scrollState.scrollTo(scrollPosition)
+        if (scrollState.value != scrollPosition) {
+            scrollState.scrollTo(scrollPosition)
+        }
     }
     
     LaunchedEffect(scrollState.value) {
+        delay(50)
         onScrollPositionChange(scrollState.value)
-    }
-    
-    LaunchedEffect(deviceName) {
-        onApplySettings()
     }
     
     Column(
@@ -198,12 +198,13 @@ fun SettingsScreen(
                 }
                 
                 val context = LocalContext.current
-                var backgroundServiceEnabled by remember {
+                val notificationService = remember(context) { NotificationService(context) }
+                
+                var backgroundServiceEnabled by remember(context) {
                     mutableStateOf(SettingsActivity.isBackgroundServiceEnabled(context))
                 }
                 
-                val notificationService = remember { NotificationService(context) }
-                var notificationEnabled by remember {
+                var notificationEnabled by remember(context, notificationService) {
                     mutableStateOf(notificationService.isNotificationEnabled())
                 }
                 
