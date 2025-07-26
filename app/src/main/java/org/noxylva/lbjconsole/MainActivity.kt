@@ -825,12 +825,20 @@ class MainActivity : ComponentActivity() {
         
         bleClient.setHighFrequencyReconnect(true)
         
-        if (hasBluetoothPermissions() && !bleClient.isConnected() && autoConnectEnabled) {
-            Log.d(TAG, "App resumed and not connected, starting auto scan")
-            startAutoScanAndConnect()
-        } else if (bleClient.isConnected()) {
-            showDisconnectButton = true
-            deviceStatus = "已连接"
+        if (hasBluetoothPermissions()) {
+            val actuallyConnected = bleClient.checkActualConnectionState()
+            
+            if (actuallyConnected) {
+                showDisconnectButton = true
+                deviceStatus = "已连接"
+                Log.d(TAG, "App resumed - connection verified")
+            } else if (autoConnectEnabled) {
+                Log.d(TAG, "App resumed and not connected, starting auto scan")
+                startAutoScanAndConnect()
+            } else {
+                deviceStatus = "未连接"
+                showDisconnectButton = false
+            }
         }
     }
     

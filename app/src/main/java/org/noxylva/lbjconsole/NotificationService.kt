@@ -8,10 +8,13 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.os.Build
 import android.util.Log
+import android.view.View
+import android.widget.RemoteViews
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import org.json.JSONObject
 import org.noxylva.lbjconsole.model.TrainRecord
+
 
 class NotificationService(private val context: Context) {
     companion object {
@@ -86,12 +89,7 @@ class NotificationService(private val context: Context) {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
 
-            val directionText = when (trainRecord.direction) {
-                1 -> "下行"
-                3 -> "上行"
-                else -> "未知"
-            }
-
+            val remoteViews = RemoteViews(context.packageName, R.layout.notification_train_record)
             val trainDisplay = if (isValidValue(trainRecord.lbjClass) && isValidValue(trainRecord.train)) {
                 "${trainRecord.lbjClass.trim()}${trainRecord.train.trim()}"
             } else if (isValidValue(trainRecord.lbjClass)) {
@@ -99,26 +97,83 @@ class NotificationService(private val context: Context) {
             } else if (isValidValue(trainRecord.train)) {
                 trainRecord.train.trim()
             } else "列车"
-
-            val title = trainDisplay
-            val content = buildString {
-                append(directionText)
-                if (isValidValue(trainRecord.route)) {
-                    append("\n线路: ${trainRecord.route.trim()}")
-                }
-                if (isValidValue(trainRecord.speed)) {
-                    append("\n速度: ${trainRecord.speed.trim()} km/h")
-                }
-                if (isValidValue(trainRecord.position)) {
-                    append("\n位置: ${trainRecord.position.trim()} km")
-                }
+            remoteViews.setTextViewText(R.id.notification_train_number, trainDisplay)
+            
+            val directionText = when (trainRecord.direction) {
+                1 -> "下"
+                3 -> "上"
+                else -> ""
             }
+            if (directionText.isNotEmpty()) {
+                remoteViews.setTextViewText(R.id.notification_direction, directionText)
+                remoteViews.setViewVisibility(R.id.notification_direction, View.VISIBLE)
+            } else {
+                remoteViews.setViewVisibility(R.id.notification_direction, View.GONE)
+            }
+            
+            val locoInfo = when {
+                isValidValue(trainRecord.locoType) && isValidValue(trainRecord.loco) -> {
+                    val shortLoco = if (trainRecord.loco.length > 5) {
+                        trainRecord.loco.takeLast(5)
+                    } else {
+                        trainRecord.loco
+                    }
+                    "${trainRecord.locoType}-${shortLoco}"
+                }
+                isValidValue(trainRecord.locoType) -> trainRecord.locoType
+                isValidValue(trainRecord.loco) -> trainRecord.loco
+                else -> ""
+            }
+            if (locoInfo.isNotEmpty()) {
+                remoteViews.setTextViewText(R.id.notification_loco_info, locoInfo)
+                remoteViews.setViewVisibility(R.id.notification_loco_info, View.VISIBLE)
+            } else {
+                remoteViews.setViewVisibility(R.id.notification_loco_info, View.GONE)
+            }
+            
+            if (isValidValue(trainRecord.route)) {
+                remoteViews.setTextViewText(R.id.notification_route, trainRecord.route.trim())
+                remoteViews.setViewVisibility(R.id.notification_route, View.VISIBLE)
+            } else {
+                remoteViews.setViewVisibility(R.id.notification_route, View.GONE)
+            }
+            
+            if (isValidValue(trainRecord.position)) {
+                remoteViews.setTextViewText(R.id.notification_position, "${trainRecord.position.trim()}K")
+                remoteViews.setViewVisibility(R.id.notification_position, View.VISIBLE)
+            } else {
+                remoteViews.setViewVisibility(R.id.notification_position, View.GONE)
+            }
+            
+            if (isValidValue(trainRecord.speed)) {
+                remoteViews.setTextViewText(R.id.notification_speed, "${trainRecord.speed.trim()} km/h")
+                remoteViews.setViewVisibility(R.id.notification_speed, View.VISIBLE)
+            } else {
+                remoteViews.setViewVisibility(R.id.notification_speed, View.GONE)
+            }
+            
+            remoteViews.setOnClickPendingIntent(R.id.notification_train_number, pendingIntent)
+
+            val summaryParts = mutableListOf<String>()
+            
+            val routeAndDirection = when {
+                isValidValue(trainRecord.route) && directionText.isNotEmpty() -> "${trainRecord.route.trim()}${directionText}行"
+                isValidValue(trainRecord.route) -> trainRecord.route.trim()
+                directionText.isNotEmpty() -> "${directionText}行"
+                else -> null
+            }
+            
+            routeAndDirection?.let { summaryParts.add(it) }
+            if (locoInfo.isNotEmpty()) summaryParts.add(locoInfo)
+            
+            val summaryText = summaryParts.joinToString(" • ")
 
             val notification = NotificationCompat.Builder(context, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_notification)
-                .setContentTitle(title)
-                .setContentText(content)
-                .setStyle(NotificationCompat.BigTextStyle().bigText(content))
+                .setContentTitle(trainDisplay)
+                .setContentText(summaryText)
+                .setCustomContentView(remoteViews)
+                .setCustomBigContentView(remoteViews)
                 .setPriority(NotificationCompat.PRIORITY_DEFAULT)
                 .setContentIntent(pendingIntent)
                 .setAutoCancel(true)
@@ -131,7 +186,7 @@ class NotificationService(private val context: Context) {
             }
 
             notificationManager.notify(notificationId, notification)
-            Log.d(TAG, "Notification sent for train: ${trainRecord.train}")
+            Log.d(TAG, "Custom notification sent for train: ${trainRecord.train}")
 
         } catch (e: Exception) {
             Log.e(TAG, "Failed to show notification: ${e.message}", e)

@@ -275,6 +275,33 @@ class BLEClient(private val context: Context) : BluetoothGattCallback() {
     fun isConnected(): Boolean {
         return isConnected
     }
+    
+    @SuppressLint("MissingPermission")
+    fun checkActualConnectionState(): Boolean {
+        bluetoothGatt?.let { gatt ->
+            try {
+                val bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
+                val connectedDevices = bluetoothManager.getConnectedDevices(BluetoothProfile.GATT)
+                val isActuallyConnected = connectedDevices.any { it.address == deviceAddress }
+                
+                if (isActuallyConnected && !isConnected) {
+                    Log.d(TAG, "Found existing GATT connection, updating internal state")
+                    isConnected = true
+                    return true
+                } else if (!isActuallyConnected && isConnected) {
+                    Log.d(TAG, "GATT connection lost, updating internal state")
+                    isConnected = false
+                    return false
+                }
+                
+                return isActuallyConnected
+            } catch (e: Exception) {
+                Log.e(TAG, "Error checking actual connection state: ${e.message}")
+                return isConnected
+            }
+        }
+        return isConnected
+    }
 
 
     @SuppressLint("MissingPermission")
