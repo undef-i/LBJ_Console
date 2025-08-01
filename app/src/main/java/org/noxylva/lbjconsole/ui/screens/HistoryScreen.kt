@@ -42,6 +42,7 @@ import org.noxylva.lbjconsole.model.MergedTrainRecord
 import org.noxylva.lbjconsole.model.MergeSettings
 import org.noxylva.lbjconsole.model.GroupBy
 import org.noxylva.lbjconsole.util.LocoInfoUtil
+import org.noxylva.lbjconsole.util.TrainTypeUtil
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -54,6 +55,7 @@ fun TrainRecordItem(
     expandedStatesMap: MutableMap<String, Boolean>,
     latestRecord: TrainRecord?,
     locoInfoUtil: LocoInfoUtil?,
+    trainTypeUtil: TrainTypeUtil?,
     onRecordClick: (TrainRecord) -> Unit,
     onToggleSelection: (TrainRecord) -> Unit,
     onLongClick: (TrainRecord) -> Unit,
@@ -61,6 +63,8 @@ fun TrainRecordItem(
 ) {
     val recordId = record.uniqueId
     val isExpanded = expandedStatesMap[recordId] == true
+    
+
     
     val cardColor = when {
         isSelected -> MaterialTheme.colorScheme.primaryContainer
@@ -130,11 +134,19 @@ fun TrainRecordItem(
                         }
                     }
                     
-                    Text(
-                        text = "${record.rssi} dBm",
-                        fontSize = 10.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    val trainType = if (record.train?.trim().isNullOrEmpty()) {
+                        null
+                    } else {
+                        val lbjClassValue = record.lbjClass?.trim() ?: "NA"
+                        trainTypeUtil?.getTrainType(lbjClassValue, record.train!!.trim())
+                    }
+                    if (!trainType.isNullOrEmpty()) {
+                        Text(
+                            text = trainType,
+                            fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(2.dp))
@@ -393,6 +405,7 @@ fun MergedTrainRecordItem(
     mergedRecord: MergedTrainRecord,
     expandedStatesMap: MutableMap<String, Boolean>,
     locoInfoUtil: LocoInfoUtil?,
+    trainTypeUtil: TrainTypeUtil?,
     mergeSettings: MergeSettings? = null,
     isInEditMode: Boolean = false,
     selectedRecords: List<TrainRecord> = emptyList(),
@@ -484,11 +497,19 @@ fun MergedTrainRecordItem(
                         }
                     }
                     
-                    Text(
-                        text = "${latestRecord.rssi} dBm",
-                        fontSize = 10.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    val trainType = if (latestRecord.train?.trim().isNullOrEmpty()) {
+                        null
+                    } else {
+                        val lbjClassValue = latestRecord.lbjClass?.trim() ?: "NA"
+                        trainTypeUtil?.getTrainType(lbjClassValue, latestRecord.train!!.trim())
+                    }
+                    if (!trainType.isNullOrEmpty()) {
+                        Text(
+                            text = trainType,
+                            fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(2.dp))
@@ -873,6 +894,7 @@ fun HistoryScreen(
     lastUpdateTime: Date?,
     temporaryStatusMessage: String? = null,
     locoInfoUtil: LocoInfoUtil? = null,
+    trainTypeUtil: TrainTypeUtil? = null,
     mergeSettings: MergeSettings? = null,
     onClearRecords: () -> Unit = {},
     onRecordClick: (TrainRecord) -> Unit = {},
@@ -1042,6 +1064,7 @@ fun HistoryScreen(
                                         expandedStatesMap = expandedStatesMap,
                                         latestRecord = latestRecord,
                                         locoInfoUtil = locoInfoUtil,
+                                        trainTypeUtil = trainTypeUtil,
                                         onRecordClick = onRecordClick,
                                         onToggleSelection = { record ->
                                             if (selectedRecordsList.contains(record)) {
@@ -1065,6 +1088,7 @@ fun HistoryScreen(
                                         mergedRecord = item,
                                         expandedStatesMap = expandedStatesMap,
                                         locoInfoUtil = locoInfoUtil,
+                                        trainTypeUtil = trainTypeUtil,
                                         mergeSettings = mergeSettings,
                                         isInEditMode = isInEditMode,
                                         selectedRecords = selectedRecordsList,

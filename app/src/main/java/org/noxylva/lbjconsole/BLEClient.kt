@@ -534,7 +534,7 @@ class BLEClient(private val context: Context) : BluetoothGattCallback() {
             String(it, StandardCharsets.UTF_8)
         } ?: return
 
-        Log.d(TAG, "Received data len=${newData.length} preview=${newData.take(50)}")
+        Log.d(TAG, "Received data len=${newData.length} preview=${newData}")
 
 
         dataBuffer.append(newData)
@@ -640,7 +640,7 @@ class BLEClient(private val context: Context) : BluetoothGattCallback() {
     private fun processJsonString(jsonStr: String): Boolean {
         try {
             val jsonObject = JSONObject(jsonStr)
-            Log.d(TAG, "Parsed JSON len=${jsonStr.length} preview=${jsonStr.take(50)}")
+            Log.d(TAG, "Parsed JSON len=${jsonStr.length} preview=${jsonStr}")
 
 
             handler.post {

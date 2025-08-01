@@ -5,7 +5,9 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.content.SharedPreferences
+import kotlinx.coroutines.runBlocking
+import org.noxylva.lbjconsole.database.AppSettingsRepository
+import org.noxylva.lbjconsole.database.TrainDatabase
 import android.os.Build
 import android.util.Log
 import android.view.View
@@ -27,7 +29,7 @@ class NotificationService(private val context: Context) {
     }
 
     private val notificationManager = NotificationManagerCompat.from(context)
-    private val prefs: SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    private val appSettingsRepository = AppSettingsRepository(context)
     private var notificationIdCounter = NOTIFICATION_ID_BASE
 
     init {
@@ -53,11 +55,15 @@ class NotificationService(private val context: Context) {
     }
 
     fun isNotificationEnabled(): Boolean {
-        return prefs.getBoolean(KEY_ENABLED, false)
+        return runBlocking {
+            appSettingsRepository.getSettings().notificationEnabled
+        }
     }
 
     fun setNotificationEnabled(enabled: Boolean) {
-        prefs.edit().putBoolean(KEY_ENABLED, enabled).apply()
+        runBlocking {
+            appSettingsRepository.updateNotificationEnabled(enabled)
+        }
         Log.d(TAG, "Notification enabled set to: $enabled")
     }
 

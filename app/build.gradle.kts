@@ -13,8 +13,8 @@ android {
         applicationId = "org.noxylva.lbjconsole"
         minSdk = 29
         targetSdk = 35
-        versionCode = 8
-        versionName = "0.0.8"
+        versionCode = 9
+        versionName = "0.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -90,4 +90,5 @@ dependencies {
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)
+    implementation(libs.androidx.startup.runtime)
 }

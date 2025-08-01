@@ -25,6 +25,7 @@ import org.noxylva.lbjconsole.NotificationService
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -44,16 +45,12 @@ fun SettingsScreen(
     onAutoConnectEnabledChange: (Boolean) -> Unit = {}
 ) {
     val uriHandler = LocalUriHandler.current
-    val scrollState = rememberScrollState()
+    val scrollState = rememberScrollState(initial = scrollPosition)
     
-    LaunchedEffect(scrollPosition) {
-        if (scrollPosition > 0 && scrollState.value != scrollPosition) {
-            scrollState.animateScrollTo(scrollPosition)
+    DisposableEffect(Unit) {
+        onDispose {
+            onScrollPositionChange(scrollState.value)
         }
-    }
-    
-    LaunchedEffect(scrollState.value) {
-        onScrollPositionChange(scrollState.value)
     }
     
     Column(
@@ -199,8 +196,20 @@ fun SettingsScreen(
                 val context = LocalContext.current
                 val notificationService = remember(context) { NotificationService(context) }
                 
-                var backgroundServiceEnabled by remember(context) {
-                    mutableStateOf(SettingsActivity.isBackgroundServiceEnabled(context))
+                var backgroundServiceEnabled by remember { mutableStateOf(false) }
+                
+                LaunchedEffect(context) {
+                    backgroundServiceEnabled = SettingsActivity.isBackgroundServiceEnabled(context)
+                }
+                
+                LaunchedEffect(backgroundServiceEnabled) {
+                    SettingsActivity.setBackgroundServiceEnabled(context, backgroundServiceEnabled)
+                    
+                    if (backgroundServiceEnabled) {
+                        BackgroundService.startService(context)
+                    } else {
+                        BackgroundService.stopService(context)
+                    }
                 }
                 
                 var notificationEnabled by remember(context, notificationService) {
@@ -228,13 +237,6 @@ fun SettingsScreen(
                         checked = backgroundServiceEnabled,
                         onCheckedChange = { enabled ->
                             backgroundServiceEnabled = enabled
-                            SettingsActivity.setBackgroundServiceEnabled(context, enabled)
-                            
-                            if (enabled) {
-                                BackgroundService.startService(context)
-                            } else {
-                                BackgroundService.stopService(context)
-                            }
                         }
                     )
                 }
