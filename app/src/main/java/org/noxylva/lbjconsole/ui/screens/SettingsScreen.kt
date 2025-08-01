@@ -47,13 +47,12 @@ fun SettingsScreen(
     val scrollState = rememberScrollState()
     
     LaunchedEffect(scrollPosition) {
-        if (scrollState.value != scrollPosition) {
-            scrollState.scrollTo(scrollPosition)
+        if (scrollPosition > 0 && scrollState.value != scrollPosition) {
+            scrollState.animateScrollTo(scrollPosition)
         }
     }
     
     LaunchedEffect(scrollState.value) {
-        delay(50)
         onScrollPositionChange(scrollState.value)
     }
     

@@ -771,6 +771,30 @@ fun MergedTrainRecordItem(
                                             "${recordItem.locoType}-${recordItem.loco}"
                                         } else null
                                     }
+                                    GroupBy.TRAIN_OR_LOCO -> {
+                                        val latestTrain = mergedRecord.latestRecord.train.trim()
+                                        val latestLoco = mergedRecord.latestRecord.loco.trim()
+                                        val recordTrain = recordItem.train.trim()
+                                        val recordLoco = recordItem.loco.trim()
+                                        
+                                        when {
+                                            latestTrain.isNotEmpty() && latestTrain != "<NUL>" && 
+                                            recordTrain.isNotEmpty() && recordTrain != "<NUL>" && 
+                                            latestTrain == recordTrain -> {
+                                                if (recordLoco.isNotEmpty() && recordLoco != "<NUL>") {
+                                                    "${recordItem.locoType}-${recordLoco}"
+                                                } else null
+                                            }
+                                            latestLoco.isNotEmpty() && latestLoco != "<NUL>" && 
+                                            recordLoco.isNotEmpty() && recordLoco != "<NUL>" && 
+                                            latestLoco == recordLoco -> {
+                                                if (recordTrain.isNotEmpty() && recordTrain != "<NUL>") {
+                                                    recordTrain
+                                                } else null
+                                            }
+                                            else -> null
+                                        }
+                                    }
                                     else -> null
                                 }
                                 
