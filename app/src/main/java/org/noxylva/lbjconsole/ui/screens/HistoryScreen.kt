@@ -1,5 +1,6 @@
 package org.noxylva.lbjconsole.ui.screens
 
+import android.util.Log
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.background
@@ -862,6 +863,7 @@ fun HistoryScreen(
 ) {
 
     val refreshKey = latestRecord?.timestamp?.time ?: 0
+    var wasAtTopBeforeUpdate by remember { mutableStateOf(false) }
 
     var isInEditMode by remember(editMode) { mutableStateOf(editMode) }
     val selectedRecordsList = remember(selectedRecords) { 
@@ -939,6 +941,22 @@ fun HistoryScreen(
         if (selectedRecordsList.isEmpty() && isInEditMode) {
             isInEditMode = false
             onStateChange(false, emptySet(), expandedStatesMap.toMap(), listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
+        }
+    }
+    
+    LaunchedEffect(listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset) {
+        if (!isInEditMode && filteredRecords.isNotEmpty()) {
+            wasAtTopBeforeUpdate = listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset <= 100
+        }
+    }
+
+    LaunchedEffect(refreshKey) {
+        if (refreshKey > 0 && !isInEditMode && filteredRecords.isNotEmpty() && wasAtTopBeforeUpdate) {
+            try {
+                listState.animateScrollToItem(0, 0)
+            } catch (e: Exception) {
+                listState.scrollToItem(0, 0)
+            }
         }
     }
 

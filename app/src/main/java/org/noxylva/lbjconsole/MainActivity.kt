@@ -52,6 +52,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
 import org.json.JSONObject
 import org.osmdroid.config.Configuration
 import org.noxylva.lbjconsole.model.TrainRecord
@@ -418,9 +419,11 @@ class MainActivity : ComponentActivity() {
                         deviceName = settingsDeviceName,
                         onDeviceNameChange = { newName -> settingsDeviceName = newName },
                         onApplySettings = {
-                            saveSettings()
-                            targetDeviceName = settingsDeviceName
-                            Log.d(TAG, "Applied settings deviceName=${settingsDeviceName}")
+                            if (targetDeviceName != settingsDeviceName) {
+                                targetDeviceName = settingsDeviceName
+                                Log.d(TAG, "Applied settings deviceName=${settingsDeviceName}")
+                                saveSettings()
+                            }
                         },
                         appVersion = getAppVersion(),
                         locoInfoUtil = locoInfoUtil,
@@ -795,28 +798,30 @@ class MainActivity : ComponentActivity() {
     
     
     private fun saveSettings() {
-        val editor = settingsPrefs.edit()
-            .putString("device_name", settingsDeviceName)
-            .putInt("current_tab", currentTab)
-            .putBoolean("history_edit_mode", historyEditMode)
-            .putString("history_selected_records", historySelectedRecords.joinToString(","))
-            .putString("history_expanded_states", historyExpandedStates.map { "${it.key}:${it.value}" }.joinToString(";"))
-            .putInt("history_scroll_position", historyScrollPosition)
-            .putInt("history_scroll_offset", historyScrollOffset)
-            .putInt("settings_scroll_position", settingsScrollPosition)
-            .putFloat("map_zoom_level", mapZoomLevel.toFloat())
-            .putBoolean("map_railway_visible", mapRailwayLayerVisible)
-            .putString("specified_device_address", specifiedDeviceAddress)
-            .putString("search_order_list", searchOrderList.joinToString(","))
-            .putBoolean("auto_connect_enabled", autoConnectEnabled)
+        lifecycleScope.launch(Dispatchers.IO) {
+            val editor = settingsPrefs.edit()
+                .putString("device_name", settingsDeviceName)
+                .putInt("current_tab", currentTab)
+                .putBoolean("history_edit_mode", historyEditMode)
+                .putString("history_selected_records", historySelectedRecords.joinToString(","))
+                .putString("history_expanded_states", historyExpandedStates.map { "${it.key}:${it.value}" }.joinToString(";"))
+                .putInt("history_scroll_position", historyScrollPosition)
+                .putInt("history_scroll_offset", historyScrollOffset)
+                .putInt("settings_scroll_position", settingsScrollPosition)
+                .putFloat("map_zoom_level", mapZoomLevel.toFloat())
+                .putBoolean("map_railway_visible", mapRailwayLayerVisible)
+                .putString("specified_device_address", specifiedDeviceAddress)
+                .putString("search_order_list", searchOrderList.joinToString(","))
+                .putBoolean("auto_connect_enabled", autoConnectEnabled)
+                
+            mapCenterPosition?.let { (lat, lon) ->
+                editor.putFloat("map_center_lat", lat.toFloat())
+                editor.putFloat("map_center_lon", lon.toFloat())
+            }
             
-        mapCenterPosition?.let { (lat, lon) ->
-            editor.putFloat("map_center_lat", lat.toFloat())
-            editor.putFloat("map_center_lon", lon.toFloat())
+            editor.apply()
+            Log.d(TAG, "Saved settings deviceName=${settingsDeviceName} tab=${currentTab} mapCenter=${mapCenterPosition} zoom=${mapZoomLevel}")
         }
-        
-        editor.apply()
-        Log.d(TAG, "Saved settings deviceName=${settingsDeviceName} tab=${currentTab} mapCenter=${mapCenterPosition} zoom=${mapZoomLevel}")
     }
     
     override fun onResume() {

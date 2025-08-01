@@ -7,9 +7,10 @@ data class MergeSettings(
 )
 
 enum class GroupBy(val displayName: String) {
-    TRAIN_AND_LOCO("车次号+机车号"),
-    TRAIN_ONLY("仅车次号"),
-    LOCO_ONLY("仅机车号")
+    TRAIN_ONLY("车次号"),
+    LOCO_ONLY("机车号"),
+    TRAIN_OR_LOCO("车次号或机车号"),
+    TRAIN_AND_LOCO("车次号与机车号")
 }
 
 enum class TimeWindow(val displayName: String, val seconds: Long?) {
@@ -23,14 +24,6 @@ enum class TimeWindow(val displayName: String, val seconds: Long?) {
 
 fun generateGroupKey(record: TrainRecord, groupBy: GroupBy): String? {
     return when (groupBy) {
-        GroupBy.TRAIN_AND_LOCO -> {
-            val train = record.train.trim()
-            val loco = record.loco.trim()
-            if (train.isNotEmpty() && train != "<NUL>" && 
-                loco.isNotEmpty() && loco != "<NUL>") {
-                "${train}_${loco}"
-            } else null
-        }
         GroupBy.TRAIN_ONLY -> {
             val train = record.train.trim()
             if (train.isNotEmpty() && train != "<NUL>") train else null
@@ -38,6 +31,23 @@ fun generateGroupKey(record: TrainRecord, groupBy: GroupBy): String? {
         GroupBy.LOCO_ONLY -> {
             val loco = record.loco.trim()
             if (loco.isNotEmpty() && loco != "<NUL>") loco else null
+        }
+        GroupBy.TRAIN_OR_LOCO -> {
+            val train = record.train.trim()
+            val loco = record.loco.trim()
+            when {
+                train.isNotEmpty() && train != "<NUL>" -> train
+                loco.isNotEmpty() && loco != "<NUL>" -> loco
+                else -> null
+            }
+        }
+        GroupBy.TRAIN_AND_LOCO -> {
+            val train = record.train.trim()
+            val loco = record.loco.trim()
+            if (train.isNotEmpty() && train != "<NUL>" && 
+                loco.isNotEmpty() && loco != "<NUL>") {
+                "${train}_${loco}"
+            } else null
         }
     }
 }

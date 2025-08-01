@@ -234,26 +234,79 @@ class TrainRecordManager(private val context: Context) {
     }
     
     private fun processRecordsForMerging(records: List<TrainRecord>, settings: MergeSettings): List<MergedTrainRecord> {
-        val groupedRecords = mutableMapOf<String, MutableList<TrainRecord>>()
         val currentTime = Date()
+        val validRecords = records.filter { record ->
+            settings.timeWindow.seconds?.let { windowSeconds ->
+                (currentTime.time - record.timestamp.time) / 1000 <= windowSeconds
+            } ?: true
+        }
+        
+        return when (settings.groupBy) {
+            GroupBy.TRAIN_OR_LOCO -> processTrainOrLocoMerging(validRecords)
+            else -> {
+                val groupedRecords = mutableMapOf<String, MutableList<TrainRecord>>()
+                validRecords.forEach { record ->
+                    val groupKey = generateGroupKey(record, settings.groupBy)
+                    if (groupKey != null) {
+                        groupedRecords.getOrPut(groupKey) { mutableListOf() }.add(record)
+                    }
+                }
+                
+                groupedRecords.mapNotNull { (groupKey, groupRecords) ->
+                    if (groupRecords.size >= 2) {
+                        val sortedRecords = groupRecords.sortedBy { it.timestamp }
+                        val latestRecord = sortedRecords.maxByOrNull { it.timestamp }!!
+                        MergedTrainRecord(
+                            groupKey = groupKey,
+                            records = sortedRecords,
+                            latestRecord = latestRecord
+                        )
+                    } else null
+                }.sortedByDescending { it.latestRecord.timestamp }
+            }
+        }
+    }
+    
+    private fun processTrainOrLocoMerging(records: List<TrainRecord>): List<MergedTrainRecord> {
+        val groups = mutableListOf<MutableList<TrainRecord>>()
         
         records.forEach { record ->
-            val groupKey = generateGroupKey(record, settings.groupBy)
-            if (groupKey != null) {
-                val withinTimeWindow = settings.timeWindow.seconds?.let { windowSeconds ->
-                    (currentTime.time - record.timestamp.time) / 1000 <= windowSeconds
-                } ?: true
-                
-                if (withinTimeWindow) {
-                    groupedRecords.getOrPut(groupKey) { mutableListOf() }.add(record)
+            val train = record.train.trim()
+            val loco = record.loco.trim()
+            
+            if ((train.isEmpty() || train == "<NUL>") && (loco.isEmpty() || loco == "<NUL>")) {
+                return@forEach
+            }
+            
+            var foundGroup: MutableList<TrainRecord>? = null
+            
+            for (group in groups) {
+                val shouldMerge = group.any { existingRecord ->
+                    val existingTrain = existingRecord.train.trim()
+                    val existingLoco = existingRecord.loco.trim()
+                    
+                    (train.isNotEmpty() && train != "<NUL>" && train == existingTrain) ||
+                    (loco.isNotEmpty() && loco != "<NUL>" && loco == existingLoco)
                 }
+                
+                if (shouldMerge) {
+                    foundGroup = group
+                    break
+                }
+            }
+            
+            if (foundGroup != null) {
+                foundGroup.add(record)
+            } else {
+                groups.add(mutableListOf(record))
             }
         }
         
-        return groupedRecords.mapNotNull { (groupKey, groupRecords) ->
+        return groups.mapNotNull { groupRecords ->
             if (groupRecords.size >= 2) {
                 val sortedRecords = groupRecords.sortedBy { it.timestamp }
                 val latestRecord = sortedRecords.maxByOrNull { it.timestamp }!!
+                val groupKey = "${latestRecord.train}_OR_${latestRecord.loco}"
                 MergedTrainRecord(
                     groupKey = groupKey,
                     records = sortedRecords,
