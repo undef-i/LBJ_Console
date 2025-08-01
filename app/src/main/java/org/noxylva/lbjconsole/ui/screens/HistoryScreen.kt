@@ -780,14 +780,14 @@ fun MergedTrainRecordItem(
                                         when {
                                             latestTrain.isNotEmpty() && latestTrain != "<NUL>" && 
                                             recordTrain.isNotEmpty() && recordTrain != "<NUL>" && 
-                                            latestTrain == recordTrain -> {
+                                            latestTrain == recordTrain && latestLoco != recordLoco -> {
                                                 if (recordLoco.isNotEmpty() && recordLoco != "<NUL>") {
                                                     "${recordItem.locoType}-${recordLoco}"
                                                 } else null
                                             }
                                             latestLoco.isNotEmpty() && latestLoco != "<NUL>" && 
                                             recordLoco.isNotEmpty() && recordLoco != "<NUL>" && 
-                                            latestLoco == recordLoco -> {
+                                            latestLoco == recordLoco && latestTrain != recordTrain -> {
                                                 if (recordTrain.isNotEmpty() && recordTrain != "<NUL>") {
                                                     recordTrain
                                                 } else null
