@@ -65,6 +65,8 @@ import org.noxylva.lbjconsole.ui.screens.SettingsScreen
 
 import org.noxylva.lbjconsole.ui.theme.LBJConsoleTheme
 import org.noxylva.lbjconsole.util.LocoInfoUtil
+import org.noxylva.lbjconsole.util.TrainTypeUtil
+import org.noxylva.lbjconsole.database.AppSettingsRepository
 import java.util.*
 import androidx.lifecycle.lifecycleScope
 import android.bluetooth.le.ScanCallback
@@ -75,7 +77,9 @@ class MainActivity : ComponentActivity() {
     private val bleClient by lazy { BLEClient(this) }
     private val trainRecordManager by lazy { TrainRecordManager(this) }
     private val locoInfoUtil by lazy { LocoInfoUtil(this) }
+    private val trainTypeUtil by lazy { TrainTypeUtil(this) }
     private val notificationService by lazy { NotificationService(this) }
+    private val appSettingsRepository by lazy { AppSettingsRepository(this) }
     
     
     private var deviceStatus by mutableStateOf("未连接")
@@ -119,9 +123,6 @@ class MainActivity : ComponentActivity() {
     private var searchOrderList by mutableStateOf(listOf<String>())
     private var showDisconnectButton by mutableStateOf(false)
     private var autoConnectEnabled by mutableStateOf(true)
-    
-    
-    private val settingsPrefs by lazy { getSharedPreferences("app_settings", Context.MODE_PRIVATE) }
     
     private fun getAppVersion(): String {
         return try {
@@ -246,7 +247,11 @@ class MainActivity : ComponentActivity() {
             } catch (e: Exception) {
                 Log.e(TAG, "Load locomotive data failed", e)
             }
+            
+
         }
+        
+
         
         
         try {
@@ -274,8 +279,10 @@ class MainActivity : ComponentActivity() {
         
         saveSettings()
         
-        if (SettingsActivity.isBackgroundServiceEnabled(this)) {
-            BackgroundService.startService(this)
+        lifecycleScope.launch {
+            if (SettingsActivity.isBackgroundServiceEnabled(this@MainActivity)) {
+                BackgroundService.startService(this@MainActivity)
+            }
         }
         
         enableEdgeToEdge()
@@ -294,6 +301,9 @@ class MainActivity : ComponentActivity() {
                         isScanning = isScanning,
                         currentTab = currentTab,
                         onTabChange = { tab ->
+                            if (currentTab == 2 && tab != 2) {
+                                saveSettings()
+                            }
                             currentTab = tab
                             saveSettings()
                         },
@@ -369,6 +379,7 @@ class MainActivity : ComponentActivity() {
                         
                         settingsScrollPosition = settingsScrollPosition,
                         onSettingsScrollPositionChange = { position ->
+                            android.util.Log.d(TAG, "Settings scroll position changed: $position")
                             settingsScrollPosition = position
                             saveSettings()
                         },
@@ -427,6 +438,7 @@ class MainActivity : ComponentActivity() {
                         },
                         appVersion = getAppVersion(),
                         locoInfoUtil = locoInfoUtil,
+                        trainTypeUtil = trainTypeUtil,
                         onOpenSettings = {
                             val intent = Intent(this@MainActivity, SettingsActivity::class.java)
                             startActivity(intent)
@@ -741,86 +753,91 @@ class MainActivity : ComponentActivity() {
     
     
     private fun loadSettings() {
-        settingsDeviceName = settingsPrefs.getString("device_name", "LBJReceiver") ?: "LBJReceiver"
-        targetDeviceName = settingsDeviceName
-        
-        
-        currentTab = settingsPrefs.getInt("current_tab", 0)
-        historyEditMode = settingsPrefs.getBoolean("history_edit_mode", false)
-        
-        val selectedRecordsStr = settingsPrefs.getString("history_selected_records", "")
-        historySelectedRecords = if (selectedRecordsStr.isNullOrEmpty()) {
-            emptySet()
-        } else {
-            selectedRecordsStr.split(",").toSet()
+        lifecycleScope.launch {
+            try {
+                val settings = appSettingsRepository.getSettings()
+                
+                settingsDeviceName = settings.deviceName
+                targetDeviceName = settingsDeviceName
+                currentTab = settings.currentTab
+                historyEditMode = settings.historyEditMode
+                
+                historySelectedRecords = if (settings.historySelectedRecords.isEmpty()) {
+                    emptySet()
+                } else {
+                    settings.historySelectedRecords.split(",").toSet()
+                }
+                
+                historyExpandedStates = if (settings.historyExpandedStates.isEmpty()) {
+                    emptyMap()
+                } else {
+                    settings.historyExpandedStates.split(";").mapNotNull { pair ->
+                        val parts = pair.split(":")
+                        if (parts.size == 2) parts[0] to (parts[1] == "true") else null
+                    }.toMap()
+                }
+                
+                historyScrollPosition = settings.historyScrollPosition
+                historyScrollOffset = settings.historyScrollOffset
+                settingsScrollPosition = settings.settingsScrollPosition
+                android.util.Log.d(TAG, "Loaded settings scroll position: $settingsScrollPosition")
+                
+                mapCenterPosition = if (settings.mapCenterLat != null && settings.mapCenterLon != null) {
+                    settings.mapCenterLat.toDouble() to settings.mapCenterLon.toDouble()
+                } else null
+                
+                mapZoomLevel = settings.mapZoomLevel.toDouble()
+                mapRailwayLayerVisible = settings.mapRailwayLayerVisible
+                
+                mergeSettings = trainRecordManager.mergeSettings
+                
+                specifiedDeviceAddress = settings.specifiedDeviceAddress
+                
+                searchOrderList = if (settings.searchOrderList.isEmpty()) {
+                    emptyList()
+                } else {
+                    settings.searchOrderList.split(",").filter { it.isNotBlank() }
+                }
+                
+                autoConnectEnabled = settings.autoConnectEnabled
+                
+                bleClient.setSpecifiedDeviceAddress(specifiedDeviceAddress)
+                
+                Log.d(TAG, "Loaded settings from Room: deviceName=${settingsDeviceName} tab=${currentTab} specifiedDevice=${specifiedDeviceAddress} searchOrder=${searchOrderList.size} autoConnect=${autoConnectEnabled}")
+            } catch (e: Exception) {
+                Log.e(TAG, "Error loading settings from Room", e)
+            }
         }
-        
-        val expandedStatesStr = settingsPrefs.getString("history_expanded_states", "")
-        historyExpandedStates = if (expandedStatesStr.isNullOrEmpty()) {
-            emptyMap()
-        } else {
-            expandedStatesStr.split(";").mapNotNull { pair ->
-                val parts = pair.split(":")
-                if (parts.size == 2) parts[0] to (parts[1] == "true") else null
-            }.toMap()
-        }
-        
-        historyScrollPosition = settingsPrefs.getInt("history_scroll_position", 0)
-        historyScrollOffset = settingsPrefs.getInt("history_scroll_offset", 0)
-        settingsScrollPosition = settingsPrefs.getInt("settings_scroll_position", 0)
-        
-        val centerLat = settingsPrefs.getFloat("map_center_lat", Float.NaN)
-        val centerLon = settingsPrefs.getFloat("map_center_lon", Float.NaN)
-        mapCenterPosition = if (!centerLat.isNaN() && !centerLon.isNaN()) {
-            centerLat.toDouble() to centerLon.toDouble()
-        } else null
-        
-        mapZoomLevel = settingsPrefs.getFloat("map_zoom_level", 10.0f).toDouble()
-        mapRailwayLayerVisible = settingsPrefs.getBoolean("map_railway_visible", true)
-        
-        mergeSettings = trainRecordManager.mergeSettings
-        
-        specifiedDeviceAddress = settingsPrefs.getString("specified_device_address", null)
-        
-        val searchOrderStr = settingsPrefs.getString("search_order_list", "")
-        searchOrderList = if (searchOrderStr.isNullOrEmpty()) {
-            emptyList()
-        } else {
-            searchOrderStr.split(",").filter { it.isNotBlank() }
-        }
-        
-        autoConnectEnabled = settingsPrefs.getBoolean("auto_connect_enabled", true)
-        
-        bleClient.setSpecifiedDeviceAddress(specifiedDeviceAddress)
-        
-        Log.d(TAG, "Loaded settings deviceName=${settingsDeviceName} tab=${currentTab} specifiedDevice=${specifiedDeviceAddress} searchOrder=${searchOrderList.size} autoConnect=${autoConnectEnabled}")
     }
     
     
     private fun saveSettings() {
         lifecycleScope.launch(Dispatchers.IO) {
-            val editor = settingsPrefs.edit()
-                .putString("device_name", settingsDeviceName)
-                .putInt("current_tab", currentTab)
-                .putBoolean("history_edit_mode", historyEditMode)
-                .putString("history_selected_records", historySelectedRecords.joinToString(","))
-                .putString("history_expanded_states", historyExpandedStates.map { "${it.key}:${it.value}" }.joinToString(";"))
-                .putInt("history_scroll_position", historyScrollPosition)
-                .putInt("history_scroll_offset", historyScrollOffset)
-                .putInt("settings_scroll_position", settingsScrollPosition)
-                .putFloat("map_zoom_level", mapZoomLevel.toFloat())
-                .putBoolean("map_railway_visible", mapRailwayLayerVisible)
-                .putString("specified_device_address", specifiedDeviceAddress)
-                .putString("search_order_list", searchOrderList.joinToString(","))
-                .putBoolean("auto_connect_enabled", autoConnectEnabled)
+            try {
+                val currentSettings = appSettingsRepository.getSettings()
+                val updatedSettings = currentSettings.copy(
+                    deviceName = settingsDeviceName,
+                    currentTab = currentTab,
+                    historyEditMode = historyEditMode,
+                    historySelectedRecords = historySelectedRecords.joinToString(","),
+                    historyExpandedStates = historyExpandedStates.map { "${it.key}:${it.value}" }.joinToString(";"),
+                    historyScrollPosition = historyScrollPosition,
+                    historyScrollOffset = historyScrollOffset,
+                    settingsScrollPosition = settingsScrollPosition,
+                    mapCenterLat = mapCenterPosition?.first?.toFloat(),
+                    mapCenterLon = mapCenterPosition?.second?.toFloat(),
+                    mapZoomLevel = mapZoomLevel.toFloat(),
+                    mapRailwayLayerVisible = mapRailwayLayerVisible,
+                    specifiedDeviceAddress = specifiedDeviceAddress,
+                    searchOrderList = searchOrderList.joinToString(","),
+                    autoConnectEnabled = autoConnectEnabled
+                )
                 
-            mapCenterPosition?.let { (lat, lon) ->
-                editor.putFloat("map_center_lat", lat.toFloat())
-                editor.putFloat("map_center_lon", lon.toFloat())
+                appSettingsRepository.saveSettings(updatedSettings)
+                Log.d(TAG, "Saved settings to Room: deviceName=${settingsDeviceName} tab=${currentTab} settingsScrollPosition=${settingsScrollPosition} mapCenter=${mapCenterPosition} zoom=${mapZoomLevel}")
+            } catch (e: Exception) {
+                Log.e(TAG, "Error saving settings to Room", e)
             }
-            
-            editor.apply()
-            Log.d(TAG, "Saved settings deviceName=${settingsDeviceName} tab=${currentTab} mapCenter=${mapCenterPosition} zoom=${mapZoomLevel}")
         }
     }
     
@@ -909,6 +926,7 @@ fun MainContent(
 
     
     locoInfoUtil: LocoInfoUtil,
+    trainTypeUtil: TrainTypeUtil,
     
     
     historyEditMode: Boolean,
@@ -1124,6 +1142,7 @@ fun MainContent(
                         lastUpdateTime = lastUpdateTime,
                         temporaryStatusMessage = temporaryStatusMessage,
                         locoInfoUtil = locoInfoUtil,
+                        trainTypeUtil = trainTypeUtil,
                         mergeSettings = mergeSettings,
                         onClearRecords = onClearRecords,
                         onRecordClick = onRecordClick,

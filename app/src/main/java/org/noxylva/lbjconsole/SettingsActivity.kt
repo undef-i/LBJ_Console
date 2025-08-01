@@ -1,30 +1,29 @@
 package org.noxylva.lbjconsole
 
 import android.content.Context
-import android.content.SharedPreferences
 import android.os.Bundle
 import android.widget.Switch
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
+import org.noxylva.lbjconsole.database.AppSettingsRepository
 
 class SettingsActivity : AppCompatActivity() {
     
     companion object {
-        private const val PREFS_NAME = "lbj_console_settings"
-        private const val KEY_BACKGROUND_SERVICE = "background_service_enabled"
-        
-        fun isBackgroundServiceEnabled(context: Context): Boolean {
-            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            return prefs.getBoolean(KEY_BACKGROUND_SERVICE, false)
+        suspend fun isBackgroundServiceEnabled(context: Context): Boolean {
+            val repository = AppSettingsRepository(context)
+            return repository.getSettings().backgroundServiceEnabled
         }
         
-        fun setBackgroundServiceEnabled(context: Context, enabled: Boolean) {
-            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            prefs.edit().putBoolean(KEY_BACKGROUND_SERVICE, enabled).apply()
+        suspend fun setBackgroundServiceEnabled(context: Context, enabled: Boolean) {
+            val repository = AppSettingsRepository(context)
+            repository.updateBackgroundServiceEnabled(enabled)
         }
     }
     
     private lateinit var backgroundServiceSwitch: Switch
-    private lateinit var prefs: SharedPreferences
+    private lateinit var appSettingsRepository: AppSettingsRepository
     
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -33,7 +32,7 @@ class SettingsActivity : AppCompatActivity() {
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
         supportActionBar?.title = "Settings"
         
-        prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        appSettingsRepository = AppSettingsRepository(this)
         
         initViews()
         setupListeners()
@@ -41,12 +40,16 @@ class SettingsActivity : AppCompatActivity() {
     
     private fun initViews() {
         backgroundServiceSwitch = findViewById(R.id.switch_background_service)
-        backgroundServiceSwitch.isChecked = isBackgroundServiceEnabled(this)
+        lifecycleScope.launch {
+            backgroundServiceSwitch.isChecked = isBackgroundServiceEnabled(this@SettingsActivity)
+        }
     }
     
     private fun setupListeners() {
         backgroundServiceSwitch.setOnCheckedChangeListener { _, isChecked ->
-            setBackgroundServiceEnabled(this, isChecked)
+            lifecycleScope.launch {
+                setBackgroundServiceEnabled(this@SettingsActivity, isChecked)
+            }
             
             if (isChecked) {
                 BackgroundService.startService(this)

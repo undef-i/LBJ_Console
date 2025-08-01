@@ -84,7 +84,7 @@ class TrainRecord(jsonData: JSONObject? = null) {
             
             _coordinates = null
             
-            Log.d(TAG, "Successfully parsed: train=$train, dir=$direction, speed=$speed")
+            Log.d(TAG, "Successfully parsed: train=$train, dir=$direction, speed=$speed, lbjClass='$lbjClass'")
         } catch (e: Exception) {
             Log.e(TAG, "JSON parse error: ${e.message}", e)
             
