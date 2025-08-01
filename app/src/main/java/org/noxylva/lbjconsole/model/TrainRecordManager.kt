@@ -7,6 +7,8 @@ import android.util.Log
 import kotlinx.coroutines.*
 import org.json.JSONArray
 import org.json.JSONObject
+import org.noxylva.lbjconsole.database.TrainDatabase
+import org.noxylva.lbjconsole.database.TrainRecordEntity
 import java.io.File
 import java.io.FileWriter
 import java.text.SimpleDateFormat
@@ -27,6 +29,8 @@ class TrainRecordManager(private val context: Context) {
     private val trainRecords = CopyOnWriteArrayList<TrainRecord>()
     private val recordCount = AtomicInteger(0)
     private val prefs: SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    private val database = TrainDatabase.getDatabase(context)
+    private val trainRecordDao = database.trainRecordDao()
     private val ioScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     
     var mergeSettings = MergeSettings()
@@ -34,8 +38,33 @@ class TrainRecordManager(private val context: Context) {
     
     init {
         ioScope.launch {
+            migrateFromSharedPreferences()
             loadRecords()
             loadMergeSettings()
+        }
+    }
+    
+    private suspend fun migrateFromSharedPreferences() {
+        try {
+            val jsonStr = prefs.getString(KEY_RECORDS, null)
+            if (jsonStr != null && jsonStr != "[]") {
+                val jsonArray = JSONArray(jsonStr)
+                val records = mutableListOf<TrainRecordEntity>()
+                
+                for (i in 0 until jsonArray.length()) {
+                    val jsonObject = jsonArray.getJSONObject(i)
+                    val trainRecord = TrainRecord(jsonObject)
+                    records.add(TrainRecordEntity.fromTrainRecord(trainRecord))
+                }
+                
+                if (records.isNotEmpty()) {
+                    trainRecordDao.insertRecords(records)
+                    prefs.edit().remove(KEY_RECORDS).apply()
+                    Log.d(TAG, "Migrated ${records.size} records from SharedPreferences to Room database")
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to migrate records: ${e.message}")
         }
     }
     
@@ -52,11 +81,16 @@ class TrainRecordManager(private val context: Context) {
         
         
         while (trainRecords.size > MAX_RECORDS) {
-            trainRecords.removeAt(trainRecords.size - 1)
+            val removedRecord = trainRecords.removeAt(trainRecords.size - 1)
+            ioScope.launch {
+                trainRecordDao.deleteRecordById(removedRecord.uniqueId)
+            }
         }
         
         recordCount.incrementAndGet()
-        saveRecords()
+        ioScope.launch {
+            trainRecordDao.insertRecord(TrainRecordEntity.fromTrainRecord(record))
+        }
         return record
     }
     
@@ -73,6 +107,16 @@ class TrainRecordManager(private val context: Context) {
         
         return trainRecords.filter { record ->
             matchFilter(record)
+        }
+    }
+    
+    suspend fun getFilteredRecordsFromDatabase(): List<TrainRecord> {
+        return try {
+            val entities = trainRecordDao.getFilteredRecords(filterTrain, filterRoute, filterDirection)
+            entities.map { it.toTrainRecord() }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to get filtered records from database: ${e.message}")
+            emptyList()
         }
     }
     
@@ -118,32 +162,56 @@ class TrainRecordManager(private val context: Context) {
     }
     
     
+    suspend fun refreshRecordsFromDatabase() {
+        try {
+            val entities = trainRecordDao.getAllRecords()
+            trainRecords.clear()
+            entities.forEach { entity ->
+                trainRecords.add(entity.toTrainRecord())
+            }
+            recordCount.set(trainRecords.size)
+            Log.d(TAG, "Refreshed ${trainRecords.size} records from database")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to refresh records from database: ${e.message}")
+        }
+    }
+    
+    
     fun clearRecords() {
         trainRecords.clear()
         recordCount.set(0)
-        saveRecords()
+        ioScope.launch {
+            trainRecordDao.deleteAllRecords()
+        }
     }
     
     fun deleteRecord(record: TrainRecord): Boolean {
         val result = trainRecords.remove(record)
         if (result) {
             recordCount.decrementAndGet()
-            saveRecords()
+            ioScope.launch {
+                trainRecordDao.deleteRecordById(record.uniqueId)
+            }
         }
         return result
     }
 
     fun deleteRecords(records: List<TrainRecord>): Int {
         var deletedCount = 0
+        val idsToDelete = mutableListOf<String>()
+        
         records.forEach { record ->
             if (trainRecords.remove(record)) {
                 deletedCount++
+                idsToDelete.add(record.uniqueId)
             }
         }
         
         if (deletedCount > 0) {
             recordCount.addAndGet(-deletedCount)
-            saveRecords()
+            ioScope.launch {
+                trainRecordDao.deleteRecordsByIds(idsToDelete)
+            }
         }
         return deletedCount
     }
@@ -151,12 +219,9 @@ class TrainRecordManager(private val context: Context) {
     private fun saveRecords() {
         ioScope.launch {
             try {
-                val jsonArray = JSONArray()
-                for (record in trainRecords) {
-                    jsonArray.put(record.toJSON())
-                }
-                prefs.edit().putString(KEY_RECORDS, jsonArray.toString()).apply()
-                Log.d(TAG, "Saved ${trainRecords.size} records")
+                val entities = trainRecords.map { TrainRecordEntity.fromTrainRecord(it) }
+                trainRecordDao.insertRecords(entities)
+                Log.d(TAG, "Saved ${trainRecords.size} records to database")
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to save records: ${e.message}")
             }
@@ -164,19 +229,17 @@ class TrainRecordManager(private val context: Context) {
     }
     
     
-    private fun loadRecords() {
+    private suspend fun loadRecords() {
         try {
-            val jsonStr = prefs.getString(KEY_RECORDS, "[]")
-            val jsonArray = JSONArray(jsonStr)
+            val entities = trainRecordDao.getAllRecords()
             trainRecords.clear()
             
-            for (i in 0 until jsonArray.length()) {
-                val jsonObject = jsonArray.getJSONObject(i)
-                trainRecords.add(TrainRecord(jsonObject))
+            entities.forEach { entity ->
+                trainRecords.add(entity.toTrainRecord())
             }
             
             recordCount.set(trainRecords.size)
-            Log.d(TAG, "Loaded ${trainRecords.size} records")
+            Log.d(TAG, "Loaded ${trainRecords.size} records from database")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to load records: ${e.message}")
         }
@@ -348,5 +411,42 @@ class TrainRecordManager(private val context: Context) {
             Log.e(TAG, "Failed to load merge settings: ${e.message}")
             mergeSettings = MergeSettings()
         }
+    }
+    
+    suspend fun exportRecordsToJson(): JSONArray {
+        val jsonArray = JSONArray()
+        try {
+            val entities = trainRecordDao.getAllRecords()
+            entities.forEach { entity ->
+                val record = entity.toTrainRecord()
+                jsonArray.put(record.toJSON())
+            }
+            Log.d(TAG, "Exported ${entities.size} records to JSON")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to export records to JSON: ${e.message}")
+        }
+        return jsonArray
+    }
+    
+    suspend fun importRecordsFromJson(jsonArray: JSONArray): Int {
+        var importedCount = 0
+        try {
+            val records = mutableListOf<TrainRecordEntity>()
+            for (i in 0 until jsonArray.length()) {
+                val jsonObject = jsonArray.getJSONObject(i)
+                val trainRecord = TrainRecord(jsonObject)
+                records.add(TrainRecordEntity.fromTrainRecord(trainRecord))
+            }
+            
+            if (records.isNotEmpty()) {
+                trainRecordDao.insertRecords(records)
+                importedCount = records.size
+                refreshRecordsFromDatabase()
+                Log.d(TAG, "Imported $importedCount records from JSON")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to import records from JSON: ${e.message}")
+        }
+        return importedCount
     }
 }
