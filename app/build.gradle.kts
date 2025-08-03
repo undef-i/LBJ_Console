@@ -13,8 +13,8 @@ android {
         applicationId = "org.noxylva.lbjconsole"
         minSdk = 29
         targetSdk = 35
-        versionCode = 9
-        versionName = "0.1.0"
+        versionCode = 10
+        versionName = "0.1.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -60,6 +60,7 @@ android {
     }
     lint {
         disable += "NullSafeMutableLiveData"
+        warning += "MissingPermission"
     }
 }
 

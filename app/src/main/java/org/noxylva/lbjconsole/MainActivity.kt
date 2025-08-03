@@ -62,6 +62,7 @@ import org.noxylva.lbjconsole.ui.screens.HistoryScreen
 
 import org.noxylva.lbjconsole.ui.screens.MapScreen
 import org.noxylva.lbjconsole.ui.screens.SettingsScreen
+import org.noxylva.lbjconsole.ui.screens.CardMapView
 
 import org.noxylva.lbjconsole.ui.theme.LBJConsoleTheme
 import org.noxylva.lbjconsole.util.LocoInfoUtil
@@ -108,6 +109,7 @@ class MainActivity : ComponentActivity() {
     private var historyExpandedStates by mutableStateOf<Map<String, Boolean>>(emptyMap())
     private var historyScrollPosition by mutableStateOf(0)
     private var historyScrollOffset by mutableStateOf(0)
+    private var historyCardMapStates by mutableStateOf<Map<String, CardMapView>>(emptyMap())
     private var mapCenterPosition by mutableStateOf<Pair<Double, Double>?>(null)
     private var mapZoomLevel by mutableStateOf(10.0)
     private var mapRailwayLayerVisible by mutableStateOf(true)
@@ -365,12 +367,14 @@ class MainActivity : ComponentActivity() {
                         historyEditMode = historyEditMode,
                         historySelectedRecords = historySelectedRecords,
                         historyExpandedStates = historyExpandedStates,
+                        historyMapViewStates = historyCardMapStates,
                         historyScrollPosition = historyScrollPosition,
                         historyScrollOffset = historyScrollOffset,
-                        onHistoryStateChange = { editMode, selectedRecords, expandedStates, scrollPosition, scrollOffset ->
+                        onHistoryStateChange = { editMode, selectedRecords, expandedStates, mapStates, scrollPosition, scrollOffset ->
                             historyEditMode = editMode
                             historySelectedRecords = selectedRecords
                             historyExpandedStates = expandedStates
+                            historyCardMapStates = mapStates
                             historyScrollPosition = scrollPosition
                             historyScrollOffset = scrollOffset
                             saveSettings()
@@ -932,9 +936,10 @@ fun MainContent(
     historyEditMode: Boolean,
     historySelectedRecords: Set<String>,
     historyExpandedStates: Map<String, Boolean>,
+    historyMapViewStates: Map<String, CardMapView>,
     historyScrollPosition: Int,
     historyScrollOffset: Int,
-    onHistoryStateChange: (Boolean, Set<String>, Map<String, Boolean>, Int, Int) -> Unit,
+    onHistoryStateChange: (Boolean, Set<String>, Map<String, Boolean>, Map<String, CardMapView>, Int, Int) -> Unit,
     
     
     settingsScrollPosition: Int,
@@ -1040,7 +1045,7 @@ fun MainContent(
                         },
                         navigationIcon = {
                             IconButton(onClick = {
-                                onHistoryStateChange(false, emptySet(), historyExpandedStates, historyScrollPosition, historyScrollOffset)
+                                onHistoryStateChange(false, emptySet(), historyExpandedStates, historyMapViewStates, historyScrollPosition, historyScrollOffset)
                             }) {
                                 Icon(
                                     imageVector = Icons.Default.Close,
@@ -1086,7 +1091,7 @@ fun MainContent(
                         }
                                         
                                         onDeleteRecords(recordsToDelete.toList())
-                                        onHistoryStateChange(false, emptySet(), historyExpandedStates, historyScrollPosition, historyScrollOffset)
+                                        onHistoryStateChange(false, emptySet(), historyExpandedStates, historyMapViewStates, historyScrollPosition, historyScrollOffset)
                                     }
                                 }
                             ) {
@@ -1151,6 +1156,7 @@ fun MainContent(
                         editMode = historyEditMode,
                         selectedRecords = historySelectedRecords,
                         expandedStates = historyExpandedStates,
+                        mapViewStates = historyMapViewStates,
                         scrollPosition = historyScrollPosition,
                         scrollOffset = historyScrollOffset,
                         onStateChange = onHistoryStateChange

@@ -19,6 +19,6 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "LBJ Receiver"
+rootProject.name = "LBJ_Console"
 include(":app")
  

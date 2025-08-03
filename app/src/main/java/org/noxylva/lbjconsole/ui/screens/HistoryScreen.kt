@@ -43,8 +43,14 @@ import org.noxylva.lbjconsole.model.MergeSettings
 import org.noxylva.lbjconsole.model.GroupBy
 import org.noxylva.lbjconsole.util.LocoInfoUtil
 import org.noxylva.lbjconsole.util.TrainTypeUtil
+import org.osmdroid.util.BoundingBox
+import org.osmdroid.util.GeoPoint
 import java.text.SimpleDateFormat
 import java.util.*
+import androidx.compose.ui.platform.LocalContext
+
+data class CardMapView(val center: GeoPoint, val zoom: Double)
+
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -328,6 +334,7 @@ fun TrainRecordItem(
                                             controller.setZoom(10.0)
                                             controller.setCenter(coordinates)
                                             this.isTilesScaledToDpi = true
+                                            tilesScaleFactor = context.resources.displayMetrics.density * 0.2f
                                             this.setUseDataConnection(true)
 
                                             try {
@@ -409,6 +416,8 @@ fun MergedTrainRecordItem(
     mergeSettings: MergeSettings? = null,
     isInEditMode: Boolean = false,
     selectedRecords: List<TrainRecord> = emptyList(),
+    mapViewState: CardMapView?,
+    onMapViewStateChange: (CardMapView) -> Unit,
     onToggleSelection: (TrainRecord) -> Unit = {},
     onLongClick: (TrainRecord) -> Unit = {},
     modifier: Modifier = Modifier
@@ -659,93 +668,152 @@ fun MergedTrainRecordItem(
                     exit = shrinkVertically(animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)) + fadeOut(animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow))
                 ) {
                     Column {
-                        val coordinates = remember { latestRecord.getCoordinates() }
+                        val allValidCoordinates = remember {
+                            mergedRecord.records
+                                .mapNotNull { it.getCoordinates() }
+                                .filter { it.latitude != 0.0 || it.longitude != 0.0 }
+                        }
 
+                        if (allValidCoordinates.isNotEmpty()) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(220.dp)
+                                    .padding(vertical = 4.dp)
+                                    .clip(RoundedCornerShape(8.dp)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                AndroidView(
+                                    modifier = Modifier.clickable(
+                                        indication = null,
+                                        interactionSource = remember { MutableInteractionSource() }
+                                    ) {},
+                                    factory = { context ->
+                                        MapView(context).apply {
+                                            setTileSource(TileSourceFactory.MAPNIK)
+                                            setMultiTouchControls(true)
+                                            zoomController.setVisibility(org.osmdroid.views.CustomZoomButtonsController.Visibility.NEVER)
+                                            isHorizontalMapRepetitionEnabled = false
+                                            isVerticalMapRepetitionEnabled = false
+                                            setHasTransientState(true)
+                                            setOnTouchListener { v, event ->
+                                                v.parent?.requestDisallowInterceptTouchEvent(true)
+                                                false
+                                            }
+                                            this.isTilesScaledToDpi = true
+                                            tilesScaleFactor = context.resources.displayMetrics.density * 0.2f
+                                            this.setUseDataConnection(true)
 
+                                            addMapListener(object : org.osmdroid.events.MapListener {
+                                                override fun onScroll(event: org.osmdroid.events.ScrollEvent?): Boolean {
+                                                    val center = mapCenter
+                                                    val zoom = zoomLevelDouble
+                                                    onMapViewStateChange(CardMapView(center as GeoPoint, zoom))
+                                                    return true
+                                                }
 
-                        if (coordinates != null) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(220.dp)
-                                .padding(vertical = 4.dp)
-                                .clip(RoundedCornerShape(8.dp)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            AndroidView(
-                                modifier = Modifier.clickable(
-                                    indication = null,
-                                    interactionSource = remember { MutableInteractionSource() }
-                                ) {},
-                                factory = { context ->
-                                    MapView(context).apply {
-                                        setTileSource(TileSourceFactory.MAPNIK)
-                                        setMultiTouchControls(true)
-                                        zoomController.setVisibility(org.osmdroid.views.CustomZoomButtonsController.Visibility.NEVER)
-                                        isHorizontalMapRepetitionEnabled = false
-                                        isVerticalMapRepetitionEnabled = false
-                                        setHasTransientState(true)
-                                        setOnTouchListener { v, event ->
-                                            v.parent?.requestDisallowInterceptTouchEvent(true)
-                                            false
-                                        }
-                                        controller.setZoom(10.0)
-                                        controller.setCenter(coordinates)
-                                        this.isTilesScaledToDpi = true
-                                        this.setUseDataConnection(true)
+                                                override fun onZoom(event: org.osmdroid.events.ZoomEvent?): Boolean {
+                                                    val center = mapCenter
+                                                    val zoom = zoomLevelDouble
+                                                    onMapViewStateChange(CardMapView(center as GeoPoint, zoom))
+                                                    return true
+                                                }
+                                            })
 
-                                        try {
-                                            val railwayTileSource = XYTileSource(
-                                                "OpenRailwayMap", 8, 16, 256, ".png",
-                                                arrayOf(
-                                                    "https://a.tiles.openrailwayMap.org/standard/",
-                                                    "https://b.tiles.openrailwaymap.org/standard/",
-                                                    "https://c.tiles.openrailwaymap.org/standard/"
-                                                ),
-                                                "© OpenRailwayMap contributors, © OpenStreetMap contributors"
-                                            )
+                                            try {
+                                                val railwayTileSource = XYTileSource(
+                                                    "OpenRailwayMap", 8, 16, 256, ".png",
+                                                    arrayOf(
+                                                        "https://a.tiles.openrailwaymap.org/standard/",
+                                                        "https://b.tiles.openrailwaymap.org/standard/",
+                                                        "https://c.tiles.openrailwaymap.org/standard/"
+                                                    ),
+                                                    "© OpenRailwayMap contributors, © OpenStreetMap contributors"
+                                                )
 
-                                            val railwayProvider = MapTileProviderBasic(context)
-                                            railwayProvider.tileSource = railwayTileSource
+                                                val railwayProvider = MapTileProviderBasic(context)
+                                                railwayProvider.tileSource = railwayTileSource
 
-                                            val railwayOverlay = TilesOverlay(railwayProvider, context)
-                                            railwayOverlay.loadingBackgroundColor = android.graphics.Color.TRANSPARENT
-                                            railwayOverlay.loadingLineColor = android.graphics.Color.TRANSPARENT
+                                                val railwayOverlay = TilesOverlay(railwayProvider, context)
+                                                railwayOverlay.loadingBackgroundColor = android.graphics.Color.TRANSPARENT
+                                                railwayOverlay.loadingLineColor = android.graphics.Color.TRANSPARENT
 
-                                            overlays.add(railwayOverlay)
-                                        } catch (e: Exception) {
-                                            e.printStackTrace()
-                                        }
-
-                                        try {
-                                            val locationProvider = GpsMyLocationProvider(context).apply {
-                                                locationUpdateMinDistance = 10f
-                                                locationUpdateMinTime = 1000
+                                                overlays.add(railwayOverlay)
+                                            } catch (e: Exception) {
+                                                e.printStackTrace()
                                             }
 
-                                            MyLocationNewOverlay(locationProvider, this).apply {
-                                                enableMyLocation()
-                                            }.also { overlays.add(it) }
-                                        } catch (e: Exception) {
-                                            e.printStackTrace()
+                                            try {
+                                                val locationProvider = GpsMyLocationProvider(context).apply {
+                                                    locationUpdateMinDistance = 10f
+                                                    locationUpdateMinTime = 1000
+                                                }
+
+                                                MyLocationNewOverlay(locationProvider, this).apply {
+                                                    enableMyLocation()
+                                                }.also { overlays.add(it) }
+                                            } catch (e: Exception) {
+                                                e.printStackTrace()
+                                            }
+
+                                            mergedRecord.records.forEach { record ->
+                                                record.getCoordinates()?.let { coordinates ->
+                                                    if (coordinates.latitude != 0.0 || coordinates.longitude != 0.0) {
+                                                        val recordMap = record.toMap()
+                                                        val marker = Marker(this)
+                                                        marker.position = coordinates
+
+                                                        val latStr = String.format("%.4f", coordinates.latitude)
+                                                        val lonStr = String.format("%.4f", coordinates.longitude)
+                                                        val coordStr = "${latStr}°N, ${lonStr}°E"
+                                                        marker.title = recordMap["train"]?.toString() ?: "列车"
+                                                        marker.snippet = coordStr
+                                                        marker.setInfoWindowAnchor(Marker.ANCHOR_CENTER, 0f)
+
+                                                        overlays.add(marker)
+                                                        if (record == latestRecord) {
+                                                            marker.showInfoWindow()
+                                                        }
+                                                    }
+                                                }
+                                            }
+
+                                            if (mapViewState != null) {
+                                                controller.setZoom(mapViewState.zoom)
+                                                controller.setCenter(mapViewState.center)
+                                            } else if (allValidCoordinates.size > 1) {
+                                                val boundingBox = BoundingBox.fromGeoPoints(allValidCoordinates)
+                                                val layoutListener = object : android.view.View.OnLayoutChangeListener {
+                                                    override fun onLayoutChange(v: android.view.View?, left: Int, top: Int, right: Int, bottom: Int, oldLeft: Int, oldTop: Int, oldRight: Int, oldBottom: Int) {
+                                                        if (width > 0 && height > 0) {
+                                                            val zoomLevel = org.osmdroid.views.MapView.getTileSystem().getBoundingBoxZoom(boundingBox, width, height)
+                                                            val latSpan = boundingBox.latitudeSpan
+                                                            val adjustedCenter = org.osmdroid.util.GeoPoint(
+                                                                boundingBox.center.latitude + latSpan * 0.25, // Shift center UP (north) to create top padding
+                                                                boundingBox.center.longitude
+                                                            )
+                                                            val newZoom = zoomLevel - 1.0
+                                                            
+                                                            controller.setZoom(newZoom)
+                                                            controller.setCenter(adjustedCenter)
+                                                            onMapViewStateChange(CardMapView(adjustedCenter, newZoom))
+
+                                                            removeOnLayoutChangeListener(this)
+                                                        }
+                                                    }
+                                                }
+                                                addOnLayoutChangeListener(layoutListener)
+                                            } else if (allValidCoordinates.isNotEmpty()) {
+                                                val center = allValidCoordinates.first()
+                                                val zoom = 14.0
+                                                controller.setZoom(zoom)
+                                                controller.setCenter(center)
+                                                onMapViewStateChange(CardMapView(center, zoom))
+                                            }
                                         }
-
-                                        val marker = Marker(this)
-                                        marker.position = coordinates
-
-                                        val latStr = String.format("%.4f", coordinates.latitude)
-                                        val lonStr = String.format("%.4f", coordinates.longitude)
-                                        val coordStr = "${latStr}°N, ${lonStr}°E"
-                                        marker.title = recordMap["train"]?.toString() ?: "列车"
-                                        marker.snippet = coordStr
-                                        marker.setInfoWindowAnchor(Marker.ANCHOR_CENTER, 0f)
-
-                                        overlays.add(marker)
-                                        marker.showInfoWindow()
-                                    }
-                                },
-                                update = { mapView -> mapView.invalidate() }
-                            )
+                                    },
+                                    update = { mapView -> mapView.invalidate() }
+                                )
                             }
                         }
                         if (recordMap.containsKey("position_info")) {
@@ -903,9 +971,10 @@ fun HistoryScreen(
     editMode: Boolean = false,
     selectedRecords: Set<String> = emptySet(),
     expandedStates: Map<String, Boolean> = emptyMap(),
+    mapViewStates: Map<String, CardMapView> = emptyMap(),
     scrollPosition: Int = 0,
     scrollOffset: Int = 0,
-    onStateChange: (Boolean, Set<String>, Map<String, Boolean>, Int, Int) -> Unit = { _, _, _, _, _ -> }
+    onStateChange: (Boolean, Set<String>, Map<String, Boolean>, Map<String, CardMapView>, Int, Int) -> Unit = { _, _, _, _, _, _ -> }
 ) {
 
     val refreshKey = latestRecord?.timestamp?.time ?: 0
@@ -934,6 +1003,9 @@ fun HistoryScreen(
     }
     val expandedStatesMap = remember(expandedStates) { 
         mutableStateMapOf<String, Boolean>().apply { putAll(expandedStates) }
+    }
+    val mapViewStatesMap = remember(mapViewStates) {
+        mutableStateMapOf<String, CardMapView>().apply { putAll(mapViewStates) }
     }
     
     val listState = rememberLazyListState(
@@ -965,28 +1037,28 @@ fun HistoryScreen(
 
     LaunchedEffect(isInEditMode, selectedRecordsList.size) {
         val selectedIds = selectedRecordsList.map { it.uniqueId }.toSet()
-        onStateChange(isInEditMode, selectedIds, expandedStatesMap.toMap(), listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
+        onStateChange(isInEditMode, selectedIds, expandedStatesMap.toMap(), mapViewStatesMap.toMap(), listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
     }
     
     LaunchedEffect(expandedStatesMap.toMap()) {
         if (!isInEditMode) {
             val selectedIds = selectedRecordsList.map { it.uniqueId }.toSet()
             delay(50)
-            onStateChange(isInEditMode, selectedIds, expandedStatesMap.toMap(), listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
+            onStateChange(isInEditMode, selectedIds, expandedStatesMap.toMap(), mapViewStatesMap.toMap(), listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
         }
     }
     
     LaunchedEffect(listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset) {
         if (!isInEditMode) {
             val selectedIds = selectedRecordsList.map { it.uniqueId }.toSet()
-            onStateChange(isInEditMode, selectedIds, expandedStatesMap.toMap(), listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
+            onStateChange(isInEditMode, selectedIds, expandedStatesMap.toMap(), mapViewStatesMap.toMap(), listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
         }
     }
 
     LaunchedEffect(selectedRecordsList.size) {
         if (selectedRecordsList.isEmpty() && isInEditMode) {
             isInEditMode = false
-            onStateChange(false, emptySet(), expandedStatesMap.toMap(), listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
+            onStateChange(false, emptySet(), expandedStatesMap.toMap(), mapViewStatesMap.toMap(), listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
         }
     }
     
@@ -1092,6 +1164,10 @@ fun HistoryScreen(
                                         mergeSettings = mergeSettings,
                                         isInEditMode = isInEditMode,
                                         selectedRecords = selectedRecordsList,
+                                        mapViewState = mapViewStatesMap[item.groupKey],
+                                        onMapViewStateChange = { newState ->
+                                            mapViewStatesMap[item.groupKey] = newState
+                                        },
                                         onToggleSelection = { record ->
                                             if (selectedRecordsList.contains(record)) {
                                                 selectedRecordsList.remove(record)
