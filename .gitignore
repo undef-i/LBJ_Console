@@ -13,10 +13,10 @@ captures
 .externalNativeBuild
 .cxx
 local.properties
-local.properties
 *.ps1
 .*.bat
 *.jks
 *.keystore
 *.base64
 docs
+gradle.properties

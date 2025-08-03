@@ -15,7 +15,7 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import org.noxylva.lbjconsole.model.MergeSettings
 import org.noxylva.lbjconsole.model.GroupBy
 import org.noxylva.lbjconsole.model.TimeWindow
@@ -24,7 +24,6 @@ import org.noxylva.lbjconsole.BackgroundService
 import org.noxylva.lbjconsole.NotificationService
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.DisposableEffect
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -195,23 +194,14 @@ fun SettingsScreen(
                 
                 val context = LocalContext.current
                 val notificationService = remember(context) { NotificationService(context) }
-                
-                var backgroundServiceEnabled by remember { mutableStateOf(false) }
-                
+
+                var backgroundServiceEnabled by remember { mutableStateOf<Boolean?>(null) }
+                val coroutineScope = rememberCoroutineScope()
+
                 LaunchedEffect(context) {
                     backgroundServiceEnabled = SettingsActivity.isBackgroundServiceEnabled(context)
                 }
-                
-                LaunchedEffect(backgroundServiceEnabled) {
-                    SettingsActivity.setBackgroundServiceEnabled(context, backgroundServiceEnabled)
-                    
-                    if (backgroundServiceEnabled) {
-                        BackgroundService.startService(context)
-                    } else {
-                        BackgroundService.stopService(context)
-                    }
-                }
-                
+
                 var notificationEnabled by remember(context, notificationService) {
                     mutableStateOf(notificationService.isNotificationEnabled())
                 }
@@ -233,12 +223,24 @@ fun SettingsScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    Switch(
-                        checked = backgroundServiceEnabled,
-                        onCheckedChange = { enabled ->
-                            backgroundServiceEnabled = enabled
-                        }
-                    )
+                    if (backgroundServiceEnabled == null) {
+                        CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                    } else {
+                        Switch(
+                            checked = backgroundServiceEnabled!!,
+                            onCheckedChange = { enabled ->
+                                backgroundServiceEnabled = enabled
+                                coroutineScope.launch {
+                                    SettingsActivity.setBackgroundServiceEnabled(context, enabled)
+                                    if (enabled) {
+                                        BackgroundService.startService(context)
+                                    } else {
+                                        BackgroundService.stopService(context)
+                                    }
+                                }
+                            }
+                        )
+                    }
                 }
                 
                 Row(
