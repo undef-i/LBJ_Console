@@ -19,4 +19,3 @@ local.properties
 *.keystore
 *.base64
 docs
-gradle.properties

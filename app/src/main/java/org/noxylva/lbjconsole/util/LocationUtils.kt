@@ -52,7 +52,7 @@ object LocationUtils {
             
             val minuteEndIndex = dmsString.indexOf('′')
             if (minuteEndIndex == -1) {
-                return degrees
+                return null
             }
             
             val minutes = dmsString.substring(degreeIndex + 1, minuteEndIndex).toDouble()

@@ -845,6 +845,13 @@ class MainActivity : ComponentActivity() {
         }
     }
     
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        Log.d(TAG, "onNewIntent called")
+        currentTab = 0
+        forceUiRefresh()
+    }
+
     override fun onResume() {
         super.onResume()
         Log.d(TAG, "App resumed")
