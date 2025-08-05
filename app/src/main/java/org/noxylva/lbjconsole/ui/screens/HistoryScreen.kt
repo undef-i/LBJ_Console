@@ -782,7 +782,7 @@ fun MergedTrainRecordItem(
                                                 controller.setZoom(mapViewState.zoom)
                                                 controller.setCenter(mapViewState.center)
                                             } else if (allValidCoordinates.size > 1) {
-                                                val boundingBox = BoundingBox.fromGeoPoints(allValidCoordinates)
+                                                val boundingBox = BoundingBox.fromGeoPoints(allValidCoordinates.filter { it.latitude != 0.0 || it.longitude != 0.0 })
                                                 val layoutListener = object : android.view.View.OnLayoutChangeListener {
                                                     override fun onLayoutChange(v: android.view.View?, left: Int, top: Int, right: Int, bottom: Int, oldLeft: Int, oldTop: Int, oldRight: Int, oldBottom: Int) {
                                                         if (width > 0 && height > 0) {
@@ -805,7 +805,7 @@ fun MergedTrainRecordItem(
                                                 addOnLayoutChangeListener(layoutListener)
                                             } else if (allValidCoordinates.isNotEmpty()) {
                                                 val center = allValidCoordinates.first()
-                                                val zoom = 14.0
+                                                val zoom = 10.0
                                                 controller.setZoom(zoom)
                                                 controller.setCenter(center)
                                                 onMapViewStateChange(CardMapView(center, zoom))

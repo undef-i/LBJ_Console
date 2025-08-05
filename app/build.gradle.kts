@@ -13,8 +13,8 @@ android {
         applicationId = "org.noxylva.lbjconsole"
         minSdk = 29
         targetSdk = 35
-        versionCode = 10
-        versionName = "0.1.1"
+        versionCode = 11
+        versionName = "0.1.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
