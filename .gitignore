@@ -19,3 +19,6 @@ local.properties
 *.keystore
 *.base64
 docs
+linux
+windows
+android_original
