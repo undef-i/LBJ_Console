@@ -4,8 +4,8 @@ import android.util.Log
 import org.osmdroid.util.GeoPoint
 
 
-object LocationUtils {
-    private const val TAG = "LocationUtils"
+object LocationUtil {
+    private const val TAG = "LocationUtil"
 
     
     fun parsePositionInfo(positionInfo: String): GeoPoint? {

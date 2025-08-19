@@ -1,19 +1,28 @@
 package org.noxylva.lbjconsole.model
 
+import android.content.Context
 import android.util.Log
 import org.json.JSONObject
 import java.util.*
 import org.osmdroid.util.GeoPoint
-import org.noxylva.lbjconsole.util.LocationUtils
+import org.noxylva.lbjconsole.util.LocationUtil
+import org.noxylva.lbjconsole.util.LocoTypeUtil
 
 class TrainRecord(jsonData: JSONObject? = null) {
     companion object {
         const val TAG = "TrainRecord"
         private var nextId = 0L
+        private var LocoTypeUtil: LocoTypeUtil? = null
         
         @Synchronized
         private fun generateUniqueId(): String {
             return "${System.currentTimeMillis()}_${++nextId}"
+        }
+        
+        fun initializeLocoTypeUtil(context: Context) {
+            if (LocoTypeUtil == null) {
+                LocoTypeUtil = LocoTypeUtil(context)
+            }
         }
     }
     
@@ -75,19 +84,25 @@ class TrainRecord(jsonData: JSONObject? = null) {
             position = jsonData.optString("pos", "")
             time = jsonData.optString("time", "")
             loco = jsonData.optString("loco", "")
-            locoType = jsonData.optString("loco_type", "")
+            
+            // 不再直接从JSON获取loco_type，而是从loco字段前三位获取
+            locoType = if (loco.isNotEmpty()) {
+                val prefix = if (loco.length >= 3) loco.take(3) else loco
+                LocoTypeUtil?.getLocoTypeByCode(prefix) ?: ""
+            } else {
+                ""
+            }
+            
             lbjClass = jsonData.optString("lbj_class", "")
             route = jsonData.optString("route", "")
             positionInfo = jsonData.optString("position_info", "")
             rssi = jsonData.optDouble("rssi", 0.0)
             
-            
             _coordinates = null
             
-            Log.d(TAG, "Successfully parsed: train=$train, dir=$direction, speed=$speed, lbjClass='$lbjClass'")
+            Log.d(TAG, "Successfully parsed: train=$train, dir=$direction, speed=$speed, lbjClass='$lbjClass', locoType='$locoType'")
         } catch (e: Exception) {
             Log.e(TAG, "JSON parse error: ${e.message}", e)
-            
             
             try { train = jsonData.optString("train", "") } catch (e: Exception) { }
             try { direction = jsonData.optInt("dir", 0) } catch (e: Exception) { }
@@ -107,7 +122,7 @@ class TrainRecord(jsonData: JSONObject? = null) {
         }
         
         
-        _coordinates = LocationUtils.parsePositionInfo(positionInfo)
+        _coordinates = LocationUtil.parsePositionInfo(positionInfo)
         return _coordinates
     }
     private fun isValidValue(value: String): Boolean {

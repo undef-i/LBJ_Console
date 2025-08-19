@@ -110,15 +110,13 @@ class MainActivity : ComponentActivity() {
     private var historyScrollPosition by mutableStateOf(0)
     private var historyScrollOffset by mutableStateOf(0)
     private var historyCardMapStates by mutableStateOf<Map<String, CardMapView>>(emptyMap())
+    private var settingsScrollPosition by mutableStateOf(0)
     private var mapCenterPosition by mutableStateOf<Pair<Double, Double>?>(null)
     private var mapZoomLevel by mutableStateOf(10.0)
     private var mapRailwayLayerVisible by mutableStateOf(true)
     
-    private var settingsScrollPosition by mutableStateOf(0)
-    
     private var mergeSettings by mutableStateOf(MergeSettings())
     
-
     
     private var targetDeviceName = "LBJReceiver"
     private var specifiedDeviceAddress by mutableStateOf<String?>(null)
@@ -185,9 +183,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
+        TrainRecord.initializeLocoTypeUtil(this)
         
         loadSettings()
-        
         
         val permissions = mutableListOf<String>()
         
@@ -199,99 +197,23 @@ class MainActivity : ComponentActivity() {
             ))
         } else {
             permissions.addAll(arrayOf(
-                Manifest.permission.BLUETOOTH,
-                Manifest.permission.BLUETOOTH_ADMIN
+                Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.ACCESS_COARSE_LOCATION
             ))
         }
         
-        permissions.addAll(arrayOf(
-            Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.ACCESS_COARSE_LOCATION
-        ))
-        
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            permissions.add(Manifest.permission.POST_NOTIFICATIONS)
+        if (permissions.isNotEmpty()) {
+            requestPermissions.launch(permissions.toTypedArray())
+        } else {
+            startAutoScanAndConnect()
         }
         
-        requestPermissions.launch(permissions.toTypedArray())
-        
+        Configuration.getInstance().userAgentValue = packageName
         
         bleClient.setTrainInfoCallback { jsonData ->
             handleTrainInfo(jsonData)
         }
         
-        bleClient.setHighFrequencyReconnect(true)
-        bleClient.setConnectionLostCallback {
-            runOnUiThread {
-                deviceStatus = "连接丢失，正在重连..."
-                showDisconnectButton = false
-                if (showConnectionDialog) {
-                    foundDevices = emptyList()
-                    startScan()
-                }
-            }
-        }
-        
-        bleClient.setConnectionSuccessCallback { address ->
-            runOnUiThread {
-                deviceAddress = address
-                deviceStatus = "已连接"
-                showDisconnectButton = true
-                Log.d(TAG, "Connection success callback: address=$address")
-            }
-        }
-        
-        
-        lifecycleScope.launch {
-            try {
-                locoInfoUtil.loadLocoData()
-                Log.d(TAG, "Loaded locomotive data")
-            } catch (e: Exception) {
-                Log.e(TAG, "Load locomotive data failed", e)
-            }
-            
-
-        }
-        
-
-        
-        
-        try {
-            
-            val osmCacheDir = File(cacheDir, "osm").apply { mkdirs() }
-            val tileCache = File(osmCacheDir, "tiles").apply { mkdirs() }
-            
-            
-            Configuration.getInstance().apply {
-                userAgentValue = packageName
-                load(this@MainActivity, getSharedPreferences("osmdroid", Context.MODE_PRIVATE))
-                osmdroidBasePath = osmCacheDir
-                osmdroidTileCache = tileCache
-                expirationOverrideDuration = 86400000L * 7 
-                tileDownloadThreads = 4
-                tileFileSystemThreads = 4
-                
-                setUserAgentValue("LBJConsole/1.0")
-            }
-            
-            Log.d(TAG, "OSM cache configured")
-        } catch (e: Exception) {
-            Log.e(TAG, "OSM cache config failed", e)
-        }
-        
-        saveSettings()
-        
-        lifecycleScope.launch {
-            if (SettingsActivity.isBackgroundServiceEnabled(this@MainActivity)) {
-                BackgroundService.startService(this@MainActivity)
-            }
-        }
-        
-        enableEdgeToEdge()
-        
-        WindowCompat.getInsetsController(window, window.decorView).apply {
-            isAppearanceLightStatusBars = false
-        }
         setContent {
             LBJConsoleTheme {
                 val scope = rememberCoroutineScope()
@@ -334,7 +256,6 @@ class MainActivity : ComponentActivity() {
                             Log.d(TAG, "Auto connect enabled: $enabled")
                         },
                         
-                        
                         latestRecord = latestRecord,
                         recentRecords = recentRecords,
                         lastUpdateTime = lastUpdateTime,
@@ -344,9 +265,10 @@ class MainActivity : ComponentActivity() {
                         },
                         onClearMonitorLog = {
                             recentRecords.clear()
+                            latestRecord = null
+                            lastUpdateTime = null
                             temporaryStatusMessage = null
                         },
-                        
                         
                         allRecords = trainRecordManager.getMixedRecords(),
                         mergedRecords = trainRecordManager.getMergedRecords(),
@@ -499,7 +421,6 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                     
-
                 }
             }
         }
@@ -762,7 +683,7 @@ class MainActivity : ComponentActivity() {
                 val settings = appSettingsRepository.getSettings()
                 
                 settingsDeviceName = settings.deviceName
-                targetDeviceName = settingsDeviceName
+                targetDeviceName = settings.deviceName
                 currentTab = settings.currentTab
                 historyEditMode = settings.historyEditMode
                 
