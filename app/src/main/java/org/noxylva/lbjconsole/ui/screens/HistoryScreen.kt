@@ -155,7 +155,18 @@ fun TrainRecordItem(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(2.dp))
+                val hasTrainDisplay = recordMap["train"]?.toString()?.isNotEmpty() ?: false
+                val hasRouteOrPosition = record.route.trim().isNotEmpty() && !record.route.trim().all { it == '*' } ||
+                    record.position.trim().isNotEmpty() && !record.position.trim().all { it == '-' || it == '.' } && record.position.trim() != "<NUL>"
+                val hasSpeed = record.speed.trim().isNotEmpty() &&
+                    !record.speed.trim().all { it == '*' || it == '-' } &&
+                    record.speed.trim() != "NUL" && record.speed.trim() != "<NUL>"
+                val hasLocoInfo = locoInfoUtil != null && record.locoType.isNotEmpty() && record.loco.isNotEmpty() && 
+                    locoInfoUtil.getLocoInfoDisplay(record.locoType, record.loco) != null
+                
+                val shouldShowOnlyTime = !hasTrainDisplay && !hasRouteOrPosition && !hasSpeed && !hasLocoInfo
+
+                Spacer(modifier = Modifier.height(if (shouldShowOnlyTime) 0.dp else 2.dp))
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -229,7 +240,7 @@ fun TrainRecordItem(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(if (shouldShowOnlyTime) 0.dp else 2.dp))
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -289,7 +300,7 @@ fun TrainRecordItem(
                         record.loco
                     )
                     if (locoInfoText != null) {
-                        Spacer(modifier = Modifier.height(4.dp))
+                        Spacer(modifier = Modifier.height(if (shouldShowOnlyTime) 0.dp else 2.dp))
                         Text(
                             text = locoInfoText,
                             fontSize = 14.sp,
@@ -297,7 +308,8 @@ fun TrainRecordItem(
                         )
                     }
                 }
-                Spacer(modifier = Modifier.height(8.dp))
+                
+                Spacer(modifier = Modifier.height(if (shouldShowOnlyTime) 0.dp else 2.dp))
                 AnimatedVisibility(
                     visible = isExpanded,
                     enter = expandVertically(animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)) + fadeIn(animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)),
@@ -597,7 +609,7 @@ fun MergedTrainRecordItem(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(2.dp))
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -657,7 +669,7 @@ fun MergedTrainRecordItem(
                         latestRecord.loco
                     )
                     if (locoInfoText != null) {
-                        Spacer(modifier = Modifier.height(4.dp))
+                        Spacer(modifier = Modifier.height(2.dp))
                         Text(
                             text = locoInfoText,
                             fontSize = 14.sp,
@@ -665,7 +677,7 @@ fun MergedTrainRecordItem(
                         )
                     }
                 }
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(2.dp))
                 AnimatedVisibility(
                     visible = isExpanded,
                     enter = expandVertically(animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)) + fadeIn(animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)),
@@ -793,7 +805,7 @@ fun MergedTrainRecordItem(
                                                             val zoomLevel = org.osmdroid.views.MapView.getTileSystem().getBoundingBoxZoom(boundingBox, width, height)
                                                             val latSpan = boundingBox.latitudeSpan
                                                             val adjustedCenter = org.osmdroid.util.GeoPoint(
-                                                                boundingBox.center.latitude + latSpan * 0.25, // Shift center UP (north) to create top padding
+                                                                boundingBox.center.latitude + latSpan * 0.25,
                                                                 boundingBox.center.longitude
                                                             )
                                                             val newZoom = zoomLevel - 1.0
