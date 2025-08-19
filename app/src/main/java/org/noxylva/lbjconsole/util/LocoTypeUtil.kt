@@ -13,7 +13,7 @@ class LocoTypeUtil(private val context: Context) {
     
     private fun loadLocoTypeMapping() {
         try {
-            context.assets.open("loco_number_info.csv").use { inputStream ->
+            context.assets.open("loco_type_info.csv").use { inputStream ->
                 BufferedReader(InputStreamReader(inputStream)).use { reader ->
                     reader.lines().forEach { line ->
                         val parts = line.split(",")

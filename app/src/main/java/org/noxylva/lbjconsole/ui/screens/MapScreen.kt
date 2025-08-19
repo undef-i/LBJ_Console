@@ -7,7 +7,12 @@ import android.graphics.PorterDuff
 import android.graphics.PorterDuffColorFilter
 import android.util.Log
 import android.view.ViewGroup
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.MyLocation
@@ -16,11 +21,16 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import kotlinx.coroutines.launch
@@ -112,7 +122,6 @@ fun MapScreen(
                     
                     val recordMap = record.toMap()
                     title = recordMap["train"]?.toString() ?: "列车"
-                    
                     val latStr = String.format("%.4f", point.latitude)
                     val lonStr = String.format("%.4f", point.longitude)
                     val coordStr = "${latStr}°N, ${lonStr}°E"
@@ -574,8 +583,8 @@ fun Context.getCompactMarkerDrawable(color: Int): Drawable {
 
 
 private fun Int.directionText(): String = when (this) {
-    1 -> "↓"
-    3 -> "↑"
+    1 -> "下行"
+    3 -> "上行"
     else -> "?"
 }
 
@@ -585,50 +594,143 @@ private fun TrainMarkerDialog(
     position: GeoPoint?,
     onDismiss: () -> Unit
 ) {
+    val recordMap = record.toMap()
+    
+    val displayItems = recordMap.filterKeys { 
+        it !in setOf("train", "direction", "time") 
+    }.toList()
+    
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
-            
-            val recordMap = record.toMap()
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(text = recordMap["train"]?.toString() ?: "列车", style = MaterialTheme.typography.titleLarge)
+                Text(
+                    text = recordMap["train"]?.toString() ?: "列车",
+                    style = MaterialTheme.typography.headlineSmall,
+                    modifier = Modifier.weight(1f)
+                )
                 recordMap["direction"]?.let { direction ->
-                    Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = direction,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        text = (direction as? Int)?.directionText() ?: direction.toString(),
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontSize = 12.sp
+                        ),
+                        modifier = Modifier.padding(start = 8.dp)
                     )
                 }
             }
         },
         text = {
-            Column {
-                
-                record.toMap().forEach { (key, value) ->
-                    if (key != "train" && key != "direction") {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .padding(vertical = 8.dp)
+            ) {
+                displayItems.forEach { (key, value) ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        val title = when (key) {
+                            "speed" -> "速度"
+                            "position" -> "位置"
+                            "time" -> "时间"
+                            "loco" -> "机车号"
+                            "loco_type" -> "机车型号"
+                            "route" -> "线路"
+                            "rssi" -> "信号强度"
+                            "timestamp" -> "时间"
+                            "receivedTimestamp" -> "接收时间"
+                            else -> key
+                        }
+                        
                         Text(
-                            text = value,
-                            style = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier.padding(vertical = 2.dp)
+                            text = title,
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        Text(
+                            text = value.toString(),
+                            style = MaterialTheme.typography.bodyMedium
                         )
                     }
                 }
                 
-                
                 position?.let {
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "坐标: ${String.format("%.6f", it.latitude)}, ${String.format("%.6f", it.longitude)}",
-                        style = MaterialTheme.typography.bodyMedium
-                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "坐标信息",
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        Text(
+                            text = "${String.format("%.6f", it.latitude)}, ${String.format("%.6f", it.longitude)}",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
                 }
             }
         },
         confirmButton = {
             TextButton(onClick = onDismiss) {
-                Text("确定")
+                Text("关闭")
             }
         }
     )
+}
+
+@Composable
+private fun InfoSection(title: String, items: List<Pair<String, String>>) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.padding(bottom = 4.dp)
+        )
+        Card(
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant
+            ),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                items.forEach { (key, value) ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 2.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = value.toString(),
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun InfoSectionSimple(title: String, items: List<Pair<String, String>>) {
+    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleMedium
+        )
+        items.forEach { (key, value) ->
+            Text(
+                text = value.toString(),
+                style = MaterialTheme.typography.bodyMedium
+            )
+        }
+    }
 }

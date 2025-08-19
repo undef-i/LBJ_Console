@@ -145,7 +145,7 @@ class NotificationService(private val context: Context) {
             }
             
             if (isValidValue(trainRecord.position)) {
-                remoteViews.setTextViewText(R.id.notification_position, "${trainRecord.position.trim()}K")
+                remoteViews.setTextViewText(R.id.notification_position, "${trainRecord.position.trim().removeSuffix(".")}K")
                 remoteViews.setViewVisibility(R.id.notification_position, View.VISIBLE)
             } else {
                 remoteViews.setViewVisibility(R.id.notification_position, View.GONE)

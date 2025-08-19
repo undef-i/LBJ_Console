@@ -271,7 +271,7 @@ fun TrainRecordItem(
 
                             if (isValidPosition) {
                                 Text(
-                                    text = "${position}K",
+                                    text = "${position.trim().removeSuffix(".")}K",
                                     fontSize = 16.sp,
                                     color = MaterialTheme.colorScheme.onSurface,
                                     modifier = Modifier.alignByBaseline()
@@ -640,7 +640,7 @@ fun MergedTrainRecordItem(
 
                             if (isValidPosition) {
                                 Text(
-                                    text = "${position}K",
+                                    text = "${position.trim().removeSuffix(".")}K",
                                     fontSize = 16.sp,
                                     color = MaterialTheme.colorScheme.onSurface,
                                     modifier = Modifier.alignByBaseline()
@@ -923,12 +923,12 @@ fun MergedTrainRecordItem(
                                     }
                                     if (recordItem.position.isNotEmpty() && recordItem.position != "<NUL>") {
                                         if (isNotEmpty()) append(" ")
-                                        append("${recordItem.position}K")
+                                        append("${recordItem.position.trim().removeSuffix(".")}K")
                                     }
                                 }
                                 
                                 Text(
-                                    text = locationText.ifEmpty { "位置未知" },
+                                    text = locationText.ifEmpty { "" },
                                     fontSize = 11.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )

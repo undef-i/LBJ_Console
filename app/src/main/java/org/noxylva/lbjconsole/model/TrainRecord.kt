@@ -85,7 +85,6 @@ class TrainRecord(jsonData: JSONObject? = null) {
             time = jsonData.optString("time", "")
             loco = jsonData.optString("loco", "")
             
-            // 不再直接从JSON获取loco_type，而是从loco字段前三位获取
             locoType = if (loco.isNotEmpty()) {
                 val prefix = if (loco.length >= 3) loco.take(3) else loco
                 LocoTypeUtil?.getLocoTypeByCode(prefix) ?: ""
@@ -161,12 +160,14 @@ class TrainRecord(jsonData: JSONObject? = null) {
         trainDisplay?.takeIf { it.isNotEmpty() }?.let { map["train"] = it }
         
         if (directionText != "未知") map["direction"] = directionText
-        if (isValidValue(speed)) map["speed"] = "速度: ${speed.trim()} km/h"
-        if (isValidValue(position)) map["position"] = "位置: ${position.trim()} km"
+        if (isValidValue(speed)) map["speed"] = "${speed.trim()} km/h"
+        if (isValidValue(position)) {
+            map["position"] = "${position.trim().removeSuffix(".")} K"
+        }
         val timeToDisplay = if (showDetailedTime) {
             val dateFormat = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault())
             if (isValidValue(time)) {
-                "列车时间: $time\n接收时间: ${dateFormat.format(receivedTimestamp)}"
+                "$time\n${dateFormat.format(receivedTimestamp)}"
             } else {
                 dateFormat.format(receivedTimestamp)
             }
@@ -180,13 +181,13 @@ class TrainRecord(jsonData: JSONObject? = null) {
             }
         }
         map["time"] = timeToDisplay
-        if (isValidValue(loco)) map["loco"] = "机车号: ${loco.trim()}"
-        if (isValidValue(locoType)) map["loco_type"] = "型号: ${locoType.trim()}"
-        if (isValidValue(route)) map["route"] = "线路: ${route.trim()}"
+        if (isValidValue(loco)) map["loco"] = "${loco.trim()}"
+        if (isValidValue(locoType)) map["loco_type"] = "${locoType.trim()}"
+        if (isValidValue(route)) map["route"] = "${route.trim()}"
         if (isValidValue(positionInfo) && !positionInfo.trim().matches(Regex(".*(<NUL>|\\s)*.*"))) {
-            map["position_info"] = "位置信息: ${positionInfo.trim()}"
+            map["position_info"] = "${positionInfo.trim()}"
         }
-        if (rssi != 0.0) map["rssi"] = "信号强度: $rssi dBm"
+        if (rssi != 0.0) map["rssi"] = "$rssi dBm"
         
         return map
     }
