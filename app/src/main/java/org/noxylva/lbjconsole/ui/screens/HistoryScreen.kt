@@ -162,18 +162,20 @@ fun TrainRecordItem(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    val trainDisplay = recordMap["train"]?.toString() ?: "未知列车"
+                    val trainDisplay = recordMap["train"]?.toString() ?: ""
 
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Text(
-                            text = trainDisplay,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 20.sp,
-                            color = MaterialTheme.colorScheme.primary
-                        )
+                        if (trainDisplay.isNotEmpty()) {
+                            Text(
+                                text = trainDisplay,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 20.sp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
 
                         val directionText = when (record.direction) {
                             1 -> "下"
@@ -203,16 +205,16 @@ fun TrainRecordItem(
                             }
                         }
                     }
-
+                    
                     val formattedInfo = when {
                         record.locoType.isNotEmpty() && record.loco.isNotEmpty() -> {
-                            val shortLoco = if (record.loco.length > 5) {
-                                record.loco.takeLast(5)
-                            } else {
-                                record.loco
-                            }
-                            "${record.locoType}-${shortLoco}"
+                        val shortLoco = if (record.loco.length > 5) {
+                            record.loco.takeLast(5)
+                        } else {
+                            record.loco
                         }
+                        "${record.locoType}-${shortLoco}"
+                    }
                         record.locoType.isNotEmpty() -> record.locoType
                         record.loco.isNotEmpty() -> record.loco
                         else -> ""
@@ -528,18 +530,20 @@ fun MergedTrainRecordItem(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    val trainDisplay = recordMap["train"]?.toString() ?: "未知列车"
+                    val trainDisplay = recordMap["train"]?.toString() ?: ""
 
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Text(
-                            text = trainDisplay,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 20.sp,
-                            color = MaterialTheme.colorScheme.primary
-                        )
+                        if (trainDisplay.isNotEmpty()) {
+                            Text(
+                                text = trainDisplay,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 20.sp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
 
                         val directionText = when (latestRecord.direction) {
                             1 -> "下"
@@ -572,13 +576,13 @@ fun MergedTrainRecordItem(
 
                     val formattedInfo = when {
                         latestRecord.locoType.isNotEmpty() && latestRecord.loco.isNotEmpty() -> {
-                            val shortLoco = if (latestRecord.loco.length > 5) {
-                                latestRecord.loco.takeLast(5)
-                            } else {
-                                latestRecord.loco
-                            }
-                            "${latestRecord.locoType}-${shortLoco}"
+                        val shortLoco = if (latestRecord.loco.length > 5) {
+                            latestRecord.loco.takeLast(5)
+                        } else {
+                            latestRecord.loco
                         }
+                        "${latestRecord.locoType}-${shortLoco}"
+                    }
                         latestRecord.locoType.isNotEmpty() -> latestRecord.locoType
                         latestRecord.loco.isNotEmpty() -> latestRecord.loco
                         else -> ""

@@ -149,7 +149,7 @@ class TrainRecord(jsonData: JSONObject? = null) {
             lbjClass.trim()
         } else if (isValidValue(train)) {
             train.trim()
-        } else ""
+        } else null
         
         val map = mutableMapOf<String, String>()
         
@@ -158,7 +158,8 @@ class TrainRecord(jsonData: JSONObject? = null) {
         map["receivedTimestamp"] = dateFormat.format(receivedTimestamp)
         
         
-        if (trainDisplay.isNotEmpty()) map["train"] = trainDisplay
+        trainDisplay?.takeIf { it.isNotEmpty() }?.let { map["train"] = it }
+        
         if (directionText != "未知") map["direction"] = directionText
         if (isValidValue(speed)) map["speed"] = "速度: ${speed.trim()} km/h"
         if (isValidValue(position)) map["position"] = "位置: ${position.trim()} km"
