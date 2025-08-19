@@ -297,12 +297,12 @@ class TrainRecordManager(private val context: Context) {
     }
     
     private fun processRecordsForMerging(records: List<TrainRecord>, settings: MergeSettings): List<MergedTrainRecord> {
-        val currentTime = Date()
-        val validRecords = records.filter { record ->
-            settings.timeWindow.seconds?.let { windowSeconds ->
+        val validRecords = settings.timeWindow.seconds?.let { windowSeconds ->
+            val currentTime = Date()
+            records.filter { record ->
                 (currentTime.time - record.timestamp.time) / 1000 <= windowSeconds
-            } ?: true
-        }
+            }
+        } ?: records
         
         return when (settings.groupBy) {
             GroupBy.TRAIN_OR_LOCO -> processTrainOrLocoMerging(validRecords)
@@ -317,11 +317,14 @@ class TrainRecordManager(private val context: Context) {
                 
                 groupedRecords.mapNotNull { (groupKey, groupRecords) ->
                     if (groupRecords.size >= 2) {
-                        val sortedRecords = groupRecords.sortedBy { it.timestamp }
-                        val latestRecord = sortedRecords.maxByOrNull { it.timestamp }!!
+                        val latestRecord = if (groupRecords.size > 1) {
+                            groupRecords.maxByOrNull { it.timestamp } ?: groupRecords.last()
+                        } else {
+                            groupRecords.last()
+                        }
                         MergedTrainRecord(
                             groupKey = groupKey,
-                            records = sortedRecords,
+                            records = groupRecords.toList(),
                             latestRecord = latestRecord
                         )
                     } else null
@@ -331,7 +334,9 @@ class TrainRecordManager(private val context: Context) {
     }
     
     private fun processTrainOrLocoMerging(records: List<TrainRecord>): List<MergedTrainRecord> {
-        val groups = mutableListOf<MutableList<TrainRecord>>()
+        val trainGroups = mutableMapOf<String, MutableList<TrainRecord>>()
+        val locoGroups = mutableMapOf<String, MutableList<TrainRecord>>()
+        val mergedGroups = mutableSetOf<MutableList<TrainRecord>>()
         
         records.forEach { record ->
             val train = record.train.trim()
@@ -341,38 +346,44 @@ class TrainRecordManager(private val context: Context) {
                 return@forEach
             }
             
-            var foundGroup: MutableList<TrainRecord>? = null
+            var targetGroup: MutableList<TrainRecord>? = null
             
-            for (group in groups) {
-                val shouldMerge = group.any { existingRecord ->
-                    val existingTrain = existingRecord.train.trim()
-                    val existingLoco = existingRecord.loco.trim()
-                    
-                    (train.isNotEmpty() && train != "<NUL>" && train == existingTrain) ||
-                    (loco.isNotEmpty() && loco != "<NUL>" && loco == existingLoco)
-                }
-                
-                if (shouldMerge) {
-                    foundGroup = group
-                    break
-                }
+            if (train.isNotEmpty() && train != "<NUL>") {
+                targetGroup = trainGroups[train]
             }
             
-            if (foundGroup != null) {
-                foundGroup.add(record)
+            if (targetGroup == null && loco.isNotEmpty() && loco != "<NUL>") {
+                targetGroup = locoGroups[loco]
+            }
+            
+            if (targetGroup != null) {
+                targetGroup.add(record)
+                if (train.isNotEmpty() && train != "<NUL>") {
+                    trainGroups[train] = targetGroup
+                }
+                if (loco.isNotEmpty() && loco != "<NUL>") {
+                    locoGroups[loco] = targetGroup
+                }
             } else {
-                groups.add(mutableListOf(record))
+                val newGroup = mutableListOf(record)
+                mergedGroups.add(newGroup)
+                
+                if (train.isNotEmpty() && train != "<NUL>") {
+                    trainGroups[train] = newGroup
+                }
+                if (loco.isNotEmpty() && loco != "<NUL>") {
+                    locoGroups[loco] = newGroup
+                }
             }
         }
         
-        return groups.mapNotNull { groupRecords ->
+        return mergedGroups.mapNotNull { groupRecords ->
             if (groupRecords.size >= 2) {
-                val sortedRecords = groupRecords.sortedBy { it.timestamp }
-                val latestRecord = sortedRecords.maxByOrNull { it.timestamp }!!
+                val latestRecord = groupRecords.maxByOrNull { it.timestamp } ?: groupRecords.lastOrNull() ?: return@mapNotNull null
                 val groupKey = "${latestRecord.train}_OR_${latestRecord.loco}"
                 MergedTrainRecord(
                     groupKey = groupKey,
-                    records = sortedRecords,
+                    records = groupRecords.toList(),
                     latestRecord = latestRecord
                 )
             } else null

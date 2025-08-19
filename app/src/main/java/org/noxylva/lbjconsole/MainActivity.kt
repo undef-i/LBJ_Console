@@ -503,7 +503,7 @@ class MainActivity : ComponentActivity() {
     
     
     private fun handleTrainInfo(jsonData: JSONObject) {
-        Log.d(TAG, "Received train data=${jsonData.toString().take(50)}...")
+        Log.d(TAG, "Received train data=${jsonData.toString()}...")
         
         runOnUiThread {
             try {
