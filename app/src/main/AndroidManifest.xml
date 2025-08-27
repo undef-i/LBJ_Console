@@ -41,13 +41,6 @@
             </intent-filter>
         </activity>
         
-        <activity
-            android:name=".SettingsActivity"
-            android:exported="false"
-            android:label="Settings"
-            android:parentActivityName=".MainActivity"
-            android:theme="@style/Theme.LBJConsole" />
-        
         <service
             android:name=".BackgroundService"
             android:enabled="true"

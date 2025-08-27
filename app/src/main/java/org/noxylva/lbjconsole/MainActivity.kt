@@ -364,11 +364,7 @@ class MainActivity : ComponentActivity() {
                         },
                         appVersion = getAppVersion(),
                         locoInfoUtil = locoInfoUtil,
-                        trainTypeUtil = trainTypeUtil,
-                        onOpenSettings = {
-                            val intent = Intent(this@MainActivity, SettingsActivity::class.java)
-                            startActivity(intent)
-                        }
+                        trainTypeUtil = trainTypeUtil
                     )
                     
                     if (showConnectionDialog) {
@@ -877,9 +873,7 @@ fun MainContent(
     mapCenterPosition: Pair<Double, Double>?,
     mapZoomLevel: Double,
     mapRailwayLayerVisible: Boolean,
-    onMapStateChange: (Pair<Double, Double>?, Double, Boolean) -> Unit,
-    
-    onOpenSettings: () -> Unit
+    onMapStateChange: (Pair<Double, Double>?, Double, Boolean) -> Unit
 ) {
     val statusColor = if (isConnected) Color(0xFF4CAF50) else Color(0xFFFF5722)
     

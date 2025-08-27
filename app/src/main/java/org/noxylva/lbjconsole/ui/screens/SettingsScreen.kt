@@ -19,7 +19,7 @@ import kotlinx.coroutines.launch
 import org.noxylva.lbjconsole.model.MergeSettings
 import org.noxylva.lbjconsole.model.GroupBy
 import org.noxylva.lbjconsole.model.TimeWindow
-import org.noxylva.lbjconsole.SettingsActivity
+import org.noxylva.lbjconsole.database.AppSettingsRepository
 import org.noxylva.lbjconsole.BackgroundService
 import org.noxylva.lbjconsole.NotificationService
 import androidx.compose.foundation.rememberScrollState
@@ -199,7 +199,8 @@ fun SettingsScreen(
                 val coroutineScope = rememberCoroutineScope()
 
                 LaunchedEffect(context) {
-                    backgroundServiceEnabled = SettingsActivity.isBackgroundServiceEnabled(context)
+                    val repository = AppSettingsRepository(context)
+                    backgroundServiceEnabled = repository.getSettings().backgroundServiceEnabled
                 }
 
                 var notificationEnabled by remember(context, notificationService) {
@@ -231,7 +232,8 @@ fun SettingsScreen(
                             onCheckedChange = { enabled ->
                                 backgroundServiceEnabled = enabled
                                 coroutineScope.launch {
-                                    SettingsActivity.setBackgroundServiceEnabled(context, enabled)
+                                    val repository = AppSettingsRepository(context)
+                                    repository.updateBackgroundServiceEnabled(enabled)
                                     if (enabled) {
                                         BackgroundService.startService(context)
                                     } else {
