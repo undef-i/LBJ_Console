@@ -1,12 +1,12 @@
 # LBJ Console
 
-LBJ Console 是一款 Android 应用程序，用于通过 BLE 从 [SX1276_Receive_LBJ](https://github.com/undef-i/SX1276_Receive_LBJ) 设备接收并显示列车预警消息，功能包括：
+LBJ Console 是一款应用程序，用于通过 BLE 从 [SX1276_Receive_LBJ](https://github.com/undef-i/SX1276_Receive_LBJ) 设备接收并显示列车预警消息，功能包括：
 
 - 接收列车预警消息，支持可选的手机推送通知。
 - 在地图上显示预警消息的 GPS 信息。
 - 基于内置数据文件显示机车配属，机车类型和车次类型。
 
-
+主分支目前只适配了 Android 。如需在其它平台上面使用，请参考 [flutter](https://github.com/undef-i/LBJ_Console/tree/flutter) 分支自行编译。
 ## 数据文件
 
 LBJ Console 依赖以下数据文件，位于 `app/src/main/assets/` 目录，用于支持机车配属和车次信息的展示：

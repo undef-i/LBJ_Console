@@ -1,5 +1,6 @@
 package org.noxylva.lbjconsole.ui.screens
 
+import android.content.Intent
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -22,6 +23,7 @@ import org.noxylva.lbjconsole.model.TimeWindow
 import org.noxylva.lbjconsole.database.AppSettingsRepository
 import org.noxylva.lbjconsole.BackgroundService
 import org.noxylva.lbjconsole.NotificationService
+import org.noxylva.lbjconsole.FilePickerActivity
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.DisposableEffect
@@ -426,6 +428,66 @@ fun SettingsScreen(
         }
         
 
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+            ),
+            shape = RoundedCornerShape(16.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Storage,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        "数据管理",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+                
+                val context = LocalContext.current
+                
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    Button(
+                        onClick = {
+                            val intent = FilePickerActivity.createExportIntent(context)
+                            context.startActivity(intent)
+                        },
+                        modifier = Modifier.weight(1f).padding(horizontal = 4.dp)
+                    ) {
+                        Icon(Icons.Default.Upload, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("导出")
+                    }
+                    
+                    Button(
+                        onClick = {
+                            val intent = FilePickerActivity.createImportIntent(context)
+                            context.startActivity(intent)
+                        },
+                        modifier = Modifier.weight(1f).padding(horizontal = 4.dp)
+                    ) {
+                        Icon(Icons.Default.Download, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("导入")
+                    }
+                }
+            }
+        }
+        
         Text(
              text = "LBJ Console v$appVersion by undef-i",
              style = MaterialTheme.typography.bodySmall,
