@@ -164,3 +164,4 @@ fabric.properties
 !/gradle/wrapper/gradle-wrapper.jar
 macos/Flutter/ephemeral/flutter_export_environment.sh
 macos/Flutter/ephemeral/Flutter-Generated.xcconfig
+*.py
