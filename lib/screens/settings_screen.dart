@@ -12,6 +12,8 @@ import 'package:file_picker/file_picker.dart';
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:cross_file/cross_file.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -388,15 +390,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
               children: [
                 Icon(Icons.share, color: Theme.of(context).colorScheme.primary),
                 const SizedBox(width: 12),
-                Text('数据导出', style: AppTheme.titleMedium),
+                Text('数据分享', style: AppTheme.titleMedium),
               ],
             ),
             const SizedBox(height: 16),
             _buildActionButton(
-              icon: Icons.download,
-              title: '导出数据',
-              subtitle: '将记录导出为JSON文件',
-              onTap: _exportData,
+              icon: Icons.share,
+              title: '分享数据',
+              subtitle: '将记录分享为JSON文件',
+              onTap: _shareData,
             ),
             const SizedBox(height: 12),
             _buildActionButton(
@@ -501,42 +503,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  Future<String?> _selectDirectory() async {
-    try {
-      // 使用文件选择器选择目录
-      final directory = await FilePicker.platform.getDirectoryPath(
-        dialogTitle: '选择导出位置',
-        lockParentWindow: true,
-      );
-      return directory;
-    } catch (e) {
-      // 如果文件选择器失败，使用默认的文档目录
-      try {
-        final documentsDir = await getApplicationDocumentsDirectory();
-        final exportDir = Directory(path.join(documentsDir.path, 'LBJ_Exports'));
-        if (!await exportDir.exists()) {
-          await exportDir.create(recursive: true);
-        }
-        return exportDir.path;
-      } catch (e) {
-        return null;
-      }
-    }
-  }
 
-  Future<void> _exportData() async {
+
+  Future<void> _shareData() async {
     final scaffoldMessenger = ScaffoldMessenger.of(context);
 
     try {
-      // 让用户选择保存位置
-      final fileName =
-          'LBJ_Console_${DateTime.now().year}${DateTime.now().month.toString().padLeft(2, '0')}${DateTime.now().day.toString().padLeft(2, '0')}.json';
-      
-      String? selectedDirectory = await _selectDirectory();
-      if (selectedDirectory == null) return;
-
-      final filePath = path.join(selectedDirectory, fileName);
-
       showDialog(
         context: context,
         barrierDismissible: false,
@@ -545,46 +517,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
             children: [
               CircularProgressIndicator(),
               SizedBox(width: 16),
-              Text('正在导出数据...'),
+              Text('正在准备分享数据...'),
             ],
           ),
         ),
       );
 
       try {
-        final exportedPath = await _databaseService.exportDataAsJson(customPath: filePath);
+        final exportedPath = await _databaseService.exportDataAsJson();
         Navigator.pop(context);
 
         if (exportedPath != null) {
           final file = File(exportedPath);
           final fileName = file.path.split(Platform.pathSeparator).last;
           
-          scaffoldMessenger.showSnackBar(
-            SnackBar(
-              content: Text('数据已导出到：$fileName'),
-              action: SnackBarAction(
-                label: '查看',
-                onPressed: () async {
-                  // 打开文件所在目录
-                  try {
-                    final directory = file.parent;
-                    await Process.run('explorer', [directory.path]);
-                  } catch (e) {
-                    // 如果无法打开目录，显示路径
-                    scaffoldMessenger.showSnackBar(
-                      SnackBar(
-                        content: Text('文件路径：${file.path}'),
-                      ),
-                    );
-                  }
-                },
-              ),
-            ),
+          await Share.shareXFiles(
+            [XFile(file.path)],
+            subject: 'LBJ Console Data',
+            text: '',
           );
         } else {
           scaffoldMessenger.showSnackBar(
             const SnackBar(
-              content: Text('导出失败'),
+              content: Text('分享失败：无法生成数据文件'),
             ),
           );
         }
@@ -592,14 +547,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
         Navigator.pop(context);
         scaffoldMessenger.showSnackBar(
           SnackBar(
-            content: Text('导出错误：$e'),
+            content: Text('分享错误：$e'),
           ),
         );
       }
     } catch (e) {
       scaffoldMessenger.showSnackBar(
         SnackBar(
-          content: Text('选择目录错误：$e'),
+          content: Text('分享错误：$e'),
         ),
       );
     }
