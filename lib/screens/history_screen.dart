@@ -244,12 +244,12 @@ class HistoryScreenState extends State<HistoryScreen> {
 
     switch (groupBy) {
       case GroupBy.trainOnly:
-        return loco != latestLoco && loco.isNotEmpty ? "机车: $loco" : "";
+        return loco != latestLoco && loco.isNotEmpty ? loco : "";
       case GroupBy.locoOnly:
-        return train != latestTrain && train.isNotEmpty ? "车次: $train" : "";
+        return train != latestTrain && train.isNotEmpty ? train : "";
       case GroupBy.trainOrLoco:
-        if (train.isNotEmpty && train != latestTrain) return "车次: $train";
-        if (loco.isNotEmpty && loco != latestLoco) return "机车: $loco";
+        if (train.isNotEmpty && train != latestTrain) return train;
+        if (loco.isNotEmpty && loco != latestLoco) return loco;
         return "";
       case GroupBy.trainAndLoco:
         return "";
@@ -261,8 +261,11 @@ class HistoryScreenState extends State<HistoryScreen> {
     if (record.route.isNotEmpty && record.route != "<NUL>")
       parts.add(record.route);
     if (record.direction != 0) parts.add(record.direction == 1 ? "下" : "上");
-    if (record.position.isNotEmpty && record.position != "<NUL>")
-      parts.add("${record.position}K");
+    if (record.position.isNotEmpty && record.position != "<NUL>") {
+      final position = record.position;
+      final cleanPosition = position.endsWith('.') ? position.substring(0, position.length - 1) : position;
+      parts.add("${cleanPosition}K");
+    }
     return parts.join(' ');
   }
 
@@ -385,12 +388,12 @@ class HistoryScreenState extends State<HistoryScreen> {
                 (record.time == "<NUL>" || record.time.isEmpty)
                     ? record.receivedTimestamp.toString().split(".")[0]
                     : record.time.split("\n")[0],
-                style: const TextStyle(fontSize: 12, color: Colors.grey),
+                style: const TextStyle(fontSize: 11, color: Colors.grey),
                 overflow: TextOverflow.ellipsis)),
         if (trainType.isNotEmpty)
           Flexible(
               child: Text(trainType,
-                  style: const TextStyle(fontSize: 12, color: Colors.grey),
+                  style: const TextStyle(fontSize: 11, color: Colors.grey),
                   overflow: TextOverflow.ellipsis))
       ]),
       const SizedBox(height: 2),
@@ -478,13 +481,13 @@ class HistoryScreenState extends State<HistoryScreen> {
               if (isValidRoute && isValidPosition) const SizedBox(width: 4),
               if (isValidPosition)
                 Flexible(
-                    child: Text("$position K",
+                    child: Text("${position.trim().endsWith('.') ? position.trim().substring(0, position.trim().length - 1) : position.trim()}K",
                         style:
                             const TextStyle(fontSize: 16, color: Colors.white),
                         overflow: TextOverflow.ellipsis))
             ])),
           if (isValidSpeed)
-            Text("$speed km/h",
+            Text("${speed.replaceAll(' ', '')} km/h",
                 style: const TextStyle(fontSize: 16, color: Colors.white),
                 textAlign: TextAlign.right)
         ]));

@@ -35,11 +35,27 @@ class LocoTypeUtil {
   Future<void> initialize() async {}
 
   String? getLocoTypeByCode(String code) {
-    return _locoTypeMap[code];
+    if (_locoTypeMap.containsKey(code)) {
+      return _locoTypeMap[code];
+    }
+    
+    if (code.length >= 4) {
+      final prefix3 = code.substring(0, 3);
+      return _locoTypeMap[prefix3];
+    }
+    
+    return null;
   }
 
   String? getLocoTypeByLocoNumber(String locoNumber) {
     if (locoNumber.length < 3) return null;
+    
+    if (locoNumber.length >= 4) {
+      final longCode = locoNumber.substring(0, 4);
+      final result = getLocoTypeByCode(longCode);
+      if (result != null) return result;
+    }
+    
     final prefix = locoNumber.substring(0, 3);
     return getLocoTypeByCode(prefix);
   }

@@ -401,10 +401,10 @@ class _MapScreenState extends State<MapScreen> {
                         _buildMaterial3DetailRow(
                             context, "类型", record.trainType),
                         _buildMaterial3DetailRow(
-                            context, "速度", "${record.speed} km/h"),
+                            context, "速度", "${record.speed.replaceAll(' ', '')} km/h"),
                         _buildMaterial3DetailRow(
-                            context, "位置", record.position),
-                        _buildMaterial3DetailRow(context, "路线", record.route),
+                            context, "位置", record.position.trim().endsWith('.') ? '${record.position.trim().substring(0, record.position.trim().length - 1)}K' : '${record.position.trim()}K'),
+                        _buildMaterial3DetailRow(context, "路线", record.route.trim().endsWith('.') ? record.route.trim().substring(0, record.route.trim().length - 1) : record.route.trim()),
                         _buildMaterial3DetailRow(
                             context, "机车", "${record.locoType}-${record.loco}"),
                         _buildMaterial3DetailRow(context, "坐标",

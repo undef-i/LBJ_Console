@@ -33,7 +33,7 @@ class AppTheme {
         unselectedItemColor: Colors.grey,
         type: BottomNavigationBarType.fixed,
       ),
-      cardTheme: CardTheme(
+      cardTheme: CardThemeData(
         color: const Color(0xFF1E1E1E),
         elevation: 2,
         shape: RoundedRectangleBorder(
@@ -82,7 +82,7 @@ class AppTheme {
           return Colors.grey.withOpacity(0.5);
         }),
       ),
-      dialogTheme: DialogTheme(
+      dialogTheme: DialogThemeData(
         backgroundColor: const Color(0xFF1E1E1E),
         elevation: 8,
         shape: RoundedRectangleBorder(

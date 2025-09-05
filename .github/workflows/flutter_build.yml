@@ -1,0 +1,61 @@
+name: Flutter Build
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.35.2'
+          channel: 'stable'
+
+      - name: Update compileSdkVersion
+        run: |
+          sed -i 's/compileSdk = 35/compileSdk = 36/g' android/app/build.gradle
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Create keystore
+        run: |
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > keystore.jks
+
+      - name: Build APK
+        run: flutter build apk --release
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+
+      - name: Build App Bundle
+        run: flutter build appbundle --release
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+
+      - name: Rename APK with tag
+        run: |
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          cp build/app/outputs/flutter-apk/app-release.apk LBJ_Console_${TAG_NAME}_android_release.apk
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            LBJ_Console_${{ github.ref_name }}_android_release.apk
+            build/app/outputs/bundle/release/app-release.aab
+          name: ${{ github.ref_name }}
+          draft: false
+          prerelease: false
