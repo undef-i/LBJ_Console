@@ -13,6 +13,158 @@ import 'package:lbjconsole/services/notification_service.dart';
 import 'package:lbjconsole/services/background_service.dart';
 import 'package:lbjconsole/themes/app_theme.dart';
 
+class _ConnectionStatusWidget extends StatefulWidget {
+  final BLEService bleService;
+  final DateTime? lastReceivedTime;
+
+  const _ConnectionStatusWidget({
+    required this.bleService,
+    required this.lastReceivedTime,
+  });
+
+  @override
+  State<_ConnectionStatusWidget> createState() =>
+      _ConnectionStatusWidgetState();
+}
+
+class _ConnectionStatusWidgetState extends State<_ConnectionStatusWidget> {
+  StreamSubscription? _connectionSubscription;
+  String _deviceStatus = "未连接";
+  bool _isConnected = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _connectionSubscription =
+        widget.bleService.connectionStream.listen((connected) {
+      if (mounted) {
+        setState(() {
+          _isConnected = connected;
+          _deviceStatus = connected ? "已连接" : "未连接";
+        });
+      }
+    });
+    _isConnected = widget.bleService.isConnected;
+    _deviceStatus = widget.bleService.deviceStatus;
+  }
+
+  @override
+  void dispose() {
+    _connectionSubscription?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (widget.lastReceivedTime == null || !_isConnected) ...[
+              Text(_deviceStatus,
+                  style: const TextStyle(color: Colors.white70, fontSize: 12)),
+            ],
+            _LastReceivedTimeWidget(
+              lastReceivedTime: widget.lastReceivedTime,
+              isConnected: _isConnected,
+            ),
+          ],
+        ),
+        const SizedBox(width: 8),
+        Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(
+            color: _isConnected ? Colors.green : Colors.red,
+            shape: BoxShape.circle,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _LastReceivedTimeWidget extends StatefulWidget {
+  final DateTime? lastReceivedTime;
+  final bool isConnected;
+
+  const _LastReceivedTimeWidget({
+    required this.lastReceivedTime,
+    required this.isConnected,
+  });
+
+  @override
+  State<_LastReceivedTimeWidget> createState() =>
+      _LastReceivedTimeWidgetState();
+}
+
+class _LastReceivedTimeWidgetState extends State<_LastReceivedTimeWidget> {
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _startTimer();
+  }
+
+  @override
+  void didUpdateWidget(_LastReceivedTimeWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.lastReceivedTime != widget.lastReceivedTime ||
+        oldWidget.isConnected != widget.isConnected) {
+      _startTimer();
+    }
+  }
+
+  void _startTimer() {
+    _timer?.cancel();
+    if (widget.lastReceivedTime != null && widget.isConnected) {
+      _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+        if (mounted) {
+          setState(() {});
+        }
+      });
+    }
+  }
+
+  String _formatTime() {
+    if (widget.lastReceivedTime == null) return '';
+
+    final now = DateTime.now();
+    final difference = now.difference(widget.lastReceivedTime!);
+
+    if (difference.inDays > 0) {
+      return '${difference.inDays}天前';
+    } else if (difference.inHours > 0) {
+      return '${difference.inHours}小时前';
+    } else if (difference.inMinutes > 0) {
+      return '${difference.inMinutes}分钟前';
+    } else {
+      return '${difference.inSeconds}秒前';
+    }
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.lastReceivedTime == null || !widget.isConnected) {
+      return const SizedBox.shrink();
+    }
+
+    return Text(
+      _formatTime(),
+      style: const TextStyle(color: Colors.white70, fontSize: 12),
+    );
+  }
+}
+
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
 
@@ -28,7 +180,8 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
   StreamSubscription? _connectionSubscription;
   StreamSubscription? _dataSubscription;
-
+  StreamSubscription? _lastReceivedTimeSubscription;
+  DateTime? _lastReceivedTime;
   bool _isHistoryEditMode = false;
   final GlobalKey<HistoryScreenState> _historyScreenKey =
       GlobalKey<HistoryScreenState>();
@@ -41,21 +194,35 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     _bleService.initialize();
     _initializeServices();
     _checkAndStartBackgroundService();
+    _setupLastReceivedTimeListener();
   }
 
   Future<void> _checkAndStartBackgroundService() async {
     final settings = await DatabaseService.instance.getAllSettings() ?? {};
-    final backgroundServiceEnabled = (settings['backgroundServiceEnabled'] ?? 0) == 1;
-    
+    final backgroundServiceEnabled =
+        (settings['backgroundServiceEnabled'] ?? 0) == 1;
+
     if (backgroundServiceEnabled) {
       await BackgroundService.startService();
     }
+  }
+
+  void _setupLastReceivedTimeListener() {
+    _lastReceivedTimeSubscription =
+        _bleService.lastReceivedTimeStream.listen((time) {
+      if (mounted) {
+        setState(() {
+          _lastReceivedTime = time;
+        });
+      }
+    });
   }
 
   @override
   void dispose() {
     _connectionSubscription?.cancel();
     _dataSubscription?.cancel();
+    _lastReceivedTimeSubscription?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -69,10 +236,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
   Future<void> _initializeServices() async {
     await _notificationService.initialize();
-
-    _connectionSubscription = _bleService.connectionStream.listen((_) {
-      if (mounted) setState(() {});
-    });
 
     _dataSubscription = _bleService.dataStream.listen((record) {
       _notificationService.showTrainNotification(record);
@@ -133,17 +296,10 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       actions: [
         Row(
           children: [
-            Container(
-              width: 8,
-              height: 8,
-              decoration: BoxDecoration(
-                color: _bleService.isConnected ? Colors.green : Colors.red,
-                shape: BoxShape.circle,
-              ),
+            _ConnectionStatusWidget(
+              bleService: _bleService,
+              lastReceivedTime: _lastReceivedTime,
             ),
-            const SizedBox(width: 8),
-            Text(_bleService.deviceStatus,
-                style: const TextStyle(color: Colors.white70)),
             IconButton(
               icon: const Icon(Icons.bluetooth, color: Colors.white),
               onPressed: _showConnectionDialog,
@@ -274,6 +430,8 @@ class _PixelPerfectBluetoothDialogState
   List<BluetoothDevice> _devices = [];
   _ScanState _scanState = _ScanState.initial;
   StreamSubscription? _connectionSubscription;
+  StreamSubscription? _lastReceivedTimeSubscription;
+  DateTime? _lastReceivedTime;
   @override
   void initState() {
     super.initState();
@@ -288,6 +446,7 @@ class _PixelPerfectBluetoothDialogState
   @override
   void dispose() {
     _connectionSubscription?.cancel();
+    _lastReceivedTimeSubscription?.cancel();
     super.dispose();
   }
 
@@ -315,6 +474,17 @@ class _PixelPerfectBluetoothDialogState
   Future<void> _disconnect() async {
     Navigator.pop(context);
     await widget.bleService.disconnect();
+  }
+
+  void _setupLastReceivedTimeListener() {
+    _lastReceivedTimeSubscription =
+        widget.bleService.lastReceivedTimeStream.listen((timestamp) {
+      if (mounted) {
+        setState(() {
+          _lastReceivedTime = timestamp;
+        });
+      }
+    });
   }
 
   @override
@@ -353,6 +523,13 @@ class _PixelPerfectBluetoothDialogState
       Text(device?.remoteId.str ?? '',
           style: Theme.of(context).textTheme.bodySmall,
           textAlign: TextAlign.center),
+      if (_lastReceivedTime != null) ...[
+        const SizedBox(height: 8),
+        _LastReceivedTimeWidget(
+          lastReceivedTime: _lastReceivedTime,
+          isConnected: widget.bleService.isConnected,
+        ),
+      ],
       const SizedBox(height: 16),
       ElevatedButton.icon(
           onPressed: _disconnect,

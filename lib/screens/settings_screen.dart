@@ -395,9 +395,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
           children: [
             Row(
               children: [
-                Icon(Icons.share, color: Theme.of(context).colorScheme.primary),
+                Icon(Icons.storage, color: Theme.of(context).colorScheme.primary),
                 const SizedBox(width: 12),
-                Text('数据分享', style: AppTheme.titleMedium),
+                Text('数据管理', style: AppTheme.titleMedium),
               ],
             ),
             const SizedBox(height: 16),

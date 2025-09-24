@@ -27,14 +27,19 @@ class BLEService {
       StreamController<TrainRecord>.broadcast();
   final StreamController<bool> _connectionController =
       StreamController<bool>.broadcast();
+  final StreamController<DateTime?> _lastReceivedTimeController =
+      StreamController<DateTime?>.broadcast();
 
   Stream<String> get statusStream => _statusController.stream;
   Stream<TrainRecord> get dataStream => _dataController.stream;
   Stream<bool> get connectionStream => _connectionController.stream;
+  Stream<DateTime?> get lastReceivedTimeStream =>
+      _lastReceivedTimeController.stream;
 
   String _deviceStatus = "未连接";
   String? _lastKnownDeviceAddress;
   String _targetDeviceName = "LBJReceiver";
+  DateTime? _lastReceivedTime;
 
   bool _isConnecting = false;
   bool _isManualDisconnect = false;
@@ -69,8 +74,7 @@ class BLEService {
       if (settings != null) {
         _targetDeviceName = settings['deviceName'] ?? 'LBJReceiver';
       }
-    } catch (e) {
-    }
+    } catch (e) {}
   }
 
   void ensureConnection() {
@@ -315,6 +319,9 @@ class BLEService {
             '${now.millisecondsSinceEpoch}_${Random().nextInt(9999)}';
         recordData['receivedTimestamp'] = now.millisecondsSinceEpoch;
 
+        _lastReceivedTime = now;
+        _lastReceivedTimeController.add(_lastReceivedTime);
+
         final trainRecord = TrainRecord.fromJson(recordData);
         _dataController.add(trainRecord);
         DatabaseService.instance.insertRecord(trainRecord);
@@ -331,6 +338,8 @@ class BLEService {
       _deviceStatus = status;
       _connectedDevice = null;
       _characteristic = null;
+      _lastReceivedTime = null;
+      _lastReceivedTimeController.add(null);
     }
     _statusController.add(_deviceStatus);
     _connectionController.add(connected);
@@ -357,5 +366,6 @@ class BLEService {
     _statusController.close();
     _dataController.close();
     _connectionController.close();
+    _lastReceivedTimeController.close();
   }
 }

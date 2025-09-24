@@ -61,7 +61,7 @@ class NotificationService {
       return;
     }
 
-    final String title = '列车信息更新';
+    final String title = '列车信息';
     final String body = _buildNotificationContent(record);
 
     final AndroidNotificationDetails androidPlatformChannelSpecifics =
