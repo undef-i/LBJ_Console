@@ -1,11 +1,12 @@
 import 'dart:math' as math;
+import 'dart:isolate';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
-import 'package:lbjconsole/models/merged_record.dart';
-import 'package:lbjconsole/services/database_service.dart';
-import 'package:lbjconsole/models/train_record.dart';
-import 'package:lbjconsole/services/merge_service.dart';
+import '../models/merged_record.dart';
+import '../services/database_service.dart';
+import '../models/train_record.dart';
+import '../services/merge_service.dart';
 
 class HistoryScreen extends StatefulWidget {
   final Function(bool isEditing) onEditModeChanged;
@@ -30,6 +31,9 @@ class HistoryScreenState extends State<HistoryScreen> {
   final ScrollController _scrollController = ScrollController();
   bool _isAtTop = true;
   MergeSettings _mergeSettings = MergeSettings();
+  
+  final Map<String, double> _mapOptimalZoom = {};
+  final Map<String, bool> _mapCalculating = {};
 
   int getSelectedCount() => _selectedRecords.length;
   Set<String> getSelectedRecordIds() => _selectedRecords;
@@ -336,8 +340,25 @@ class HistoryScreenState extends State<HistoryScreen> {
         .whereType<LatLng>()
         .toList();
     if (positions.isEmpty) return const SizedBox.shrink();
+    
+    final mapId = records.map((r) => r.uniqueId).join('_');
     final bounds = LatLngBounds.fromPoints(positions);
-    final optimalZoom = _calculateOptimalZoom(positions, containerWidth: 400, containerHeight: 220);
+    
+    if (!_mapOptimalZoom.containsKey(mapId) && !(_mapCalculating[mapId] ?? false)) {
+      _mapCalculating[mapId] = true;
+      
+      _calculateOptimalZoomAsync(positions, containerWidth: 400, containerHeight: 220).then((optimalZoom) {
+        if (mounted) {
+          setState(() {
+            _mapOptimalZoom[mapId] = optimalZoom;
+            _mapCalculating[mapId] = false;
+          });
+        }
+      });
+    }
+    
+    final zoomLevel = _mapOptimalZoom[mapId] ?? _getDefaultZoom(positions);
+    
     return Column(children: [
       const SizedBox(height: 8),
       Container(
@@ -348,7 +369,7 @@ class HistoryScreenState extends State<HistoryScreen> {
           child: FlutterMap(
               options: MapOptions(
                   initialCenter: bounds.center,
-                  initialZoom: optimalZoom,
+                  initialZoom: zoomLevel,
                   minZoom: 5,
                   maxZoom: 18),
               children: [
@@ -373,6 +394,12 @@ class HistoryScreenState extends State<HistoryScreen> {
                         .toList())
               ]))
     ]);
+  }
+  
+  double _getDefaultZoom(List<LatLng> positions) {
+    if (positions.length == 1) return 15.0;
+    if (positions.length < 10) return 12.0;
+    return 10.0;
   }
 
   Widget _buildRecordCard(TrainRecord record, {bool isSubCard = false}) {
@@ -638,4 +665,104 @@ class HistoryScreenState extends State<HistoryScreen> {
       return null;
     }
   }
+
+  Future<_BoundaryBox> _calculateBoundaryBoxParallel(List<LatLng> positions) async {
+    if (positions.isEmpty) {
+      return _BoundaryBox(0, 0, 0, 0);
+    }
+    
+    if (positions.length < 100) {
+      return _calculateBoundaryBoxIsolate(positions);
+    }
+    
+    final chunkSize = (positions.length / 4).ceil();
+    final chunks = <List<LatLng>>[];
+    
+    for (int i = 0; i < positions.length; i += chunkSize) {
+      final end = math.min(i + chunkSize, positions.length);
+      chunks.add(positions.sublist(i, end));
+    }
+    
+    final results = await Future.wait(
+      chunks.map((chunk) => Isolate.run(() => _calculateBoundaryBoxIsolate(chunk)))
+    );
+    
+    double minLat = results[0].minLat;
+    double maxLat = results[0].maxLat;
+    double minLng = results[0].minLng;
+    double maxLng = results[0].maxLng;
+    
+    for (final box in results.skip(1)) {
+      minLat = math.min(minLat, box.minLat);
+      maxLat = math.max(maxLat, box.maxLat);
+      minLng = math.min(minLng, box.minLng);
+      maxLng = math.max(maxLng, box.maxLng);
+    }
+    
+    return _BoundaryBox(minLat, maxLat, minLng, maxLng);
+  }
+
+  Future<double> _calculateOptimalZoomAsync(List<LatLng> positions, {required double containerWidth, required double containerHeight}) async {
+    if (positions.isEmpty) return 15.0;
+    if (positions.length == 1) return 17.0;
+
+    final boundaryBox = await _calculateBoundaryBoxParallel(positions);
+    
+    double latToY(double lat) {
+      final latRad = lat * math.pi / 180.0;
+      return math.log(math.tan(latRad) + 1.0/math.cos(latRad));
+    }
+
+    double lngToX(double lng) {
+      return lng * math.pi / 180.0;
+    }
+
+    final minX = lngToX(boundaryBox.minLng);
+    final maxX = lngToX(boundaryBox.maxLng);
+    final minY = latToY(boundaryBox.minLat);
+    final maxY = latToY(boundaryBox.maxLat);
+
+    const worldSize = 2.0 * math.pi;
+    
+    final widthWorld = (maxX - minX) / worldSize;
+    final heightWorld = (maxY - minY) / worldSize;
+
+    const paddingRatio = 0.8; 
+
+    final widthZoom = math.log((containerWidth * paddingRatio) / (widthWorld * 256.0)) / math.log(2.0);
+    final heightZoom = math.log((containerHeight * paddingRatio) / (heightWorld * 256.0)) / math.log(2.0);
+
+    final optimalZoom = math.min(widthZoom, heightZoom);
+
+    return math.max(1.0, math.min(20.0, optimalZoom));
+  }
+}
+
+class _BoundaryBox {
+  final double minLat;
+  final double maxLat;
+  final double minLng;
+  final double maxLng;
+  
+  _BoundaryBox(this.minLat, this.maxLat, this.minLng, this.maxLng);
+}
+
+_BoundaryBox _calculateBoundaryBoxIsolate(List<LatLng> positions) {
+  if (positions.isEmpty) {
+    return _BoundaryBox(0, 0, 0, 0);
+  }
+  
+  double minLat = positions[0].latitude;
+  double maxLat = positions[0].latitude;
+  double minLng = positions[0].longitude;
+  double maxLng = positions[0].longitude;
+
+  for (final pos in positions) {
+    minLat = math.min(minLat, pos.latitude);
+    maxLat = math.max(maxLat, pos.latitude);
+    minLng = math.min(minLng, pos.longitude);
+    maxLng = math.max(maxLng, pos.longitude);
+  }
+  
+  return _BoundaryBox(minLat, maxLat, minLng, maxLng);
 }
