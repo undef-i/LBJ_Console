@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -256,6 +257,66 @@ class HistoryScreenState extends State<HistoryScreen> {
     }
   }
 
+  double _calculateOptimalZoom(List<LatLng> positions, {double containerWidth = 400, double containerHeight = 220}) {
+    if (positions.isEmpty) return 15.0;
+    if (positions.length == 1) return 17.0;
+
+    double minLat = positions[0].latitude;
+    double maxLat = positions[0].latitude;
+    double minLng = positions[0].longitude;
+    double maxLng = positions[0].longitude;
+
+    for (final pos in positions) {
+      minLat = math.min(minLat, pos.latitude);
+      maxLat = math.max(maxLat, pos.latitude);
+      minLng = math.min(minLng, pos.longitude);
+      maxLng = math.max(maxLng, pos.longitude);
+    }
+
+    double latToY(double lat) {
+      final latRad = lat * math.pi / 180.0;
+      return math.log(math.tan(latRad) + 1.0/math.cos(latRad));
+    }
+
+    double lngToX(double lng) {
+      return lng * math.pi / 180.0;
+    }
+
+    final minX = lngToX(minLng);
+    final maxX = lngToX(maxLng);
+    final minY = latToY(minLat);
+    final maxY = latToY(maxLat);
+
+    const worldSize = 2.0 * math.pi;
+    
+    final widthWorld = (maxX - minX) / worldSize;
+    final heightWorld = (maxY - minY) / worldSize;
+
+    const paddingRatio = 0.8; 
+
+    final widthZoom = math.log((containerWidth * paddingRatio) / (widthWorld * 256.0)) / math.log(2.0);
+    final heightZoom = math.log((containerHeight * paddingRatio) / (heightWorld * 256.0)) / math.log(2.0);
+
+    final optimalZoom = math.min(widthZoom, heightZoom);
+
+    return math.max(1.0, math.min(20.0, optimalZoom));
+  }
+  
+  double _calculateDistance(LatLng pos1, LatLng pos2) {
+    const earthRadius = 6371000;
+    final lat1 = pos1.latitude * math.pi / 180;
+    final lat2 = pos2.latitude * math.pi / 180;
+    final deltaLat = (pos2.latitude - pos1.latitude) * math.pi / 180;
+    final deltaLng = (pos2.longitude - pos1.longitude) * math.pi / 180;
+    
+    final a = math.sin(deltaLat / 2) * math.sin(deltaLat / 2) +
+              math.cos(lat1) * math.cos(lat2) *
+              math.sin(deltaLng / 2) * math.sin(deltaLng / 2);
+    final c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
+    
+    return earthRadius * c;
+  }
+
   String _getLocationInfo(TrainRecord record) {
     List<String> parts = [];
     if (record.route.isNotEmpty && record.route != "<NUL>")
@@ -276,6 +337,7 @@ class HistoryScreenState extends State<HistoryScreen> {
         .toList();
     if (positions.isEmpty) return const SizedBox.shrink();
     final bounds = LatLngBounds.fromPoints(positions);
+    final optimalZoom = _calculateOptimalZoom(positions, containerWidth: 400, containerHeight: 220);
     return Column(children: [
       const SizedBox(height: 8),
       Container(
@@ -286,10 +348,9 @@ class HistoryScreenState extends State<HistoryScreen> {
           child: FlutterMap(
               options: MapOptions(
                   initialCenter: bounds.center,
-                  initialZoom: 10,
+                  initialZoom: optimalZoom,
                   minZoom: 5,
-                  maxZoom: 18,
-                  cameraConstraint: CameraConstraint.contain(bounds: bounds)),
+                  maxZoom: 18),
               children: [
                 TileLayer(
                     urlTemplate:
@@ -495,19 +556,29 @@ class HistoryScreenState extends State<HistoryScreen> {
 
   Widget _buildExpandedContent(TrainRecord record) {
     final position = _parsePosition(record.positionInfo);
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      if (position != null)
-        Column(children: [
+    if (position == null) return const SizedBox.shrink();
+    
+    return FutureBuilder<double>(
+      future: Future(() => _calculateOptimalZoom([position], containerWidth: 400, containerHeight: 220)),
+      builder: (context, zoomSnapshot) {
+        if (!zoomSnapshot.hasData) {
+          return const SizedBox.shrink();
+        }
+        
+        return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           const SizedBox(height: 8),
           Container(
               height: 220,
+              width: double.infinity,
               margin: const EdgeInsets.symmetric(vertical: 4),
               decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(8),
                   color: Colors.grey[900]),
               child: FlutterMap(
-                  options:
-                      MapOptions(initialCenter: position, initialZoom: 15.0),
+                  options: MapOptions(
+                    initialCenter: position, 
+                    initialZoom: zoomSnapshot.data!
+                  ),
                   children: [
                     TileLayer(
                         urlTemplate:
@@ -528,8 +599,9 @@ class HistoryScreenState extends State<HistoryScreen> {
                                   color: Colors.white, size: 20)))
                     ])
                   ]))
-        ])
-    ]);
+        ]);
+      },
+    );
   }
 
   LatLng? _parsePosition(String? positionInfo) {

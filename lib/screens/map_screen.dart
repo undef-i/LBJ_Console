@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -26,8 +27,8 @@ class _MapScreenState extends State<MapScreen> {
   bool _isMapInitialized = false;
   bool _isFollowingLocation = false;
   bool _isLocationPermissionGranted = false;
+  Timer? _locationTimer;
 
-  static const LatLng _defaultPosition = LatLng(39.9042, 116.4074);
 
   @override
   void initState() {
@@ -35,12 +36,13 @@ class _MapScreenState extends State<MapScreen> {
     _initializeMap();
     _loadTrainRecords();
     _loadSettings();
-    _requestLocationPermission();
+    _startLocationUpdates();
   }
 
   @override
   void dispose() {
     _saveSettings();
+    _locationTimer?.cancel();
     super.dispose();
   }
 
@@ -49,6 +51,9 @@ class _MapScreenState extends State<MapScreen> {
   Future<void> _requestLocationPermission() async {
     bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请开启定位服务')),
+      );
       return;
     }
 
@@ -58,6 +63,9 @@ class _MapScreenState extends State<MapScreen> {
     }
 
     if (permission == LocationPermission.deniedForever) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('定位权限被拒绝，请在设置中开启')),
+      );
       return;
     }
 
@@ -78,11 +86,38 @@ class _MapScreenState extends State<MapScreen> {
         _userLocation = LatLng(position.latitude, position.longitude);
       });
 
-      if (!_isMapInitialized && _userLocation != null) {
-        _mapController.move(_userLocation!, _currentZoom);
-      }
-    } catch (e) {}
+    } catch (e) {
+    }
   }
+
+  void _startLocationUpdates() {
+    _requestLocationPermission();
+    
+    _locationTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
+      if (_isLocationPermissionGranted) {
+        _getCurrentLocation();
+      }
+    });
+  }
+
+  Future<void> _forceUpdateLocation() async {
+    
+    try {
+      Position position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.best,
+      );
+
+      final newLocation = LatLng(position.latitude, position.longitude);
+      
+      setState(() {
+        _userLocation = newLocation;
+      });
+
+      _mapController.move(newLocation, 15.0);
+    } catch (e) {
+    }
+  }
+
 
   Future<void> _loadSettings() async {
     try {
@@ -159,13 +194,12 @@ class _MapScreenState extends State<MapScreen> {
     } else if (_lastTrainLocation != null) {
       targetLocation = _lastTrainLocation;
     } else {
-      targetLocation = _defaultPosition;
+      _isMapInitialized = true;
+      return;
     }
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _centerMap(targetLocation!, zoom: _currentZoom);
-      _isMapInitialized = true;
-    });
+    _centerMap(targetLocation!, zoom: _currentZoom);
+    _isMapInitialized = true;
   }
 
   void _centerMap(LatLng location, {double? zoom}) {
@@ -313,7 +347,7 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   void _centerToMyLocation() {
-    _centerMap(_lastTrainLocation ?? _defaultPosition, zoom: 15.0);
+    _centerMap(_lastTrainLocation ?? const LatLng(39.9042, 116.4074), zoom: 15.0);
   }
 
   void _centerToLastTrain() {
@@ -537,11 +571,12 @@ class _MapScreenState extends State<MapScreen> {
           FlutterMap(
             mapController: _mapController,
             options: MapOptions(
-              initialCenter: _lastTrainLocation ?? _defaultPosition,
+              initialCenter: _lastTrainLocation ?? const LatLng(39.9042, 116.4074),
               initialZoom: _currentZoom,
               initialRotation: _currentRotation,
               minZoom: 4.0,
               maxZoom: 18.0,
+
               onPositionChanged: (MapCamera camera, bool hasGesture) {
                 if (hasGesture) {
                   setState(() {
@@ -550,28 +585,6 @@ class _MapScreenState extends State<MapScreen> {
                     _currentRotation = camera.rotation;
                   });
                   _saveSettings();
-                }
-              },
-              onTap: (_, point) {
-                for (final record in _trainRecords) {
-                  final coords = record.getCoordinates();
-                  final dmsCoords = _parseDmsCoordinate(record.positionInfo);
-                  LatLng? recordPosition;
-
-                  if (dmsCoords != null) {
-                    recordPosition = dmsCoords;
-                  } else if (coords['lat'] != 0.0 && coords['lng'] != 0.0) {
-                    recordPosition = LatLng(coords['lat']!, coords['lng']!);
-                  }
-
-                  if (recordPosition != null) {
-                    final distance = const Distance()
-                        .as(LengthUnit.Meter, recordPosition, point);
-                    if (distance < 50) {
-                      _showTrainDetailsDialog(record, recordPosition);
-                      break;
-                    }
-                  }
                 }
               },
             ),
@@ -622,10 +635,7 @@ class _MapScreenState extends State<MapScreen> {
                   heroTag: 'myLocation',
                   backgroundColor: const Color(0xFF1E1E1E),
                   onPressed: () {
-                    _getCurrentLocation();
-                    if (_userLocation != null) {
-                      _centerMap(_userLocation!, zoom: 15.0);
-                    }
+                    _forceUpdateLocation();
                   },
                   child: const Icon(Icons.my_location, color: Colors.white),
                 ),
