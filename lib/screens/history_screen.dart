@@ -31,7 +31,7 @@ class HistoryScreenState extends State<HistoryScreen> {
   final ScrollController _scrollController = ScrollController();
   bool _isAtTop = true;
   MergeSettings _mergeSettings = MergeSettings();
-  
+
   final Map<String, double> _mapOptimalZoom = {};
   final Map<String, bool> _mapCalculating = {};
 
@@ -156,8 +156,19 @@ class HistoryScreenState extends State<HistoryScreen> {
                   widget.onSelectionChanged();
                 });
               } else {
-                setState(
-                    () => _expandedStates[mergedRecord.groupKey] = !isExpanded);
+                if (isExpanded) {
+                  final mapId =
+                      mergedRecord.records.map((r) => r.uniqueId).join('_');
+                  setState(() {
+                    _expandedStates[mergedRecord.groupKey] = false;
+                    _mapOptimalZoom.remove(mapId);
+                    _mapCalculating.remove(mapId);
+                  });
+                } else {
+                  setState(() {
+                    _expandedStates[mergedRecord.groupKey] = true;
+                  });
+                }
               }
             },
             onLongPress: () {
@@ -261,8 +272,8 @@ class HistoryScreenState extends State<HistoryScreen> {
     }
   }
 
-  double _calculateOptimalZoom(List<LatLng> positions, {double containerWidth = 400, double containerHeight = 220}) {
-    if (positions.isEmpty) return 15.0;
+  double _calculateOptimalZoom(List<LatLng> positions,
+      {double containerWidth = 400, double containerHeight = 220}) {
     if (positions.length == 1) return 17.0;
 
     double minLat = positions[0].latitude;
@@ -279,7 +290,7 @@ class HistoryScreenState extends State<HistoryScreen> {
 
     double latToY(double lat) {
       final latRad = lat * math.pi / 180.0;
-      return math.log(math.tan(latRad) + 1.0/math.cos(latRad));
+      return math.log(math.tan(latRad) + 1.0 / math.cos(latRad));
     }
 
     double lngToX(double lng) {
@@ -292,32 +303,38 @@ class HistoryScreenState extends State<HistoryScreen> {
     final maxY = latToY(maxLat);
 
     const worldSize = 2.0 * math.pi;
-    
+
     final widthWorld = (maxX - minX) / worldSize;
     final heightWorld = (maxY - minY) / worldSize;
 
-    const paddingRatio = 0.8; 
+    const paddingRatio = 0.8;
 
-    final widthZoom = math.log((containerWidth * paddingRatio) / (widthWorld * 256.0)) / math.log(2.0);
-    final heightZoom = math.log((containerHeight * paddingRatio) / (heightWorld * 256.0)) / math.log(2.0);
+    final widthZoom =
+        math.log((containerWidth * paddingRatio) / (widthWorld * 256.0)) /
+            math.log(2.0);
+    final heightZoom =
+        math.log((containerHeight * paddingRatio) / (heightWorld * 256.0)) /
+            math.log(2.0);
 
     final optimalZoom = math.min(widthZoom, heightZoom);
 
     return math.max(1.0, math.min(20.0, optimalZoom));
   }
-  
+
   double _calculateDistance(LatLng pos1, LatLng pos2) {
     const earthRadius = 6371000;
     final lat1 = pos1.latitude * math.pi / 180;
     final lat2 = pos2.latitude * math.pi / 180;
     final deltaLat = (pos2.latitude - pos1.latitude) * math.pi / 180;
     final deltaLng = (pos2.longitude - pos1.longitude) * math.pi / 180;
-    
+
     final a = math.sin(deltaLat / 2) * math.sin(deltaLat / 2) +
-              math.cos(lat1) * math.cos(lat2) *
-              math.sin(deltaLng / 2) * math.sin(deltaLng / 2);
+        math.cos(lat1) *
+            math.cos(lat2) *
+            math.sin(deltaLng / 2) *
+            math.sin(deltaLng / 2);
     final c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
-    
+
     return earthRadius * c;
   }
 
@@ -328,7 +345,9 @@ class HistoryScreenState extends State<HistoryScreen> {
     if (record.direction != 0) parts.add(record.direction == 1 ? "下" : "上");
     if (record.position.isNotEmpty && record.position != "<NUL>") {
       final position = record.position;
-      final cleanPosition = position.endsWith('.') ? position.substring(0, position.length - 1) : position;
+      final cleanPosition = position.endsWith('.')
+          ? position.substring(0, position.length - 1)
+          : position;
       parts.add("${cleanPosition}K");
     }
     return parts.join(' ');
@@ -340,14 +359,17 @@ class HistoryScreenState extends State<HistoryScreen> {
         .whereType<LatLng>()
         .toList();
     if (positions.isEmpty) return const SizedBox.shrink();
-    
+
     final mapId = records.map((r) => r.uniqueId).join('_');
     final bounds = LatLngBounds.fromPoints(positions);
-    
-    if (!_mapOptimalZoom.containsKey(mapId) && !(_mapCalculating[mapId] ?? false)) {
+
+    if (!_mapOptimalZoom.containsKey(mapId) &&
+        !(_mapCalculating[mapId] ?? false)) {
       _mapCalculating[mapId] = true;
-      
-      _calculateOptimalZoomAsync(positions, containerWidth: 400, containerHeight: 220).then((optimalZoom) {
+
+      _calculateOptimalZoomAsync(positions,
+              containerWidth: 400, containerHeight: 220)
+          .then((optimalZoom) {
         if (mounted) {
           setState(() {
             _mapOptimalZoom[mapId] = optimalZoom;
@@ -356,9 +378,26 @@ class HistoryScreenState extends State<HistoryScreen> {
         }
       });
     }
-    
-    final zoomLevel = _mapOptimalZoom[mapId] ?? _getDefaultZoom(positions);
-    
+
+    if (!_mapOptimalZoom.containsKey(mapId)) {
+      return const Column(
+        children: [
+          SizedBox(height: 8),
+          SizedBox(
+            height: 228,
+            child: Center(
+              child: CircularProgressIndicator(
+                color: Colors.blue,
+                strokeWidth: 2,
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    final zoomLevel = _mapOptimalZoom[mapId]!;
+
     return Column(children: [
       const SizedBox(height: 8),
       Container(
@@ -366,36 +405,15 @@ class HistoryScreenState extends State<HistoryScreen> {
           margin: const EdgeInsets.symmetric(vertical: 4),
           decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(8), color: Colors.grey[900]),
-          child: FlutterMap(
-              options: MapOptions(
-                  initialCenter: bounds.center,
-                  initialZoom: zoomLevel,
-                  minZoom: 5,
-                  maxZoom: 18),
-              children: [
-                TileLayer(
-                    urlTemplate:
-                        'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                    userAgentPackageName: 'org.noxylva.lbjconsole'),
-                MarkerLayer(
-                    markers: positions
-                        .map((pos) => Marker(
-                            point: pos,
-                            width: 40,
-                            height: 40,
-                            child: Container(
-                                decoration: BoxDecoration(
-                                    color: Colors.red.withOpacity(0.8),
-                                    shape: BoxShape.circle,
-                                    border: Border.all(
-                                        color: Colors.white, width: 2)),
-                                child: const Icon(Icons.train,
-                                    color: Colors.white, size: 20))))
-                        .toList())
-              ]))
+          child: _DelayedMultiMarkerMap(
+            key: ValueKey('multi_map_${mapId}_$zoomLevel'),
+            positions: positions,
+            center: bounds.center,
+            zoom: zoomLevel,
+          ))
     ]);
   }
-  
+
   double _getDefaultZoom(List<LatLng> positions) {
     if (positions.length == 1) return 15.0;
     if (positions.length < 10) return 12.0;
@@ -432,7 +450,17 @@ class HistoryScreenState extends State<HistoryScreen> {
                   widget.onSelectionChanged();
                 });
               } else if (!isSubCard) {
-                setState(() => _expandedStates[record.uniqueId] = !isExpanded);
+                if (isExpanded) {
+                  setState(() {
+                    _expandedStates[record.uniqueId] = false;
+                    _mapOptimalZoom.remove(record.uniqueId);
+                    _mapCalculating.remove(record.uniqueId);
+                  });
+                } else {
+                  setState(() {
+                    _expandedStates[record.uniqueId] = true;
+                  });
+                }
               }
             },
             onLongPress: () {
@@ -569,7 +597,8 @@ class HistoryScreenState extends State<HistoryScreen> {
               if (isValidRoute && isValidPosition) const SizedBox(width: 4),
               if (isValidPosition)
                 Flexible(
-                    child: Text("${position.trim().endsWith('.') ? position.trim().substring(0, position.trim().length - 1) : position.trim()}K",
+                    child: Text(
+                        "${position.trim().endsWith('.') ? position.trim().substring(0, position.trim().length - 1) : position.trim()}K",
                         style:
                             const TextStyle(fontSize: 16, color: Colors.white),
                         overflow: TextOverflow.ellipsis))
@@ -583,52 +612,60 @@ class HistoryScreenState extends State<HistoryScreen> {
 
   Widget _buildExpandedContent(TrainRecord record) {
     final position = _parsePosition(record.positionInfo);
-    if (position == null) return const SizedBox.shrink();
-    
-    return FutureBuilder<double>(
-      future: Future(() => _calculateOptimalZoom([position], containerWidth: 400, containerHeight: 220)),
-      builder: (context, zoomSnapshot) {
-        if (!zoomSnapshot.hasData) {
-          return const SizedBox.shrink();
+    final mapId = record.uniqueId;
+
+    if (position == null) {
+      return const SizedBox.shrink();
+    }
+
+    if (!_mapOptimalZoom.containsKey(mapId) &&
+        !(_mapCalculating[mapId] ?? false)) {
+      _mapCalculating[mapId] = true;
+
+      _calculateOptimalZoomAsync([position],
+              containerWidth: 400, containerHeight: 220)
+          .then((optimalZoom) {
+        if (mounted) {
+          setState(() {
+            _mapOptimalZoom[mapId] = optimalZoom;
+            _mapCalculating[mapId] = false;
+          });
         }
-        
-        return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const SizedBox(height: 8),
-          Container(
-              height: 220,
-              width: double.infinity,
-              margin: const EdgeInsets.symmetric(vertical: 4),
-              decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(8),
-                  color: Colors.grey[900]),
-              child: FlutterMap(
-                  options: MapOptions(
-                    initialCenter: position, 
-                    initialZoom: zoomSnapshot.data!
-                  ),
-                  children: [
-                    TileLayer(
-                        urlTemplate:
-                            'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                        userAgentPackageName: 'org.noxylva.lbjconsole'),
-                    MarkerLayer(markers: [
-                      Marker(
-                          point: position,
-                          width: 40,
-                          height: 40,
-                          child: Container(
-                              decoration: BoxDecoration(
-                                  color: Colors.red,
-                                  borderRadius: BorderRadius.circular(20),
-                                  border: Border.all(
-                                      color: Colors.white, width: 2)),
-                              child: const Icon(Icons.train,
-                                  color: Colors.white, size: 20)))
-                    ])
-                  ]))
-        ]);
-      },
-    );
+      });
+    }
+
+    if (!_mapOptimalZoom.containsKey(mapId)) {
+      return const Column(
+        children: [
+          SizedBox(height: 8),
+          SizedBox(
+            height: 228,
+            child: Center(
+              child: CircularProgressIndicator(
+                color: Colors.blue,
+                strokeWidth: 2,
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    final zoomLevel = _mapOptimalZoom[mapId]!;
+
+    return Column(children: [
+      const SizedBox(height: 8),
+      Container(
+          height: 220,
+          margin: const EdgeInsets.symmetric(vertical: 4),
+          decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(8), color: Colors.grey[900]),
+          child: _DelayedMapWithMarker(
+            key: ValueKey('map_${mapId}_$zoomLevel'),
+            position: position,
+            zoom: zoomLevel,
+          ))
+    ]);
   }
 
   LatLng? _parsePosition(String? positionInfo) {
@@ -666,51 +703,47 @@ class HistoryScreenState extends State<HistoryScreen> {
     }
   }
 
-  Future<_BoundaryBox> _calculateBoundaryBoxParallel(List<LatLng> positions) async {
-    if (positions.isEmpty) {
-      return _BoundaryBox(0, 0, 0, 0);
-    }
-    
+  Future<_BoundaryBox> _calculateBoundaryBoxParallel(
+      List<LatLng> positions) async {
     if (positions.length < 100) {
       return _calculateBoundaryBoxIsolate(positions);
     }
-    
+
     final chunkSize = (positions.length / 4).ceil();
     final chunks = <List<LatLng>>[];
-    
+
     for (int i = 0; i < positions.length; i += chunkSize) {
       final end = math.min(i + chunkSize, positions.length);
       chunks.add(positions.sublist(i, end));
     }
-    
-    final results = await Future.wait(
-      chunks.map((chunk) => Isolate.run(() => _calculateBoundaryBoxIsolate(chunk)))
-    );
-    
+
+    final results = await Future.wait(chunks.map(
+        (chunk) => Isolate.run(() => _calculateBoundaryBoxIsolate(chunk))));
+
     double minLat = results[0].minLat;
     double maxLat = results[0].maxLat;
     double minLng = results[0].minLng;
     double maxLng = results[0].maxLng;
-    
+
     for (final box in results.skip(1)) {
       minLat = math.min(minLat, box.minLat);
       maxLat = math.max(maxLat, box.maxLat);
       minLng = math.min(minLng, box.minLng);
       maxLng = math.max(maxLng, box.maxLng);
     }
-    
+
     return _BoundaryBox(minLat, maxLat, minLng, maxLng);
   }
 
-  Future<double> _calculateOptimalZoomAsync(List<LatLng> positions, {required double containerWidth, required double containerHeight}) async {
-    if (positions.isEmpty) return 15.0;
+  Future<double> _calculateOptimalZoomAsync(List<LatLng> positions,
+      {required double containerWidth, required double containerHeight}) async {
     if (positions.length == 1) return 17.0;
 
     final boundaryBox = await _calculateBoundaryBoxParallel(positions);
-    
+
     double latToY(double lat) {
       final latRad = lat * math.pi / 180.0;
-      return math.log(math.tan(latRad) + 1.0/math.cos(latRad));
+      return math.log(math.tan(latRad) + 1.0 / math.cos(latRad));
     }
 
     double lngToX(double lng) {
@@ -723,18 +756,22 @@ class HistoryScreenState extends State<HistoryScreen> {
     final maxY = latToY(boundaryBox.maxLat);
 
     const worldSize = 2.0 * math.pi;
-    
+
     final widthWorld = (maxX - minX) / worldSize;
     final heightWorld = (maxY - minY) / worldSize;
 
-    const paddingRatio = 0.8; 
+    const paddingRatio = 0.8;
 
-    final widthZoom = math.log((containerWidth * paddingRatio) / (widthWorld * 256.0)) / math.log(2.0);
-    final heightZoom = math.log((containerHeight * paddingRatio) / (heightWorld * 256.0)) / math.log(2.0);
+    final widthZoom =
+        math.log((containerWidth * paddingRatio) / (widthWorld * 256.0)) /
+            math.log(2.0);
+    final heightZoom =
+        math.log((containerHeight * paddingRatio) / (heightWorld * 256.0)) /
+            math.log(2.0);
 
     final optimalZoom = math.min(widthZoom, heightZoom);
 
-    return math.max(1.0, math.min(20.0, optimalZoom));
+    return math.max(5.0, math.min(18.0, optimalZoom));
   }
 }
 
@@ -743,15 +780,11 @@ class _BoundaryBox {
   final double maxLat;
   final double minLng;
   final double maxLng;
-  
+
   _BoundaryBox(this.minLat, this.maxLat, this.minLng, this.maxLng);
 }
 
 _BoundaryBox _calculateBoundaryBoxIsolate(List<LatLng> positions) {
-  if (positions.isEmpty) {
-    return _BoundaryBox(0, 0, 0, 0);
-  }
-  
   double minLat = positions[0].latitude;
   double maxLat = positions[0].latitude;
   double minLng = positions[0].longitude;
@@ -763,6 +796,98 @@ _BoundaryBox _calculateBoundaryBoxIsolate(List<LatLng> positions) {
     minLng = math.min(minLng, pos.longitude);
     maxLng = math.max(maxLng, pos.longitude);
   }
-  
+
   return _BoundaryBox(minLat, maxLat, minLng, maxLng);
+}
+
+class _DelayedMapWithMarker extends StatefulWidget {
+  final LatLng position;
+  final double zoom;
+
+  const _DelayedMapWithMarker({
+    Key? key,
+    required this.position,
+    required this.zoom,
+  }) : super(key: key);
+
+  @override
+  State<_DelayedMapWithMarker> createState() => _DelayedMapWithMarkerState();
+}
+
+class _DelayedMapWithMarkerState extends State<_DelayedMapWithMarker> {
+  @override
+  Widget build(BuildContext context) {
+    return FlutterMap(
+      options:
+          MapOptions(initialCenter: widget.position, initialZoom: widget.zoom),
+      children: [
+        TileLayer(
+            urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+            userAgentPackageName: 'org.noxylva.lbjconsole'),
+        MarkerLayer(markers: [
+          Marker(
+              point: widget.position,
+              width: 40,
+              height: 40,
+              child: Container(
+                  decoration: BoxDecoration(
+                      color: Colors.red,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: Colors.white, width: 2)),
+                  child:
+                      const Icon(Icons.train, color: Colors.white, size: 20)))
+        ])
+      ],
+    );
+  }
+}
+
+class _DelayedMultiMarkerMap extends StatefulWidget {
+  final List<LatLng> positions;
+  final LatLng center;
+  final double zoom;
+
+  const _DelayedMultiMarkerMap({
+    Key? key,
+    required this.positions,
+    required this.center,
+    required this.zoom,
+  }) : super(key: key);
+
+  @override
+  State<_DelayedMultiMarkerMap> createState() => _DelayedMultiMarkerMapState();
+}
+
+class _DelayedMultiMarkerMapState extends State<_DelayedMultiMarkerMap> {
+  @override
+  Widget build(BuildContext context) {
+    return FlutterMap(
+      options: MapOptions(
+        initialCenter: widget.center,
+        initialZoom: widget.zoom,
+        minZoom: 5,
+        maxZoom: 18,
+      ),
+      children: [
+        TileLayer(
+          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+          userAgentPackageName: 'org.noxylva.lbjconsole',
+        ),
+        MarkerLayer(
+            markers: widget.positions
+                .map((pos) => Marker(
+                    point: pos,
+                    width: 40,
+                    height: 40,
+                    child: Container(
+                        decoration: BoxDecoration(
+                            color: Colors.red.withOpacity(0.8),
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.white, width: 2)),
+                        child: const Icon(Icons.train,
+                            color: Colors.white, size: 20))))
+                .toList()),
+      ],
+    );
+  }
 }
