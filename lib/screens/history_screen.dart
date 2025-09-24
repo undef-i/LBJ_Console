@@ -7,6 +7,8 @@ import '../models/merged_record.dart';
 import '../services/database_service.dart';
 import '../models/train_record.dart';
 import '../services/merge_service.dart';
+import '../models/map_state.dart';
+import '../services/map_state_service.dart';
 
 class HistoryScreen extends StatefulWidget {
   final Function(bool isEditing) onEditModeChanged;
@@ -53,7 +55,6 @@ class HistoryScreenState extends State<HistoryScreen> {
   @override
   void initState() {
     super.initState();
-    loadRecords();
     _scrollController.addListener(() {
       if (_scrollController.position.atEdge) {
         if (_scrollController.position.pixels == 0) {
@@ -62,6 +63,9 @@ class HistoryScreenState extends State<HistoryScreen> {
       } else {
         if (_isAtTop) setState(() => _isAtTop = false);
       }
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) loadRecords();
     });
   }
 
@@ -72,7 +76,6 @@ class HistoryScreenState extends State<HistoryScreen> {
   }
 
   Future<void> loadRecords({bool scrollToTop = true}) async {
-    if (mounted) setState(() => _isLoading = true);
     try {
       final allRecords = await DatabaseService.instance.getAllRecords();
       final settingsMap = await DatabaseService.instance.getAllSettings() ?? {};
@@ -80,15 +83,22 @@ class HistoryScreenState extends State<HistoryScreen> {
       final items = MergeService.getMixedList(allRecords, _mergeSettings);
 
       if (mounted) {
-        setState(() {
-          _displayItems.clear();
-          _displayItems.addAll(items);
-          _isLoading = false;
-        });
-        if (scrollToTop && (_isAtTop) && _scrollController.hasClients) {
-          _scrollController.animateTo(0.0,
-              duration: const Duration(milliseconds: 300),
-              curve: Curves.easeOut);
+        final hasDataChanged = _hasDataChanged(items);
+
+        if (hasDataChanged) {
+          setState(() {
+            _displayItems.clear();
+            _displayItems.addAll(items);
+            _isLoading = false;
+          });
+
+          if (scrollToTop && _isAtTop && _scrollController.hasClients) {
+            _scrollController.jumpTo(0.0);
+          }
+        } else {
+          if (_isLoading) {
+            setState(() => _isLoading = false);
+          }
         }
       }
     } catch (e) {
@@ -96,9 +106,63 @@ class HistoryScreenState extends State<HistoryScreen> {
     }
   }
 
+  Future<void> addNewRecord(TrainRecord newRecord) async {
+    try {
+      final settingsMap = await DatabaseService.instance.getAllSettings() ?? {};
+      _mergeSettings = MergeSettings.fromMap(settingsMap);
+
+      final isNewRecord = !_displayItems.any((item) {
+        if (item is TrainRecord) {
+          return item.uniqueId == newRecord.uniqueId;
+        } else if (item is MergedTrainRecord) {
+          return item.records.any((r) => r.uniqueId == newRecord.uniqueId);
+        }
+        return false;
+      });
+
+      if (!isNewRecord) return;
+
+      if (mounted) {
+        final allRecords = await DatabaseService.instance.getAllRecords();
+        final items = MergeService.getMixedList(allRecords, _mergeSettings);
+
+        setState(() {
+          _displayItems.clear();
+          _displayItems.addAll(items);
+        });
+
+        if (_isAtTop && _scrollController.hasClients) {
+          _scrollController.jumpTo(0.0);
+        }
+      }
+    } catch (e) {
+      print('添加新纪录失败: $e');
+    }
+  }
+
+  bool _hasDataChanged(List<Object> newItems) {
+    if (_displayItems.length != newItems.length) return true;
+
+    for (int i = 0; i < _displayItems.length; i++) {
+      final oldItem = _displayItems[i];
+      final newItem = newItems[i];
+
+      if (oldItem.runtimeType != newItem.runtimeType) return true;
+
+      if (oldItem is TrainRecord && newItem is TrainRecord) {
+        if (oldItem.uniqueId != newItem.uniqueId) return true;
+      } else if (oldItem is MergedTrainRecord && newItem is MergedTrainRecord) {
+        if (oldItem.groupKey != newItem.groupKey) return true;
+        if (oldItem.records.length != newItem.records.length) return true;
+      }
+    }
+
+    return false;
+  }
+
   @override
   Widget build(BuildContext context) {
-    if (_isLoading) {
+    if (_isLoading && _displayItems.isEmpty) {
       return const Center(child: CircularProgressIndicator());
     }
     if (_displayItems.isEmpty) {
@@ -197,7 +261,7 @@ class HistoryScreenState extends State<HistoryScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _buildExpandedMapForAll(mergedRecord.records),
+        _buildExpandedMapForAll(mergedRecord.records, mergedRecord.groupKey),
         const Divider(color: Colors.white24, height: 24),
         ...mergedRecord.records.map((record) => _buildSubRecordItem(
             record, mergedRecord.latestRecord, _mergeSettings.groupBy)),
@@ -353,7 +417,7 @@ class HistoryScreenState extends State<HistoryScreen> {
     return parts.join(' ');
   }
 
-  Widget _buildExpandedMapForAll(List<TrainRecord> records) {
+  Widget _buildExpandedMapForAll(List<TrainRecord> records, String groupKey) {
     final positions = records
         .map((record) => _parsePosition(record.positionInfo))
         .whereType<LatLng>()
@@ -410,6 +474,7 @@ class HistoryScreenState extends State<HistoryScreen> {
             positions: positions,
             center: bounds.center,
             zoom: zoomLevel,
+            groupKey: groupKey,
           ))
     ]);
   }
@@ -664,6 +729,7 @@ class HistoryScreenState extends State<HistoryScreen> {
             key: ValueKey('map_${mapId}_$zoomLevel'),
             position: position,
             zoom: zoomLevel,
+            recordId: record.uniqueId,
           ))
     ]);
   }
@@ -803,11 +869,13 @@ _BoundaryBox _calculateBoundaryBoxIsolate(List<LatLng> positions) {
 class _DelayedMapWithMarker extends StatefulWidget {
   final LatLng position;
   final double zoom;
+  final String recordId;
 
   const _DelayedMapWithMarker({
     Key? key,
     required this.position,
     required this.zoom,
+    required this.recordId,
   }) : super(key: key);
 
   @override
@@ -815,11 +883,90 @@ class _DelayedMapWithMarker extends StatefulWidget {
 }
 
 class _DelayedMapWithMarkerState extends State<_DelayedMapWithMarker> {
+  late final MapController _mapController;
+  late final String _mapKey;
+  bool _isInitializing = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _mapController = MapController();
+    _mapKey = MapStateService.instance.getSingleRecordMapKey(widget.recordId);
+    _initializeMapState();
+  }
+
+  Future<void> _initializeMapState() async {
+    final savedState = await MapStateService.instance.getMapState(_mapKey);
+    if (savedState != null && mounted) {
+      _mapController.move(
+        LatLng(savedState.centerLat, savedState.centerLng),
+        savedState.zoom,
+      );
+      if (savedState.bearing != 0.0) {
+        _mapController.rotate(savedState.bearing);
+      }
+    }
+    setState(() {
+      _isInitializing = false;
+    });
+  }
+
+  void _onCameraMove() {
+    if (_isInitializing) return;
+
+    final camera = _mapController.camera;
+    final state = MapState(
+      zoom: camera.zoom,
+      centerLat: camera.center.latitude,
+      centerLng: camera.center.longitude,
+      bearing: camera.rotation,
+    );
+
+    MapStateService.instance.saveMapState(_mapKey, state);
+  }
+
+  @override
+  void dispose() {
+    _mapController.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (_isInitializing) {
+      return FlutterMap(
+        options: MapOptions(
+          initialCenter: widget.position,
+          initialZoom: widget.zoom,
+          onPositionChanged: (position, hasGesture) => _onCameraMove(),
+        ),
+        mapController: _mapController,
+        children: [
+          TileLayer(
+              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+              userAgentPackageName: 'org.noxylva.lbjconsole'),
+          MarkerLayer(markers: [
+            Marker(
+                point: widget.position,
+                width: 40,
+                height: 40,
+                child: Container(
+                    decoration: BoxDecoration(
+                        color: Colors.red,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: Colors.white, width: 2)),
+                    child:
+                        const Icon(Icons.train, color: Colors.white, size: 20)))
+          ])
+        ],
+      );
+    }
+
     return FlutterMap(
-      options:
-          MapOptions(initialCenter: widget.position, initialZoom: widget.zoom),
+      options: MapOptions(
+        onPositionChanged: (position, hasGesture) => _onCameraMove(),
+      ),
+      mapController: _mapController,
       children: [
         TileLayer(
             urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
@@ -846,12 +993,14 @@ class _DelayedMultiMarkerMap extends StatefulWidget {
   final List<LatLng> positions;
   final LatLng center;
   final double zoom;
+  final String groupKey;
 
   const _DelayedMultiMarkerMap({
     Key? key,
     required this.positions,
     required this.center,
     required this.zoom,
+    required this.groupKey,
   }) : super(key: key);
 
   @override
@@ -859,15 +1008,65 @@ class _DelayedMultiMarkerMap extends StatefulWidget {
 }
 
 class _DelayedMultiMarkerMapState extends State<_DelayedMultiMarkerMap> {
+  late final MapController _mapController;
+  late final String _mapKey;
+  bool _isInitializing = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _mapController = MapController();
+    _mapKey = MapStateService.instance.getMergedRecordMapKey(widget.groupKey);
+    _initializeMapState();
+  }
+
+  Future<void> _initializeMapState() async {
+    final savedState = await MapStateService.instance.getMapState(_mapKey);
+    if (savedState != null && mounted) {
+      _mapController.move(
+        LatLng(savedState.centerLat, savedState.centerLng),
+        savedState.zoom,
+      );
+      if (savedState.bearing != 0.0) {
+        _mapController.rotate(savedState.bearing);
+      }
+    } else if (mounted) {
+      _mapController.move(widget.center, widget.zoom);
+    }
+    setState(() {
+      _isInitializing = false;
+    });
+  }
+
+  void _onCameraMove() {
+    if (_isInitializing) return;
+
+    final camera = _mapController.camera;
+    final state = MapState(
+      zoom: camera.zoom,
+      centerLat: camera.center.latitude,
+      centerLng: camera.center.longitude,
+      bearing: camera.rotation,
+    );
+
+    MapStateService.instance.saveMapState(_mapKey, state);
+  }
+
+  @override
+  void dispose() {
+    _mapController.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     return FlutterMap(
       options: MapOptions(
-        initialCenter: widget.center,
-        initialZoom: widget.zoom,
+        onPositionChanged: (position, hasGesture) => _onCameraMove(),
         minZoom: 5,
         maxZoom: 18,
       ),
+      mapController: _mapController,
       children: [
         TileLayer(
           urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',

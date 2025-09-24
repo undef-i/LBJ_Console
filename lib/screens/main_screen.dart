@@ -10,6 +10,7 @@ import 'package:lbjconsole/screens/settings_screen.dart';
 import 'package:lbjconsole/services/ble_service.dart';
 import 'package:lbjconsole/services/database_service.dart';
 import 'package:lbjconsole/services/notification_service.dart';
+import 'package:lbjconsole/services/background_service.dart';
 import 'package:lbjconsole/themes/app_theme.dart';
 
 class MainScreen extends StatefulWidget {
@@ -39,6 +40,16 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     _bleService = BLEService();
     _bleService.initialize();
     _initializeServices();
+    _checkAndStartBackgroundService();
+  }
+
+  Future<void> _checkAndStartBackgroundService() async {
+    final settings = await DatabaseService.instance.getAllSettings() ?? {};
+    final backgroundServiceEnabled = (settings['backgroundServiceEnabled'] ?? 0) == 1;
+    
+    if (backgroundServiceEnabled) {
+      await BackgroundService.startService();
+    }
   }
 
   @override
@@ -66,7 +77,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     _dataSubscription = _bleService.dataStream.listen((record) {
       _notificationService.showTrainNotification(record);
       if (_historyScreenKey.currentState != null) {
-        _historyScreenKey.currentState!.loadRecords(scrollToTop: true);
+        _historyScreenKey.currentState!.addNewRecord(record);
       }
     });
   }

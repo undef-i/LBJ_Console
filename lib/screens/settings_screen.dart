@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:lbjconsole/models/merged_record.dart';
 import 'package:lbjconsole/services/database_service.dart';
 import 'package:lbjconsole/services/ble_service.dart';
+import 'package:lbjconsole/services/background_service.dart';
 import 'package:lbjconsole/themes/app_theme.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -196,11 +197,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
                 Switch(
                   value: _backgroundServiceEnabled,
-                  onChanged: (value) {
+                  onChanged: (value) async {
                     setState(() {
                       _backgroundServiceEnabled = value;
                     });
-                    _saveSettings();
+                    await _saveSettings();
+
+                    if (value) {
+                      await BackgroundService.startService();
+                    } else {
+                      await BackgroundService.stopService();
+                    }
                   },
                   activeColor: Theme.of(context).colorScheme.primary,
                 ),
@@ -503,8 +510,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-
-
   Future<void> _shareData() async {
     final scaffoldMessenger = ScaffoldMessenger.of(context);
 
@@ -530,7 +535,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         if (exportedPath != null) {
           final file = File(exportedPath);
           final fileName = file.path.split(Platform.pathSeparator).last;
-          
+
           await Share.shareXFiles(
             [XFile(file.path)],
             subject: 'LBJ Console Data',
@@ -735,7 +740,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 if (snapshot.hasData) {
                   return Text(snapshot.data!, style: AppTheme.bodyMedium);
                 } else {
-                  return const Text('v0.1.3-flutter', style: AppTheme.bodyMedium);
+                  return const Text('v0.1.3-flutter',
+                      style: AppTheme.bodyMedium);
                 }
               },
             ),
