@@ -53,6 +53,7 @@ dependencies:
   package_info_plus: ^8.1.2
   msix: ^3.16.12
   flutter_background_service: ^5.1.0
+  scrollview_observer: ^1.20.0
 
 dev_dependencies:
   flutter_test:

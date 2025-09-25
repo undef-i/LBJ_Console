@@ -3,6 +3,7 @@ import 'dart:isolate';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:scrollview_observer/scrollview_observer.dart';
 import '../models/merged_record.dart';
 import '../services/database_service.dart';
 import '../models/train_record.dart';
@@ -31,6 +32,9 @@ class HistoryScreenState extends State<HistoryScreen> {
   final Set<String> _selectedRecords = {};
   final Map<String, bool> _expandedStates = {};
   final ScrollController _scrollController = ScrollController();
+  final ListObserverController _observerController =
+      ListObserverController(controller: null)..cacheJumpIndexOffset = false;
+  late final ChatScrollObserver _chatObserver;
   bool _isAtTop = true;
   MergeSettings _mergeSettings = MergeSettings();
   double _itemHeightCache = 0.0;
@@ -56,6 +60,10 @@ class HistoryScreenState extends State<HistoryScreen> {
   @override
   void initState() {
     super.initState();
+    _chatObserver = ChatScrollObserver(_observerController)
+      ..toRebuildScrollViewCallback = () {
+        setState(() {});
+      };
     _scrollController.addListener(() {
       if (_scrollController.position.atEdge) {
         if (_scrollController.position.pixels == 0) {
@@ -73,6 +81,7 @@ class HistoryScreenState extends State<HistoryScreen> {
   @override
   void dispose() {
     _scrollController.dispose();
+    _observerController.controller?.dispose();
     super.dispose();
   }
 
@@ -123,42 +132,24 @@ class HistoryScreenState extends State<HistoryScreen> {
 
       if (!isNewRecord) return;
 
+      final allRecords = await DatabaseService.instance.getAllRecords();
+      final items = MergeService.getMixedList(allRecords, _mergeSettings);
+
       if (mounted) {
-        final previousScrollOffset = _scrollController.hasClients ? _scrollController.offset : 0.0;
-        final previousItemCount = _displayItems.length;
-        
-        final allRecords = await DatabaseService.instance.getAllRecords();
-        final items = MergeService.getMixedList(allRecords, _mergeSettings);
+        if (!_isAtTop) {
+          _chatObserver.standby();
+        }
 
         setState(() {
           _displayItems.clear();
           _displayItems.addAll(items);
         });
 
-        if (_scrollController.hasClients) {
-          if (_isAtTop) {
-            _scrollController.jumpTo(0.0);
-          } else {
-            final newItemCount = items.length;
-            final itemDifference = newItemCount - previousItemCount;
-            
-            if (itemDifference > 0 && previousScrollOffset > 0) {
-              final itemHeight = _getEstimatedItemHeight();
-              final adjustedOffset = previousScrollOffset + (itemDifference * itemHeight);
-                          
-              _scrollController.jumpTo(adjustedOffset.clamp(0.0, _scrollController.position.maxScrollExtent));
-            }
-          }
+        if (_isAtTop && _scrollController.hasClients) {
+          _scrollController.jumpTo(0.0);
         }
       }
     } catch (e) {}
-  }
-
-  double _getEstimatedItemHeight() {
-    if (_itemHeightCache > 0) {
-      return _itemHeightCache;
-    }
-    return 85.0;
   }
 
   bool _hasDataChanged(List<Object> newItems) {
@@ -194,8 +185,12 @@ class HistoryScreenState extends State<HistoryScreen> {
         Text('暂无记录', style: TextStyle(color: Colors.white, fontSize: 18))
       ]));
     }
-    return ListView.builder(
+    return ListViewObserver(
+      controller: _observerController,
+      child: ListView.builder(
         controller: _scrollController,
+        physics: ChatObserverClampingScrollPhysics(observer: _chatObserver),
+        shrinkWrap: _chatObserver.isShrinkWrap,
         padding: const EdgeInsets.all(16.0),
         itemCount: _displayItems.length,
         itemBuilder: (context, index) {
@@ -206,7 +201,9 @@ class HistoryScreenState extends State<HistoryScreen> {
             return _buildRecordCard(item);
           }
           return const SizedBox.shrink();
-        });
+        },
+      ),
+    );
   }
 
   Widget _buildMergedRecordCard(MergedTrainRecord mergedRecord) {
@@ -510,9 +507,9 @@ class HistoryScreenState extends State<HistoryScreen> {
     final isSelected = _selectedRecords.contains(record.uniqueId);
     final isExpanded =
         !isSubCard && (_expandedStates[record.uniqueId] ?? false);
-    
+
     final GlobalKey itemKey = GlobalKey();
-    
+
     final Widget card = Card(
         key: itemKey,
         color: isSelected && _isEditMode
@@ -570,10 +567,11 @@ class HistoryScreenState extends State<HistoryScreen> {
                       _buildLocoInfo(record),
                       if (isExpanded) _buildExpandedContent(record)
                     ]))));
-    
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_itemHeightCache <= 0 && itemKey.currentContext != null) {
-        final RenderBox renderBox = itemKey.currentContext!.findRenderObject() as RenderBox;
+        final RenderBox renderBox =
+            itemKey.currentContext!.findRenderObject() as RenderBox;
         final double realHeight = renderBox.size.height;
         if (realHeight > 0) {
           setState(() {
@@ -582,7 +580,7 @@ class HistoryScreenState extends State<HistoryScreen> {
         }
       }
     });
-    
+
     return card;
   }
 
