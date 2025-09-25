@@ -60,6 +60,10 @@ class HistoryScreenState extends State<HistoryScreen> {
     });
   }
 
+  Future<void> reloadRecords() async {
+    await loadRecords(scrollToTop: false);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -93,7 +97,71 @@ class HistoryScreenState extends State<HistoryScreen> {
       final allRecords = await DatabaseService.instance.getAllRecords();
       final settingsMap = await DatabaseService.instance.getAllSettings() ?? {};
       _mergeSettings = MergeSettings.fromMap(settingsMap);
-      final items = MergeService.getMixedList(allRecords, _mergeSettings);
+
+      List<TrainRecord> filteredRecords = allRecords;
+      if ((settingsMap['hideTimeOnlyRecords'] ?? 0) == 1) {
+        int hiddenCount = 0;
+        int shownCount = 0;
+
+        filteredRecords = allRecords.where((record) {
+          bool isFieldMeaningful(String field) {
+            if (field.isEmpty) return false;
+            String cleaned = field.replaceAll('<NUL>', '').trim();
+            if (cleaned.isEmpty) return false;
+            if (cleaned.runes
+                .every((r) => r == '*'.runes.first || r == ' '.runes.first))
+              return false;
+            return true;
+          }
+
+          final hasTrainNumber = isFieldMeaningful(record.fullTrainNumber) &&
+              !record.fullTrainNumber.contains("-----");
+
+          final hasDirection = record.direction == 1 || record.direction == 3;
+
+          final hasLocoInfo = isFieldMeaningful(record.locoType) ||
+              isFieldMeaningful(record.loco);
+
+          final hasRoute = isFieldMeaningful(record.route);
+
+          final hasPosition = isFieldMeaningful(record.position);
+
+          final hasSpeed =
+              isFieldMeaningful(record.speed) && record.speed != "NUL";
+
+          final hasPositionInfo = isFieldMeaningful(record.positionInfo);
+
+          final hasTrainType =
+              isFieldMeaningful(record.trainType) && record.trainType != "未知";
+
+          final hasLbjClass =
+              isFieldMeaningful(record.lbjClass) && record.lbjClass != "NA";
+
+          final hasTrain = isFieldMeaningful(record.train) &&
+              !record.train.contains("-----");
+
+          final shouldShow = hasTrainNumber ||
+              hasDirection ||
+              hasLocoInfo ||
+              hasRoute ||
+              hasPosition ||
+              hasSpeed ||
+              hasPositionInfo ||
+              hasTrainType ||
+              hasLbjClass ||
+              hasTrain;
+
+          if (!shouldShow) {
+            hiddenCount++;
+          } else {
+            shownCount++;
+          }
+
+          return shouldShow;
+        }).toList();
+      }
+
+      final items = MergeService.getMixedList(filteredRecords, _mergeSettings);
 
       if (mounted) {
         final hasDataChanged = _hasDataChanged(items);
@@ -123,6 +191,58 @@ class HistoryScreenState extends State<HistoryScreen> {
     try {
       final settingsMap = await DatabaseService.instance.getAllSettings() ?? {};
       _mergeSettings = MergeSettings.fromMap(settingsMap);
+
+      if ((settingsMap['hideTimeOnlyRecords'] ?? 0) == 1) {
+        bool isFieldMeaningful(String field) {
+          if (field.isEmpty) return false;
+          String cleaned = field.replaceAll('<NUL>', '').trim();
+          if (cleaned.isEmpty) return false;
+          if (cleaned.runes
+              .every((r) => r == '*'.runes.first || r == ' '.runes.first))
+            return false;
+          return true;
+        }
+
+        final hasTrainNumber = isFieldMeaningful(newRecord.fullTrainNumber) &&
+            !newRecord.fullTrainNumber.contains("-----");
+
+        final hasDirection =
+            newRecord.direction == 1 || newRecord.direction == 3;
+
+        final hasLocoInfo = isFieldMeaningful(newRecord.locoType) ||
+            isFieldMeaningful(newRecord.loco);
+
+        final hasRoute = isFieldMeaningful(newRecord.route);
+
+        final hasPosition = isFieldMeaningful(newRecord.position);
+
+        final hasSpeed =
+            isFieldMeaningful(newRecord.speed) && newRecord.speed != "NUL";
+
+        final hasPositionInfo = isFieldMeaningful(newRecord.positionInfo);
+
+        final hasTrainType = isFieldMeaningful(newRecord.trainType) &&
+            newRecord.trainType != "未知";
+
+        final hasLbjClass =
+            isFieldMeaningful(newRecord.lbjClass) && newRecord.lbjClass != "NA";
+
+        final hasTrain = isFieldMeaningful(newRecord.train) &&
+            !newRecord.train.contains("-----");
+
+        if (!hasTrainNumber &&
+            !hasDirection &&
+            !hasLocoInfo &&
+            !hasRoute &&
+            !hasPosition &&
+            !hasSpeed &&
+            !hasPositionInfo &&
+            !hasTrainType &&
+            !hasLbjClass &&
+            !hasTrain) {
+          return;
+        }
+      }
 
       final isNewRecord = !_displayItems.any((item) {
         if (item is TrainRecord) {
@@ -624,7 +744,8 @@ class HistoryScreenState extends State<HistoryScreen> {
 
     final hasTrainNumber = record.fullTrainNumber.isNotEmpty;
     final hasDirection = record.direction == 1 || record.direction == 3;
-    final hasLocoInfo = formattedLocoInfo.isNotEmpty && formattedLocoInfo != "<NUL>";
+    final hasLocoInfo =
+        formattedLocoInfo.isNotEmpty && formattedLocoInfo != "<NUL>";
     final shouldShowTrainRow = hasTrainNumber || hasDirection || hasLocoInfo;
 
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -661,7 +782,8 @@ class HistoryScreenState extends State<HistoryScreen> {
                                   fontWeight: FontWeight.bold,
                                   color: Colors.white),
                               overflow: TextOverflow.ellipsis)),
-                    if (hasTrainNumber && hasDirection) const SizedBox(width: 6),
+                    if (hasTrainNumber && hasDirection)
+                      const SizedBox(width: 6),
                     if (hasDirection)
                       Container(
                           width: 20,

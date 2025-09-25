@@ -397,7 +397,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         selectedIndex: _currentIndex,
         onDestinationSelected: (index) {
           if (_currentIndex == 2 && index == 0) {
-            _historyScreenKey.currentState?.loadRecords();
+            _historyScreenKey.currentState?.reloadRecords();
           }
           setState(() {
             if (_isHistoryEditMode) _isHistoryEditMode = false;

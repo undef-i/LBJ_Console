@@ -32,6 +32,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _notificationsEnabled = true;
   int _recordCount = 0;
   bool _mergeRecordsEnabled = false;
+  bool _hideTimeOnlyRecords = false;
   GroupBy _groupBy = GroupBy.trainAndLoco;
   TimeWindow _timeWindow = TimeWindow.unlimited;
 
@@ -61,6 +62,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             (settingsMap['backgroundServiceEnabled'] ?? 0) == 1;
         _notificationsEnabled = (settingsMap['notificationEnabled'] ?? 1) == 1;
         _mergeRecordsEnabled = settings.enabled;
+        _hideTimeOnlyRecords = (settingsMap['hideTimeOnlyRecords'] ?? 0) == 1;
         _groupBy = settings.groupBy;
         _timeWindow = settings.timeWindow;
       });
@@ -82,6 +84,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       'backgroundServiceEnabled': _backgroundServiceEnabled ? 1 : 0,
       'notificationEnabled': _notificationsEnabled ? 1 : 0,
       'mergeRecordsEnabled': _mergeRecordsEnabled ? 1 : 0,
+      'hideTimeOnlyRecords': _hideTimeOnlyRecords ? 1 : 0,
       'groupBy': _groupBy.name,
       'timeWindow': _timeWindow.name,
     });
@@ -229,6 +232,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   onChanged: (value) {
                     setState(() {
                       _notificationsEnabled = value;
+                    });
+                    _saveSettings();
+                  },
+                  activeColor: Theme.of(context).colorScheme.primary,
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('隐藏只有时间有效的记录', style: AppTheme.bodyLarge),
+                    Text('不显示只有时间信息的记录', style: AppTheme.caption),
+                  ],
+                ),
+                Switch(
+                  value: _hideTimeOnlyRecords,
+                  onChanged: (value) {
+                    setState(() {
+                      _hideTimeOnlyRecords = value;
                     });
                     _saveSettings();
                   },
