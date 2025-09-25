@@ -580,17 +580,7 @@ class HistoryScreenState extends State<HistoryScreen> {
                       _buildRecordHeader(record),
                       _buildPositionAndSpeed(record),
                       _buildLocoInfo(record),
-                      AnimatedCrossFade(
-                        duration: const Duration(milliseconds: 300),
-                        firstChild: const SizedBox.shrink(),
-                        secondChild: _buildExpandedContent(record),
-                        crossFadeState: isExpanded
-                            ? CrossFadeState.showSecond
-                            : CrossFadeState.showFirst,
-                        firstCurve: Curves.easeInOut,
-                        secondCurve: Curves.easeInOut,
-                        sizeCurve: Curves.easeInOut,
-                      )
+                      if (isExpanded) _buildExpandedContent(record),
                     ]))));
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -623,7 +613,7 @@ class HistoryScreenState extends State<HistoryScreen> {
       formattedLocoInfo = record.loco;
     }
 
-    if (record.fullTrainNumber.isEmpty) {
+    if (record.fullTrainNumber.isEmpty && formattedLocoInfo.isEmpty) {
       return Text(
           (record.time == "<NUL>" || record.time.isEmpty)
               ? record.receivedTimestamp.toString().split(".")[0]
@@ -631,6 +621,11 @@ class HistoryScreenState extends State<HistoryScreen> {
           style: const TextStyle(fontSize: 11, color: Colors.grey),
           overflow: TextOverflow.ellipsis);
     }
+
+    final hasTrainNumber = record.fullTrainNumber.isNotEmpty;
+    final hasDirection = record.direction == 1 || record.direction == 3;
+    final hasLocoInfo = formattedLocoInfo.isNotEmpty && formattedLocoInfo != "<NUL>";
+    final shouldShowTrainRow = hasTrainNumber || hasDirection || hasLocoInfo;
 
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
@@ -647,43 +642,46 @@ class HistoryScreenState extends State<HistoryScreen> {
                   style: const TextStyle(fontSize: 11, color: Colors.grey),
                   overflow: TextOverflow.ellipsis))
       ]),
-      const SizedBox(height: 2),
-      Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Flexible(
-                child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                  Flexible(
-                      child: Text(record.fullTrainNumber,
-                          style: const TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white),
-                          overflow: TextOverflow.ellipsis)),
-                  const SizedBox(width: 6),
-                  if (record.direction == 1 || record.direction == 3)
-                    Container(
-                        width: 20,
-                        height: 20,
-                        decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(2)),
-                        child: Center(
-                            child: Text(record.direction == 1 ? "下" : "上",
-                                style: const TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.black))))
-                ])),
-            if (formattedLocoInfo.isNotEmpty && formattedLocoInfo != "<NUL>")
-              Text(formattedLocoInfo,
-                  style: const TextStyle(fontSize: 14, color: Colors.white70))
-          ]),
-      const SizedBox(height: 2)
+      if (shouldShowTrainRow) ...[
+        const SizedBox(height: 2),
+        Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Flexible(
+                  child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                    if (hasTrainNumber)
+                      Flexible(
+                          child: Text(record.fullTrainNumber,
+                              style: const TextStyle(
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.white),
+                              overflow: TextOverflow.ellipsis)),
+                    if (hasTrainNumber && hasDirection) const SizedBox(width: 6),
+                    if (hasDirection)
+                      Container(
+                          width: 20,
+                          height: 20,
+                          decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(2)),
+                          child: Center(
+                              child: Text(record.direction == 1 ? "下" : "上",
+                                  style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.black))))
+                  ])),
+              if (hasLocoInfo)
+                Text(formattedLocoInfo,
+                    style: const TextStyle(fontSize: 14, color: Colors.white70))
+            ]),
+        const SizedBox(height: 2)
+      ]
     ]);
   }
 

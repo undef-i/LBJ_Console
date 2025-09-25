@@ -149,7 +149,7 @@ class TrainRecord {
     final lbjClassValue = lbjClass.trim();
     final trainValue = train.trim();
 
-    if (trainValue == "<NUL>") {
+    if (trainValue == "<NUL>" || trainValue.contains("-----")) {
       return "";
     }
 

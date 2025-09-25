@@ -5,7 +5,7 @@ class MergeService {
   static String? _generateGroupKey(TrainRecord record, GroupBy groupBy) {
     final train = record.train.trim();
     final loco = record.loco.trim();
-    final hasTrain = train.isNotEmpty && train != "<NUL>";
+    final hasTrain = train.isNotEmpty && train != "<NUL>" && !train.contains("-----");
     final hasLoco = loco.isNotEmpty && loco != "<NUL>";
 
     switch (groupBy) {
