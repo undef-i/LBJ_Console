@@ -1,6 +1,9 @@
 import 'dart:math' as math;
 import 'dart:isolate';
+import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:scrollview_observer/scrollview_observer.dart';
@@ -140,10 +143,13 @@ class HistoryScreenState extends State<HistoryScreen> {
           _chatObserver.standby();
         }
 
-        setState(() {
-          _displayItems.clear();
-          _displayItems.addAll(items);
-        });
+        final hasDataChanged = _hasDataChanged(items);
+        if (hasDataChanged) {
+          setState(() {
+            _displayItems.clear();
+            _displayItems.addAll(items);
+          });
+        }
 
         if (_isAtTop && _scrollController.hasClients) {
           _scrollController.jumpTo(0.0);
@@ -198,7 +204,7 @@ class HistoryScreenState extends State<HistoryScreen> {
           if (item is MergedTrainRecord) {
             return _buildMergedRecordCard(item);
           } else if (item is TrainRecord) {
-            return _buildRecordCard(item);
+            return _buildRecordCard(item, key: ValueKey(item.uniqueId));
           }
           return const SizedBox.shrink();
         },
@@ -503,7 +509,8 @@ class HistoryScreenState extends State<HistoryScreen> {
     return 10.0;
   }
 
-  Widget _buildRecordCard(TrainRecord record, {bool isSubCard = false}) {
+  Widget _buildRecordCard(TrainRecord record,
+      {bool isSubCard = false, Key? key}) {
     final isSelected = _selectedRecords.contains(record.uniqueId);
     final isExpanded =
         !isSubCard && (_expandedStates[record.uniqueId] ?? false);
@@ -511,7 +518,7 @@ class HistoryScreenState extends State<HistoryScreen> {
     final GlobalKey itemKey = GlobalKey();
 
     final Widget card = Card(
-        key: itemKey,
+        key: key ?? itemKey,
         color: isSelected && _isEditMode
             ? const Color(0xFF2E2E2E)
             : const Color(0xFF1E1E1E),
@@ -538,15 +545,23 @@ class HistoryScreenState extends State<HistoryScreen> {
                 });
               } else if (!isSubCard) {
                 if (isExpanded) {
-                  setState(() {
-                    _expandedStates[record.uniqueId] = false;
-                    _mapOptimalZoom.remove(record.uniqueId);
-                    _mapCalculating.remove(record.uniqueId);
-                  });
+                  final shouldUpdate =
+                      _expandedStates[record.uniqueId] == true ||
+                          _mapOptimalZoom.containsKey(record.uniqueId) ||
+                          _mapCalculating.containsKey(record.uniqueId);
+                  if (shouldUpdate) {
+                    setState(() {
+                      _expandedStates[record.uniqueId] = false;
+                      _mapOptimalZoom.remove(record.uniqueId);
+                      _mapCalculating.remove(record.uniqueId);
+                    });
+                  }
                 } else {
-                  setState(() {
-                    _expandedStates[record.uniqueId] = true;
-                  });
+                  if (_expandedStates[record.uniqueId] != true) {
+                    setState(() {
+                      _expandedStates[record.uniqueId] = true;
+                    });
+                  }
                 }
               }
             },
@@ -565,7 +580,17 @@ class HistoryScreenState extends State<HistoryScreen> {
                       _buildRecordHeader(record),
                       _buildPositionAndSpeed(record),
                       _buildLocoInfo(record),
-                      if (isExpanded) _buildExpandedContent(record)
+                      AnimatedCrossFade(
+                        duration: const Duration(milliseconds: 300),
+                        firstChild: const SizedBox.shrink(),
+                        secondChild: _buildExpandedContent(record),
+                        crossFadeState: isExpanded
+                            ? CrossFadeState.showSecond
+                            : CrossFadeState.showFirst,
+                        firstCurve: Curves.easeInOut,
+                        secondCurve: Curves.easeInOut,
+                        sizeCurve: Curves.easeInOut,
+                      )
                     ]))));
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -586,8 +611,6 @@ class HistoryScreenState extends State<HistoryScreen> {
 
   Widget _buildRecordHeader(TrainRecord record, {bool isMerged = false}) {
     final trainType = record.trainType;
-    final trainDisplay =
-        record.fullTrainNumber.isEmpty ? "未知列车" : record.fullTrainNumber;
     String formattedLocoInfo = "";
     if (record.locoType.isNotEmpty && record.loco.isNotEmpty) {
       final shortLoco = record.loco.length > 5
@@ -599,6 +622,16 @@ class HistoryScreenState extends State<HistoryScreen> {
     } else if (record.loco.isNotEmpty) {
       formattedLocoInfo = record.loco;
     }
+
+    if (record.fullTrainNumber.isEmpty) {
+      return Text(
+          (record.time == "<NUL>" || record.time.isEmpty)
+              ? record.receivedTimestamp.toString().split(".")[0]
+              : record.time.split("\n")[0],
+          style: const TextStyle(fontSize: 11, color: Colors.grey),
+          overflow: TextOverflow.ellipsis);
+    }
+
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
         Flexible(
@@ -625,7 +658,7 @@ class HistoryScreenState extends State<HistoryScreen> {
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
                   Flexible(
-                      child: Text(trainDisplay,
+                      child: Text(record.fullTrainNumber,
                           style: const TextStyle(
                               fontSize: 20,
                               fontWeight: FontWeight.bold,
