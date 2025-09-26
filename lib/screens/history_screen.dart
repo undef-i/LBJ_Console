@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:scrollview_observer/scrollview_observer.dart';
 import '../models/merged_record.dart';
 import '../services/database_service.dart';
@@ -45,6 +46,10 @@ class HistoryScreenState extends State<HistoryScreen> {
   final Map<String, double> _mapOptimalZoom = {};
   final Map<String, bool> _mapCalculating = {};
 
+  LatLng? _currentUserLocation;
+  bool _isLocationPermissionGranted = false;
+  Timer? _locationTimer;
+
   int getSelectedCount() => _selectedRecords.length;
   Set<String> getSelectedRecordIds() => _selectedRecords;
   List<Object> getDisplayItems() => _displayItems;
@@ -81,7 +86,10 @@ class HistoryScreenState extends State<HistoryScreen> {
       }
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) loadRecords();
+      if (mounted) {
+        loadRecords();
+        _startLocationUpdates();
+      }
     });
   }
 
@@ -89,6 +97,7 @@ class HistoryScreenState extends State<HistoryScreen> {
   void dispose() {
     _scrollController.dispose();
     _observerController.controller?.dispose();
+    _locationTimer?.cancel();
     super.dispose();
   }
 
@@ -660,6 +669,7 @@ class HistoryScreenState extends State<HistoryScreen> {
             center: bounds.center,
             zoom: zoomLevel,
             groupKey: groupKey,
+            currentUserLocation: _currentUserLocation,
           ))
     ]);
   }
@@ -668,6 +678,53 @@ class HistoryScreenState extends State<HistoryScreen> {
     if (positions.length == 1) return 15.0;
     if (positions.length < 10) return 12.0;
     return 10.0;
+  }
+
+  Future<void> _requestLocationPermission() async {
+    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      return;
+    }
+
+    LocationPermission permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+    }
+
+    if (permission == LocationPermission.deniedForever) {
+      return;
+    }
+
+    setState(() {
+      _isLocationPermissionGranted = true;
+    });
+
+    _getCurrentLocation();
+  }
+
+  Future<void> _getCurrentLocation() async {
+    try {
+      Position position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+        forceAndroidLocationManager: true,
+      );
+
+      setState(() {
+        _currentUserLocation = LatLng(position.latitude, position.longitude);
+      });
+    } catch (e) {
+      print('获取当前位置失败: $e');
+    }
+  }
+
+  void _startLocationUpdates() {
+    _requestLocationPermission();
+
+    _locationTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
+      if (_isLocationPermissionGranted) {
+        _getCurrentLocation();
+      }
+    });
   }
 
   Widget _buildRecordCard(TrainRecord record,
@@ -704,26 +761,6 @@ class HistoryScreenState extends State<HistoryScreen> {
                   }
                   widget.onSelectionChanged();
                 });
-              } else if (!isSubCard) {
-                if (isExpanded) {
-                  final shouldUpdate =
-                      _expandedStates[record.uniqueId] == true ||
-                          _mapOptimalZoom.containsKey(record.uniqueId) ||
-                          _mapCalculating.containsKey(record.uniqueId);
-                  if (shouldUpdate) {
-                    setState(() {
-                      _expandedStates[record.uniqueId] = false;
-                      _mapOptimalZoom.remove(record.uniqueId);
-                      _mapCalculating.remove(record.uniqueId);
-                    });
-                  }
-                } else {
-                  if (_expandedStates[record.uniqueId] != true) {
-                    setState(() {
-                      _expandedStates[record.uniqueId] = true;
-                    });
-                  }
-                }
               }
             },
             onLongPress: () {
@@ -961,6 +998,7 @@ class HistoryScreenState extends State<HistoryScreen> {
             position: position,
             zoom: zoomLevel,
             recordId: record.uniqueId,
+            currentUserLocation: _currentUserLocation,
           ))
     ]);
   }
@@ -1101,12 +1139,14 @@ class _DelayedMapWithMarker extends StatefulWidget {
   final LatLng position;
   final double zoom;
   final String recordId;
+  final LatLng? currentUserLocation;
 
   const _DelayedMapWithMarker({
     Key? key,
     required this.position,
     required this.zoom,
     required this.recordId,
+    this.currentUserLocation,
   }) : super(key: key);
 
   @override
@@ -1164,6 +1204,44 @@ class _DelayedMapWithMarkerState extends State<_DelayedMapWithMarker> {
 
   @override
   Widget build(BuildContext context) {
+    final markers = <Marker>[
+      Marker(
+        point: widget.position,
+        width: 24,
+        height: 24,
+        child: Container(
+          decoration: BoxDecoration(
+            color: Colors.red,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.white, width: 1.5),
+          ),
+          child: const Icon(Icons.train, color: Colors.white, size: 12),
+        ),
+      ),
+    ];
+
+    if (widget.currentUserLocation != null) {
+      markers.add(
+        Marker(
+          point: widget.currentUserLocation!,
+          width: 24,
+          height: 24,
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.blue,
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white, width: 1.5),
+            ),
+            child: const Icon(
+              Icons.my_location,
+              color: Colors.white,
+              size: 12,
+            ),
+          ),
+        ),
+      );
+    }
+
     if (_isInitializing) {
       return FlutterMap(
         options: MapOptions(
@@ -1176,19 +1254,7 @@ class _DelayedMapWithMarkerState extends State<_DelayedMapWithMarker> {
           TileLayer(
               urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
               userAgentPackageName: 'org.noxylva.lbjconsole'),
-          MarkerLayer(markers: [
-            Marker(
-                point: widget.position,
-                width: 40,
-                height: 40,
-                child: Container(
-                    decoration: BoxDecoration(
-                        color: Colors.red,
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: Colors.white, width: 2)),
-                    child:
-                        const Icon(Icons.train, color: Colors.white, size: 20)))
-          ])
+          MarkerLayer(markers: markers),
         ],
       );
     }
@@ -1202,19 +1268,7 @@ class _DelayedMapWithMarkerState extends State<_DelayedMapWithMarker> {
         TileLayer(
             urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
             userAgentPackageName: 'org.noxylva.lbjconsole'),
-        MarkerLayer(markers: [
-          Marker(
-              point: widget.position,
-              width: 40,
-              height: 40,
-              child: Container(
-                  decoration: BoxDecoration(
-                      color: Colors.red,
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: Colors.white, width: 2)),
-                  child:
-                      const Icon(Icons.train, color: Colors.white, size: 20)))
-        ])
+        MarkerLayer(markers: markers),
       ],
     );
   }
@@ -1225,6 +1279,7 @@ class _DelayedMultiMarkerMap extends StatefulWidget {
   final LatLng center;
   final double zoom;
   final String groupKey;
+  final LatLng? currentUserLocation;
 
   const _DelayedMultiMarkerMap({
     Key? key,
@@ -1232,6 +1287,7 @@ class _DelayedMultiMarkerMap extends StatefulWidget {
     required this.center,
     required this.zoom,
     required this.groupKey,
+    this.currentUserLocation,
   }) : super(key: key);
 
   @override
@@ -1291,6 +1347,41 @@ class _DelayedMultiMarkerMapState extends State<_DelayedMultiMarkerMap> {
 
   @override
   Widget build(BuildContext context) {
+    final markers = <Marker>[
+      ...widget.positions.map((pos) => Marker(
+          point: pos,
+          width: 24,
+          height: 24,
+          child: Container(
+              decoration: BoxDecoration(
+                  color: Colors.red.withOpacity(0.8),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 1.5)),
+              child: const Icon(Icons.train, color: Colors.white, size: 12)))),
+    ];
+
+    if (widget.currentUserLocation != null) {
+      markers.add(
+        Marker(
+          point: widget.currentUserLocation!,
+          width: 24,
+          height: 24,
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.blue,
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white, width: 1.5),
+            ),
+            child: const Icon(
+              Icons.my_location,
+              color: Colors.white,
+              size: 12,
+            ),
+          ),
+        ),
+      );
+    }
+
     return FlutterMap(
       options: MapOptions(
         onPositionChanged: (position, hasGesture) => _onCameraMove(),
@@ -1303,20 +1394,7 @@ class _DelayedMultiMarkerMapState extends State<_DelayedMultiMarkerMap> {
           urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
           userAgentPackageName: 'org.noxylva.lbjconsole',
         ),
-        MarkerLayer(
-            markers: widget.positions
-                .map((pos) => Marker(
-                    point: pos,
-                    width: 40,
-                    height: 40,
-                    child: Container(
-                        decoration: BoxDecoration(
-                            color: Colors.red.withOpacity(0.8),
-                            shape: BoxShape.circle,
-                            border: Border.all(color: Colors.white, width: 2)),
-                        child: const Icon(Icons.train,
-                            color: Colors.white, size: 20))))
-                .toList()),
+        MarkerLayer(markers: markers),
       ],
     );
   }

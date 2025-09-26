@@ -13,7 +13,7 @@ class DatabaseService {
   DatabaseService._internal();
 
   static const String _databaseName = 'train_database';
-  static const _databaseVersion = 2;
+  static const _databaseVersion = 4;
 
   static const String trainRecordsTable = 'train_records';
   static const String appSettingsTable = 'app_settings';
@@ -42,6 +42,17 @@ class DatabaseService {
     if (oldVersion < 2) {
       await db.execute(
           'ALTER TABLE $appSettingsTable ADD COLUMN hideTimeOnlyRecords INTEGER NOT NULL DEFAULT 0');
+    }
+    if (oldVersion < 3) {
+      await db.execute(
+          'ALTER TABLE $appSettingsTable ADD COLUMN mapTimeFilter TEXT NOT NULL DEFAULT "unlimited"');
+    }
+    if (oldVersion < 4) {
+      try {
+        await db.execute(
+            'ALTER TABLE $appSettingsTable ADD COLUMN mapTimeFilter TEXT NOT NULL DEFAULT "unlimited"');
+      } catch (e) {
+      }
     }
   }
 
@@ -89,7 +100,8 @@ class DatabaseService {
         mergeRecordsEnabled INTEGER NOT NULL DEFAULT 0,
         hideTimeOnlyRecords INTEGER NOT NULL DEFAULT 0,
         groupBy TEXT NOT NULL DEFAULT 'trainAndLoco',
-        timeWindow TEXT NOT NULL DEFAULT 'unlimited'
+        timeWindow TEXT NOT NULL DEFAULT 'unlimited',
+        mapTimeFilter TEXT NOT NULL DEFAULT 'unlimited'
       )
     ''');
 
@@ -114,6 +126,7 @@ class DatabaseService {
       'hideTimeOnlyRecords': 0,
       'groupBy': 'trainAndLoco',
       'timeWindow': 'unlimited',
+      'mapTimeFilter': 'unlimited',
     });
   }
 
@@ -131,6 +144,31 @@ class DatabaseService {
     final result = await db.query(
       trainRecordsTable,
       orderBy: 'timestamp DESC',
+    );
+    return result.map((json) => TrainRecord.fromDatabaseJson(json)).toList();
+  }
+
+  Future<List<TrainRecord>> getRecordsWithinTimeRange(Duration duration) async {
+    final db = await database;
+    final cutoffTime = DateTime.now().subtract(duration).millisecondsSinceEpoch;
+    final result = await db.query(
+      trainRecordsTable,
+      where: 'timestamp >= ?',
+      whereArgs: [cutoffTime],
+      orderBy: 'timestamp DESC',
+    );
+    return result.map((json) => TrainRecord.fromDatabaseJson(json)).toList();
+  }
+
+  Future<List<TrainRecord>> getRecordsWithinReceivedTimeRange(
+      Duration duration) async {
+    final db = await database;
+    final cutoffTime = DateTime.now().subtract(duration).millisecondsSinceEpoch;
+    final result = await db.query(
+      trainRecordsTable,
+      where: 'receivedTimestamp >= ?',
+      whereArgs: [cutoffTime],
+      orderBy: 'receivedTimestamp DESC',
     );
     return result.map((json) => TrainRecord.fromDatabaseJson(json)).toList();
   }

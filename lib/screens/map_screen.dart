@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' show sin, cos, sqrt, atan2, pi;
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -29,13 +30,89 @@ class _MapScreenState extends State<MapScreen> {
   bool _isLocationPermissionGranted = false;
   Timer? _locationTimer;
 
+  String _selectedTimeFilter = 'unlimited';
+  final Map<String, Duration> _timeFilterOptions = {
+    'unlimited': Duration.zero,
+    '1hour': Duration(hours: 1),
+    '6hours': Duration(hours: 6),
+    '12hours': Duration(hours: 12),
+    '24hours': Duration(hours: 24),
+    '7days': Duration(days: 7),
+    '30days': Duration(days: 30),
+  };
+
   @override
   void initState() {
     super.initState();
+    print('=== 地图页面初始化 ===');
     _initializeMap();
-    _loadTrainRecords();
-    _loadSettings();
-    _startLocationUpdates();
+
+    _checkDatabaseSettings();
+
+    //
+    _loadSettings().then((_) {
+      print('设置加载完成，开始加载列车记录');
+      _loadTrainRecords().then((_) {
+        print('列车记录加载完成，开始位置更新');
+        _startLocationUpdates();
+      });
+    });
+  }
+
+  Future<void> _checkDatabaseSettings() async {
+    try {
+      print('=== 检查数据库设置 ===');
+      final dbInfo = await DatabaseService.instance.getDatabaseInfo();
+      print('数据库信息: $dbInfo');
+
+      final settings = await DatabaseService.instance.getAllSettings();
+      print('数据库设置详情: $settings');
+
+      if (settings != null) {
+        final lat = settings['mapCenterLat'];
+        final lon = settings['mapCenterLon'];
+        print('数据库中的位置坐标: lat=$lat, lon=$lon');
+
+        if (lat != null && lon != null) {
+          if (lat == 39.9042 && lon == 116.4074) {
+            print('警告：数据库中保存的是北京默认坐标');
+          } else if (lat == 0.0 && lon == 0.0) {
+            print('警告：数据库中保存的是零坐标');
+          } else {
+            print('数据库中保存的是有效坐标');
+            final beijingLat = 39.9042;
+            final beijingLon = 116.4074;
+            final distance =
+                _calculateDistance(lat, lon, beijingLat, beijingLon);
+            print('与北京市中心的距离: ${distance.toStringAsFixed(2)} 公里');
+
+            if (distance < 50) {
+              print('注意：保存的位置在北京附近（距离 < 50公里）');
+            }
+          }
+        }
+      }
+    } catch (e) {
+      print('检查数据库设置失败: $e');
+    }
+  }
+
+  double _calculateDistance(
+      double lat1, double lon1, double lat2, double lon2) {
+    const earthRadius = 6371;
+    final dLat = _degreesToRadians(lat2 - lat1);
+    final dLon = _degreesToRadians(lon2 - lon1);
+    final a = sin(dLat / 2) * sin(dLat / 2) +
+        cos(_degreesToRadians(lat1)) *
+            cos(_degreesToRadians(lat2)) *
+            sin(dLon / 2) *
+            sin(dLon / 2);
+    final c = 2 * atan2(sqrt(a), sqrt(1 - a));
+    return earthRadius * c;
+  }
+
+  double _degreesToRadians(double degrees) {
+    return degrees * pi / 180;
   }
 
   @override
@@ -77,15 +154,25 @@ class _MapScreenState extends State<MapScreen> {
 
   Future<void> _getCurrentLocation() async {
     try {
+      print('=== 获取当前位置 ===');
       Position position = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.high,
         forceAndroidLocationManager: true,
       );
 
+      final newLocation = LatLng(position.latitude, position.longitude);
+      print('获取到位置: $newLocation');
       setState(() {
-        _userLocation = LatLng(position.latitude, position.longitude);
+        _userLocation = newLocation;
       });
-    } catch (e) {}
+
+      if (!_isMapInitialized) {
+        print('获取位置后尝试初始化地图');
+        _initializeMapPosition();
+      }
+    } catch (e) {
+      print('获取位置失败: $e');
+    }
   }
 
   void _startLocationUpdates() {
@@ -119,43 +206,83 @@ class _MapScreenState extends State<MapScreen> {
 
   Future<void> _loadSettings() async {
     try {
+      print('=== 开始加载设置 ===');
       final settings = await DatabaseService.instance.getAllSettings();
+      print('设置数据: $settings');
       if (settings != null) {
+        print(
+            '设置中的位置: lat=${settings['mapCenterLat']}, lon=${settings['mapCenterLon']}');
+        print('设置中的缩放: ${settings['mapZoomLevel']}');
         setState(() {
           _railwayLayerVisible =
               (settings['mapRailwayLayerVisible'] as int?) == 1;
           _currentZoom = (settings['mapZoomLevel'] as num?)?.toDouble() ?? 10.0;
           _currentRotation =
               (settings['mapRotation'] as num?)?.toDouble() ?? 0.0;
+          _selectedTimeFilter =
+              settings['mapTimeFilter'] as String? ?? 'unlimited';
 
           final lat = (settings['mapCenterLat'] as num?)?.toDouble();
           final lon = (settings['mapCenterLon'] as num?)?.toDouble();
 
-          if (lat != null && lon != null) {
+          if (lat != null && lon != null && lat != 0.0 && lon != 0.0) {
             _currentLocation = LatLng(lat, lon);
+            print('使用保存的位置: $_currentLocation');
+          } else {
+            print('保存的位置无效或为零，不使用');
           }
         });
+        print('设置加载完成，当前位置: $_currentLocation');
+        if (!_isMapInitialized) {
+          print('设置加载后尝试初始化地图');
+          _initializeMapPosition();
+        }
+      } else {
+        print('没有保存的设置数据');
       }
-    } catch (e) {}
+    } catch (e) {
+      print('加载设置失败: $e');
+    }
   }
 
   Future<void> _saveSettings() async {
     try {
+      print('=== 保存设置到数据库 ===');
+      print('当前旋转角度: $_currentRotation');
+      print('当前缩放级别: $_currentZoom');
+      print('当前位置: $_currentLocation');
+
       final center = _mapController.camera.center;
-      await DatabaseService.instance.updateSettings({
+
+      final isDefaultLocation =
+          center.latitude == 39.9042 && center.longitude == 116.4074;
+
+      final settings = {
         'mapRailwayLayerVisible': _railwayLayerVisible ? 1 : 0,
         'mapZoomLevel': _currentZoom,
-        'mapCenterLat': center.latitude,
-        'mapCenterLon': center.longitude,
         'mapRotation': _currentRotation,
-      });
-    } catch (e) {}
+        'mapTimeFilter': _selectedTimeFilter,
+      };
+
+      if (!isDefaultLocation) {
+        settings['mapCenterLat'] = center.latitude;
+        settings['mapCenterLon'] = center.longitude;
+      }
+
+      print('保存的设置数据: $settings');
+      await DatabaseService.instance.updateSettings(settings);
+      print('=== 设置保存成功 ===');
+    } catch (e) {
+      print('保存设置失败: $e');
+    }
   }
 
   Future<void> _loadTrainRecords() async {
     setState(() => _isLoading = true);
     try {
-      final records = await DatabaseService.instance.getAllRecords();
+      print('=== 开始加载列车记录 ===');
+      final records = await _getFilteredRecords();
+      print('加载到 ${records.length} 条记录');
       setState(() {
         _trainRecords.clear();
         _trainRecords.addAll(records);
@@ -163,20 +290,46 @@ class _MapScreenState extends State<MapScreen> {
 
         if (_trainRecords.isNotEmpty) {
           final lastRecord = _trainRecords.first;
+          print(
+              '最新记录: ${lastRecord.fullTrainNumber}, 位置: ${lastRecord.position}');
           final coords = lastRecord.getCoordinates();
           final dmsCoords = _parseDmsCoordinate(lastRecord.positionInfo);
 
           if (dmsCoords != null) {
             _lastTrainLocation = dmsCoords;
+            print('使用DMS坐标: $dmsCoords');
           } else if (coords['lat'] != 0.0 && coords['lng'] != 0.0) {
             _lastTrainLocation = LatLng(coords['lat']!, coords['lng']!);
+            print('使用解析坐标: $_lastTrainLocation');
+          } else {
+            print('记录中没有有效坐标');
           }
+        } else {
+          print('没有列车记录');
         }
 
-        _initializeMapPosition();
+        print('列车位置: $_lastTrainLocation');
+        if (!_isMapInitialized) {
+          print('列车记录加载后尝试初始化地图');
+          _initializeMapPosition();
+        }
       });
     } catch (e) {
       setState(() => _isLoading = false);
+      print('加载列车记录失败: $e');
+    }
+  }
+
+  Future<List<TrainRecord>> _getFilteredRecords() async {
+    if (_selectedTimeFilter == 'unlimited') {
+      return await DatabaseService.instance.getAllRecords();
+    } else {
+      final duration = _timeFilterOptions[_selectedTimeFilter];
+      if (duration != null && duration != Duration.zero) {
+        return await DatabaseService.instance
+            .getRecordsWithinReceivedTimeRange(duration);
+      }
+      return await DatabaseService.instance.getAllRecords();
     }
   }
 
@@ -185,23 +338,36 @@ class _MapScreenState extends State<MapScreen> {
 
     LatLng? targetLocation;
 
+    print('=== 初始化地图位置 ===');
+    print('当前位置: $_currentLocation');
+    print('列车位置: $_lastTrainLocation');
+    print('用户位置: $_userLocation');
+    print('地图已初始化: $_isMapInitialized');
+
     if (_currentLocation != null) {
       targetLocation = _currentLocation;
-    } else if (_userLocation != null) {
-      targetLocation = _userLocation;
+      print('使用保存的坐标: $targetLocation');
     } else if (_lastTrainLocation != null) {
       targetLocation = _lastTrainLocation;
+      print('使用列车位置: $targetLocation');
+    } else if (_userLocation != null) {
+      targetLocation = _userLocation;
+      print('使用用户位置: $targetLocation');
     } else {
-      _isMapInitialized = true;
-      return;
+      targetLocation = const LatLng(39.9042, 116.4074);
+      print('没有可用位置，使用北京默认位置: $targetLocation');
     }
 
-    _centerMap(targetLocation!, zoom: _currentZoom);
+    print('最终选择位置: $targetLocation');
+    print('当前旋转角度: $_currentRotation');
+    _centerMap(targetLocation!, zoom: _currentZoom, rotation: _currentRotation);
     _isMapInitialized = true;
+    print('地图初始化完成，旋转角度: $_currentRotation');
   }
 
-  void _centerMap(LatLng location, {double? zoom}) {
+  void _centerMap(LatLng location, {double? zoom, double? rotation}) {
     _mapController.move(location, zoom ?? _currentZoom);
+    _mapController.rotate(rotation ?? _currentRotation);
   }
 
   LatLng? _parseDmsCoordinate(String? positionInfo) {
@@ -292,41 +458,27 @@ class _MapScreenState extends State<MapScreen> {
           Marker(
             point: position,
             width: 80,
-            height: 60,
+            height: 16,
             child: GestureDetector(
               onTap: () => position != null
                   ? _showTrainDetailsDialog(record, position)
                   : null,
               child: Column(
                 mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Container(
-                    width: 36,
-                    height: 36,
-                    decoration: BoxDecoration(
-                      color: Colors.red,
-                      borderRadius: BorderRadius.circular(18),
-                      border: Border.all(color: Colors.white, width: 2),
-                    ),
-                    child: const Icon(
-                      Icons.train,
-                      color: Colors.white,
-                      size: 18,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Container(
                     padding:
-                        const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                        const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                     decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.7),
-                      borderRadius: BorderRadius.circular(2),
+                      color: Colors.black.withOpacity(0.8),
+                      borderRadius: BorderRadius.circular(3),
                     ),
                     child: Text(
                       trainDisplay,
                       style: const TextStyle(
                         color: Colors.white,
-                        fontSize: 10,
+                        fontSize: 8,
                         fontWeight: FontWeight.bold,
                       ),
                       overflow: TextOverflow.ellipsis,
@@ -345,8 +497,9 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   void _centerToMyLocation() {
-    _centerMap(_lastTrainLocation ?? const LatLng(39.9042, 116.4074),
-        zoom: 15.0);
+    if (_userLocation != null) {
+      _centerMap(_userLocation!, zoom: 15.0, rotation: _currentRotation);
+    }
   }
 
   void _centerToLastTrain() {
@@ -363,8 +516,70 @@ class _MapScreenState extends State<MapScreen> {
       }
 
       if (targetPosition != null) {
-        _centerMap(targetPosition, zoom: 15.0);
+        _centerMap(targetPosition, zoom: 15.0, rotation: _currentRotation);
       }
+    }
+  }
+
+  void _showTimeFilterDialog() {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('时间筛选'),
+          content: SizedBox(
+            width: double.minPositive,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: _timeFilterOptions.keys.map((key) {
+                return RadioListTile<String>(
+                  title: Text(_getTimeFilterLabel(key)),
+                  value: key,
+                  groupValue: _selectedTimeFilter,
+                  onChanged: (String? value) {
+                    if (value != null) {
+                      setState(() {
+                        _selectedTimeFilter = value;
+                      });
+                      _loadTrainRecords();
+                      Navigator.pop(context);
+                    }
+                  },
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                );
+              }).toList(),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('取消'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  String _getTimeFilterLabel(String key) {
+    switch (key) {
+      case 'unlimited':
+        return '全部时间';
+      case '1hour':
+        return '最近1小时';
+      case '6hours':
+        return '最近6小时';
+      case '12hours':
+        return '最近12小时';
+      case '24hours':
+        return '最近24小时';
+      case '7days':
+        return '最近7天';
+      case '30days':
+        return '最近30天';
+      default:
+        return '未知';
     }
   }
 
@@ -428,9 +643,9 @@ class _MapScreenState extends State<MapScreen> {
                     child: Column(
                       children: [
                         _buildMaterial3DetailRow(
-                            context, "时间", record.formattedTime),
+                            context, "时间", _getDisplayTime(record)),
                         _buildMaterial3DetailRow(
-                            context, "日期", record.formattedDate),
+                            context, "日期", _getDisplayDate(record)),
                         _buildMaterial3DetailRow(
                             context, "类型", record.trainType),
                         _buildMaterial3DetailRow(context, "速度",
@@ -470,7 +685,8 @@ class _MapScreenState extends State<MapScreen> {
                       child: FilledButton(
                         onPressed: () {
                           Navigator.pop(context);
-                          _centerMap(position, zoom: 17.0);
+                          _centerMap(position,
+                              zoom: 17.0, rotation: _currentRotation);
                         },
                         child: const Row(
                           mainAxisAlignment: MainAxisAlignment.center,
@@ -516,6 +732,25 @@ class _MapScreenState extends State<MapScreen> {
     );
   }
 
+  String _getDisplayTime(TrainRecord record) {
+    if (record.time == "<NUL>" || record.time.isEmpty) {
+      final receivedTime = record.receivedTimestamp;
+      return '${receivedTime.hour.toString().padLeft(2, '0')}:${receivedTime.minute.toString().padLeft(2, '0')}:${receivedTime.second.toString().padLeft(2, '0')}';
+    } else {
+      return record.time.split("\n")[0];
+    }
+  }
+
+  String _getDisplayDate(TrainRecord record) {
+    if (record.time == "<NUL>" || record.time.isEmpty) {
+      final receivedTime = record.receivedTimestamp;
+      return '${receivedTime.year}-${receivedTime.month.toString().padLeft(2, '0')}-${receivedTime.day.toString().padLeft(2, '0')}';
+    } else {
+      final now = DateTime.now();
+      return '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+    }
+  }
+
   Widget _buildMaterial3DetailRow(
       BuildContext context, String label, String value) {
     return Padding(
@@ -555,18 +790,18 @@ class _MapScreenState extends State<MapScreen> {
       markers.add(
         Marker(
           point: _userLocation!,
-          width: 40,
-          height: 40,
+          width: 24,
+          height: 24,
           child: Container(
             decoration: BoxDecoration(
               color: Colors.blue,
-              shape: BoxShape.circle,
-              border: Border.all(color: Colors.white, width: 2),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.white, width: 1),
             ),
             child: const Icon(
               Icons.my_location,
               color: Colors.white,
-              size: 20,
+              size: 12,
             ),
           ),
         ),
@@ -580,21 +815,22 @@ class _MapScreenState extends State<MapScreen> {
           FlutterMap(
             mapController: _mapController,
             options: MapOptions(
-              initialCenter:
-                  _lastTrainLocation ?? const LatLng(39.9042, 116.4074),
+              initialCenter: _currentLocation ??
+                  _lastTrainLocation ??
+                  _userLocation ??
+                  const LatLng(39.9042, 116.4074),
               initialZoom: _currentZoom,
               initialRotation: _currentRotation,
               minZoom: 4.0,
               maxZoom: 18.0,
               onPositionChanged: (MapCamera camera, bool hasGesture) {
-                if (hasGesture) {
-                  setState(() {
-                    _currentLocation = camera.center;
-                    _currentZoom = camera.zoom;
-                    _currentRotation = camera.rotation;
-                  });
-                  _saveSettings();
-                }
+                setState(() {
+                  _currentLocation = camera.center;
+                  _currentZoom = camera.zoom;
+                  _currentRotation = camera.rotation;
+                });
+
+                _saveSettings();
               },
             ),
             children: [
@@ -625,6 +861,13 @@ class _MapScreenState extends State<MapScreen> {
             top: 40,
             child: Column(
               children: [
+                FloatingActionButton.small(
+                  heroTag: 'timeFilter',
+                  backgroundColor: const Color(0xFF1E1E1E),
+                  onPressed: _showTimeFilterDialog,
+                  child: const Icon(Icons.filter_list, color: Colors.white),
+                ),
+                const SizedBox(height: 8),
                 FloatingActionButton.small(
                   heroTag: 'railwayLayer',
                   backgroundColor: const Color(0xFF1E1E1E),

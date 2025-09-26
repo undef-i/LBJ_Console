@@ -142,8 +142,29 @@ class MergeService {
       }
 
       if (group.length >= 2) {
+        final firstRecord = group.first;
+        final train = firstRecord.train.trim();
+        final loco = firstRecord.loco.trim();
+        String uniqueGroupKey;
+
+        if (train.isNotEmpty &&
+            train != "<NUL>" &&
+            !train.contains("-----") &&
+            loco.isNotEmpty &&
+            loco != "<NUL>") {
+          uniqueGroupKey = "train_or_loco:${train}_$loco";
+        } else if (train.isNotEmpty &&
+            train != "<NUL>" &&
+            !train.contains("-----")) {
+          uniqueGroupKey = "train_or_loco:train:$train";
+        } else if (loco.isNotEmpty && loco != "<NUL>") {
+          uniqueGroupKey = "train_or_loco:loco:$loco";
+        } else {
+          uniqueGroupKey = "train_or_loco:group_${mergedRecords.length}";
+        }
+
         mergedRecords.add(MergedTrainRecord(
-          groupKey: "train_or_loco_group",
+          groupKey: uniqueGroupKey,
           records: group,
           latestRecord: group.first,
         ));

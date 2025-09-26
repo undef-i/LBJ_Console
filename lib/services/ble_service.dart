@@ -319,6 +319,10 @@ class BLEService {
             '${now.millisecondsSinceEpoch}_${Random().nextInt(9999)}';
         recordData['receivedTimestamp'] = now.millisecondsSinceEpoch;
 
+        if (!recordData.containsKey('timestamp')) {
+          recordData['timestamp'] = now.millisecondsSinceEpoch;
+        }
+
         _lastReceivedTime = now;
         _lastReceivedTimeController.add(_lastReceivedTime);
 
