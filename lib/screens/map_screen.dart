@@ -29,7 +29,6 @@ class _MapScreenState extends State<MapScreen> {
   bool _isLocationPermissionGranted = false;
   Timer? _locationTimer;
 
-
   @override
   void initState() {
     super.initState();
@@ -80,19 +79,18 @@ class _MapScreenState extends State<MapScreen> {
     try {
       Position position = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.high,
+        forceAndroidLocationManager: true,
       );
 
       setState(() {
         _userLocation = LatLng(position.latitude, position.longitude);
       });
-
-    } catch (e) {
-    }
+    } catch (e) {}
   }
 
   void _startLocationUpdates() {
     _requestLocationPermission();
-    
+
     _locationTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
       if (_isLocationPermissionGranted) {
         _getCurrentLocation();
@@ -101,23 +99,23 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   Future<void> _forceUpdateLocation() async {
-    
     try {
       Position position = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.best,
+        forceAndroidLocationManager: true,
       );
 
       final newLocation = LatLng(position.latitude, position.longitude);
-      
+
       setState(() {
         _userLocation = newLocation;
       });
 
       _mapController.move(newLocation, 15.0);
     } catch (e) {
+      print('强制更新位置失败: $e');
     }
   }
-
 
   Future<void> _loadSettings() async {
     try {
@@ -347,7 +345,8 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   void _centerToMyLocation() {
-    _centerMap(_lastTrainLocation ?? const LatLng(39.9042, 116.4074), zoom: 15.0);
+    _centerMap(_lastTrainLocation ?? const LatLng(39.9042, 116.4074),
+        zoom: 15.0);
   }
 
   void _centerToLastTrain() {
@@ -434,11 +433,21 @@ class _MapScreenState extends State<MapScreen> {
                             context, "日期", record.formattedDate),
                         _buildMaterial3DetailRow(
                             context, "类型", record.trainType),
+                        _buildMaterial3DetailRow(context, "速度",
+                            "${record.speed.replaceAll(' ', '')} km/h"),
                         _buildMaterial3DetailRow(
-                            context, "速度", "${record.speed.replaceAll(' ', '')} km/h"),
+                            context,
+                            "位置",
+                            record.position.trim().endsWith('.')
+                                ? '${record.position.trim().substring(0, record.position.trim().length - 1)}K'
+                                : '${record.position.trim()}K'),
                         _buildMaterial3DetailRow(
-                            context, "位置", record.position.trim().endsWith('.') ? '${record.position.trim().substring(0, record.position.trim().length - 1)}K' : '${record.position.trim()}K'),
-                        _buildMaterial3DetailRow(context, "路线", record.route.trim().endsWith('.') ? record.route.trim().substring(0, record.route.trim().length - 1) : record.route.trim()),
+                            context,
+                            "路线",
+                            record.route.trim().endsWith('.')
+                                ? record.route.trim().substring(
+                                    0, record.route.trim().length - 1)
+                                : record.route.trim()),
                         _buildMaterial3DetailRow(
                             context, "机车", "${record.locoType}-${record.loco}"),
                         _buildMaterial3DetailRow(context, "坐标",
@@ -571,12 +580,12 @@ class _MapScreenState extends State<MapScreen> {
           FlutterMap(
             mapController: _mapController,
             options: MapOptions(
-              initialCenter: _lastTrainLocation ?? const LatLng(39.9042, 116.4074),
+              initialCenter:
+                  _lastTrainLocation ?? const LatLng(39.9042, 116.4074),
               initialZoom: _currentZoom,
               initialRotation: _currentRotation,
               minZoom: 4.0,
               maxZoom: 18.0,
-
               onPositionChanged: (MapCamera camera, bool hasGesture) {
                 if (hasGesture) {
                   setState(() {
