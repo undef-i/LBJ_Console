@@ -12,7 +12,8 @@ class LocationService {
   LatLng? _currentLocation;
   Timer? _locationTimer;
   bool _isLocationPermissionGranted = false;
-  final StreamController<LatLng?> _locationStreamController = StreamController<LatLng?>.broadcast();
+  final StreamController<LatLng?> _locationStreamController =
+      StreamController<LatLng?>.broadcast();
 
   Stream<LatLng?> get locationStream => _locationStreamController.stream;
   LatLng? get currentLocation => _currentLocation;
@@ -30,7 +31,6 @@ class LocationService {
     try {
       bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
-        print('定位服务未开启');
         return;
       }
 
@@ -40,14 +40,11 @@ class LocationService {
       }
 
       if (permission == LocationPermission.deniedForever) {
-        print('定位权限被拒绝，请在设置中开启');
         return;
       }
 
       _isLocationPermissionGranted = true;
-    } catch (e) {
-      print('请求定位权限失败: $e');
-    }
+    } catch (e) {}
   }
 
   Future<void> _getCurrentLocation() async {
@@ -56,14 +53,12 @@ class LocationService {
     try {
       Position position = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.high,
-        forceAndroidLocationManager: true,  // 强制使用Android LocationManager
+        forceAndroidLocationManager: true,
       );
 
       _currentLocation = LatLng(position.latitude, position.longitude);
       _locationStreamController.add(_currentLocation);
-    } catch (e) {
-      print('获取当前位置失败: $e');
-    }
+    } catch (e) {}
   }
 
   void _startLocationUpdates() {

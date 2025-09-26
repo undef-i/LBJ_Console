@@ -44,16 +44,12 @@ class _MapScreenState extends State<MapScreen> {
   @override
   void initState() {
     super.initState();
-    print('=== 地图页面初始化 ===');
     _initializeMap();
 
     _checkDatabaseSettings();
 
-    //
     _loadSettings().then((_) {
-      print('设置加载完成，开始加载列车记录');
       _loadTrainRecords().then((_) {
-        print('列车记录加载完成，开始位置更新');
         _startLocationUpdates();
       });
     });
@@ -61,40 +57,28 @@ class _MapScreenState extends State<MapScreen> {
 
   Future<void> _checkDatabaseSettings() async {
     try {
-      print('=== 检查数据库设置 ===');
       final dbInfo = await DatabaseService.instance.getDatabaseInfo();
-      print('数据库信息: $dbInfo');
 
       final settings = await DatabaseService.instance.getAllSettings();
-      print('数据库设置详情: $settings');
 
       if (settings != null) {
         final lat = settings['mapCenterLat'];
         final lon = settings['mapCenterLon'];
-        print('数据库中的位置坐标: lat=$lat, lon=$lon');
 
         if (lat != null && lon != null) {
           if (lat == 39.9042 && lon == 116.4074) {
-            print('警告：数据库中保存的是北京默认坐标');
           } else if (lat == 0.0 && lon == 0.0) {
-            print('警告：数据库中保存的是零坐标');
           } else {
-            print('数据库中保存的是有效坐标');
             final beijingLat = 39.9042;
             final beijingLon = 116.4074;
             final distance =
                 _calculateDistance(lat, lon, beijingLat, beijingLon);
-            print('与北京市中心的距离: ${distance.toStringAsFixed(2)} 公里');
 
-            if (distance < 50) {
-              print('注意：保存的位置在北京附近（距离 < 50公里）');
-            }
+            if (distance < 50) {}
           }
         }
       }
-    } catch (e) {
-      print('检查数据库设置失败: $e');
-    }
+    } catch (e) {}
   }
 
   double _calculateDistance(
@@ -154,25 +138,20 @@ class _MapScreenState extends State<MapScreen> {
 
   Future<void> _getCurrentLocation() async {
     try {
-      print('=== 获取当前位置 ===');
       Position position = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.high,
         forceAndroidLocationManager: true,
       );
 
       final newLocation = LatLng(position.latitude, position.longitude);
-      print('获取到位置: $newLocation');
       setState(() {
         _userLocation = newLocation;
       });
 
       if (!_isMapInitialized) {
-        print('获取位置后尝试初始化地图');
         _initializeMapPosition();
       }
-    } catch (e) {
-      print('获取位置失败: $e');
-    }
+    } catch (e) {}
   }
 
   void _startLocationUpdates() {
@@ -199,20 +178,13 @@ class _MapScreenState extends State<MapScreen> {
       });
 
       _mapController.move(newLocation, 15.0);
-    } catch (e) {
-      print('强制更新位置失败: $e');
-    }
+    } catch (e) {}
   }
 
   Future<void> _loadSettings() async {
     try {
-      print('=== 开始加载设置 ===');
       final settings = await DatabaseService.instance.getAllSettings();
-      print('设置数据: $settings');
       if (settings != null) {
-        print(
-            '设置中的位置: lat=${settings['mapCenterLat']}, lon=${settings['mapCenterLon']}');
-        print('设置中的缩放: ${settings['mapZoomLevel']}');
         setState(() {
           _railwayLayerVisible =
               (settings['mapRailwayLayerVisible'] as int?) == 1;
@@ -227,31 +199,17 @@ class _MapScreenState extends State<MapScreen> {
 
           if (lat != null && lon != null && lat != 0.0 && lon != 0.0) {
             _currentLocation = LatLng(lat, lon);
-            print('使用保存的位置: $_currentLocation');
-          } else {
-            print('保存的位置无效或为零，不使用');
           }
         });
-        print('设置加载完成，当前位置: $_currentLocation');
         if (!_isMapInitialized) {
-          print('设置加载后尝试初始化地图');
           _initializeMapPosition();
         }
-      } else {
-        print('没有保存的设置数据');
       }
-    } catch (e) {
-      print('加载设置失败: $e');
-    }
+    } catch (e) {}
   }
 
   Future<void> _saveSettings() async {
     try {
-      print('=== 保存设置到数据库 ===');
-      print('当前旋转角度: $_currentRotation');
-      print('当前缩放级别: $_currentZoom');
-      print('当前位置: $_currentLocation');
-
       final center = _mapController.camera.center;
 
       final isDefaultLocation =
@@ -269,20 +227,14 @@ class _MapScreenState extends State<MapScreen> {
         settings['mapCenterLon'] = center.longitude;
       }
 
-      print('保存的设置数据: $settings');
       await DatabaseService.instance.updateSettings(settings);
-      print('=== 设置保存成功 ===');
-    } catch (e) {
-      print('保存设置失败: $e');
-    }
+    } catch (e) {}
   }
 
   Future<void> _loadTrainRecords() async {
     setState(() => _isLoading = true);
     try {
-      print('=== 开始加载列车记录 ===');
       final records = await _getFilteredRecords();
-      print('加载到 ${records.length} 条记录');
       setState(() {
         _trainRecords.clear();
         _trainRecords.addAll(records);
@@ -290,33 +242,22 @@ class _MapScreenState extends State<MapScreen> {
 
         if (_trainRecords.isNotEmpty) {
           final lastRecord = _trainRecords.first;
-          print(
-              '最新记录: ${lastRecord.fullTrainNumber}, 位置: ${lastRecord.position}');
           final coords = lastRecord.getCoordinates();
           final dmsCoords = _parseDmsCoordinate(lastRecord.positionInfo);
 
           if (dmsCoords != null) {
             _lastTrainLocation = dmsCoords;
-            print('使用DMS坐标: $dmsCoords');
           } else if (coords['lat'] != 0.0 && coords['lng'] != 0.0) {
             _lastTrainLocation = LatLng(coords['lat']!, coords['lng']!);
-            print('使用解析坐标: $_lastTrainLocation');
-          } else {
-            print('记录中没有有效坐标');
           }
-        } else {
-          print('没有列车记录');
         }
 
-        print('列车位置: $_lastTrainLocation');
         if (!_isMapInitialized) {
-          print('列车记录加载后尝试初始化地图');
           _initializeMapPosition();
         }
       });
     } catch (e) {
       setState(() => _isLoading = false);
-      print('加载列车记录失败: $e');
     }
   }
 
@@ -338,31 +279,18 @@ class _MapScreenState extends State<MapScreen> {
 
     LatLng? targetLocation;
 
-    print('=== 初始化地图位置 ===');
-    print('当前位置: $_currentLocation');
-    print('列车位置: $_lastTrainLocation');
-    print('用户位置: $_userLocation');
-    print('地图已初始化: $_isMapInitialized');
-
     if (_currentLocation != null) {
       targetLocation = _currentLocation;
-      print('使用保存的坐标: $targetLocation');
     } else if (_lastTrainLocation != null) {
       targetLocation = _lastTrainLocation;
-      print('使用列车位置: $targetLocation');
     } else if (_userLocation != null) {
       targetLocation = _userLocation;
-      print('使用用户位置: $targetLocation');
     } else {
       targetLocation = const LatLng(39.9042, 116.4074);
-      print('没有可用位置，使用北京默认位置: $targetLocation');
     }
 
-    print('最终选择位置: $targetLocation');
-    print('当前旋转角度: $_currentRotation');
     _centerMap(targetLocation!, zoom: _currentZoom, rotation: _currentRotation);
     _isMapInitialized = true;
-    print('地图初始化完成，旋转角度: $_currentRotation');
   }
 
   void _centerMap(LatLng location, {double? zoom, double? rotation}) {
@@ -392,9 +320,7 @@ class _MapScreenState extends State<MapScreen> {
           return LatLng(lat, lng);
         }
       }
-    } catch (e) {
-      print('解析DMS坐标失败: $e');
-    }
+    } catch (e) {}
 
     return null;
   }

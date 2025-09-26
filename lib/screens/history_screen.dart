@@ -712,9 +712,7 @@ class HistoryScreenState extends State<HistoryScreen> {
       setState(() {
         _currentUserLocation = LatLng(position.latitude, position.longitude);
       });
-    } catch (e) {
-      print('获取当前位置失败: $e');
-    }
+    } catch (e) {}
   }
 
   void _startLocationUpdates() {

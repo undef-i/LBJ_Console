@@ -9,7 +9,7 @@ class MapStateService {
   MapStateService._internal();
 
   static const String _tableName = 'record_map_states';
-  
+
   final Map<String, MapState> _memoryCache = {};
 
   Future<void> _ensureTableExists() async {
@@ -34,10 +34,10 @@ class MapStateService {
   Future<void> saveMapState(String key, MapState state) async {
     try {
       _memoryCache[key] = state;
-      
+
       final db = await DatabaseService.instance.database;
       await _ensureTableExists();
-      
+
       await db.insert(
         _tableName,
         {
@@ -47,9 +47,7 @@ class MapStateService {
         },
         conflictAlgorithm: ConflictAlgorithm.replace,
       );
-    } catch (e) {
-      print('保存地图状态失败: $e');
-    }
+    } catch (e) {}
   }
 
   Future<MapState?> getMapState(String key) async {
@@ -60,7 +58,7 @@ class MapStateService {
     try {
       final db = await DatabaseService.instance.database;
       await _ensureTableExists();
-      
+
       final result = await db.query(
         _tableName,
         where: 'key = ?',
@@ -74,16 +72,14 @@ class MapStateService {
         _memoryCache[key] = state;
         return state;
       }
-    } catch (e) {
-      print('读取地图状态失败: $e');
-    }
-    
+    } catch (e) {}
+
     return null;
   }
 
   Future<void> deleteMapState(String key) async {
     _memoryCache.remove(key);
-    
+
     try {
       final db = await DatabaseService.instance.database;
       await db.delete(
@@ -91,20 +87,16 @@ class MapStateService {
         where: 'key = ?',
         whereArgs: [key],
       );
-    } catch (e) {
-      print('删除地图状态失败: $e');
-    }
+    } catch (e) {}
   }
 
   Future<void> clearAllMapStates() async {
     _memoryCache.clear();
-    
+
     try {
       final db = await DatabaseService.instance.database;
       await db.delete(_tableName);
-    } catch (e) {
-      print('清空地图状态失败: $e');
-    }
+    } catch (e) {}
   }
 
   void clearMemoryCache() {

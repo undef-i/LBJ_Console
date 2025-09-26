@@ -330,9 +330,7 @@ class BLEService {
         _dataController.add(trainRecord);
         DatabaseService.instance.insertRecord(trainRecord);
       }
-    } catch (e) {
-      print("$TAG: JSON Decode Error: $e, Data: $jsonData");
-    }
+    } catch (e) {}
   }
 
   void _updateConnectionState(bool connected, String status) {

@@ -90,19 +90,31 @@ class NotificationService {
   String _buildNotificationContent(TrainRecord record) {
     final buffer = StringBuffer();
 
-    buffer.writeln('车次: ${record.fullTrainNumber}');
-    buffer.writeln('线路: ${record.route}');
-    buffer.writeln('方向: ${record.directionText}');
+    buffer.write(record.fullTrainNumber);
+    if (_isValidValue(record.route)) {
+      buffer.write(' ${record.route}');
+    }
+    if (_isValidValue(record.directionText)) {
+      buffer.write(' ${record.directionText}');
+    }
+    if (_isValidValue(record.positionInfo)) {
+      buffer.write(' ${record.positionInfo}');
+    }
+    buffer.writeln();
+    if (_isValidValue(record.locoType) && _isValidValue(record.loco)) {
+      final shortLoco = record.loco.length > 5
+          ? record.loco.substring(record.loco.length - 5)
+          : record.loco;
+      buffer.write('${record.locoType}-$shortLoco');
+    } else if (_isValidValue(record.locoType)) {
+      buffer.write(record.locoType);
+    } else if (_isValidValue(record.loco)) {
+      buffer.write(record.loco);
+    }
 
     if (_isValidValue(record.speed)) {
-      buffer.writeln('速度: ${record.speed} km/h');
+      buffer.write(' ${record.speed}km/h');
     }
-
-    if (_isValidValue(record.positionInfo)) {
-      buffer.writeln('位置: ${record.positionInfo}');
-    }
-
-    buffer.writeln('时间: ${record.formattedTime}');
 
     return buffer.toString().trim();
   }

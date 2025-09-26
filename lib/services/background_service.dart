@@ -20,9 +20,9 @@ class BackgroundService {
     if (_isInitialized) return;
 
     final service = FlutterBackgroundService();
-    
+
     final flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
-    
+
     if (Platform.isAndroid) {
       const AndroidNotificationChannel channel = AndroidNotificationChannel(
         _notificationChannelId,
@@ -34,10 +34,12 @@ class BackgroundService {
         playSound: false,
       );
 
-      await flutterLocalNotificationsPlugin.resolvePlatformSpecificImplementation<
-          AndroidFlutterLocalNotificationsPlugin>()?.createNotificationChannel(channel);
+      await flutterLocalNotificationsPlugin
+          .resolvePlatformSpecificImplementation<
+              AndroidFlutterLocalNotificationsPlugin>()
+          ?.createNotificationChannel(channel);
     }
-    
+
     await service.configure(
       androidConfiguration: AndroidConfiguration(
         onStart: _onStart,
@@ -81,8 +83,9 @@ class BackgroundService {
     if (service is AndroidServiceInstance) {
       await Future.delayed(const Duration(seconds: 1));
       if (await service.isForegroundService()) {
-        final flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
-        
+        final flutterLocalNotificationsPlugin =
+            FlutterLocalNotificationsPlugin();
+
         try {
           const AndroidNotificationChannel channel = AndroidNotificationChannel(
             _notificationChannelId,
@@ -94,8 +97,10 @@ class BackgroundService {
             playSound: false,
           );
 
-          await flutterLocalNotificationsPlugin.resolvePlatformSpecificImplementation<
-              AndroidFlutterLocalNotificationsPlugin>()?.createNotificationChannel(channel);
+          await flutterLocalNotificationsPlugin
+              .resolvePlatformSpecificImplementation<
+                  AndroidFlutterLocalNotificationsPlugin>()
+              ?.createNotificationChannel(channel);
 
           await flutterLocalNotificationsPlugin.show(
             _notificationId,
@@ -122,10 +127,7 @@ class BackgroundService {
               ),
             ),
           );
-          print('前台服务通知显示成功');
-        } catch (e) {
-          print('前台服务通知显示失败: $e');
-        }
+        } catch (e) {}
       }
     }
 
@@ -136,8 +138,9 @@ class BackgroundService {
             final bleService = BLEService();
             final isConnected = bleService.isConnected;
             final deviceStatus = bleService.deviceStatus;
-            
-            final flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
+
+            final flutterLocalNotificationsPlugin =
+                FlutterLocalNotificationsPlugin();
             await flutterLocalNotificationsPlugin.show(
               _notificationId,
               'LBJ Console',
@@ -163,9 +166,7 @@ class BackgroundService {
                 ),
               ),
             );
-          } catch (e) {
-            print('前台服务通知更新失败: $e');
-          }
+          } catch (e) {}
         }
       }
     });
@@ -179,7 +180,7 @@ class BackgroundService {
   static Future<void> startService() async {
     await initialize();
     final service = FlutterBackgroundService();
-    
+
     if (Platform.isAndroid) {
       final isRunning = await service.isRunning();
       if (!isRunning) {
