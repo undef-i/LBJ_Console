@@ -459,23 +459,64 @@ class HistoryScreenState extends State<HistoryScreen> {
     );
   }
 
+  String _formatLocoInfo(TrainRecord record) {
+    final locoType = record.locoType.trim();
+    final loco = record.loco.trim();
+
+    if (locoType.isNotEmpty && loco.isNotEmpty) {
+      final shortLoco =
+          loco.length > 5 ? loco.substring(loco.length - 5) : loco;
+      return "$locoType-$shortLoco";
+    } else if (locoType.isNotEmpty) {
+      return locoType;
+    } else if (loco.isNotEmpty) {
+      return loco;
+    }
+    return "";
+  }
+
   String _getDifferingInfo(
       TrainRecord record, TrainRecord latest, GroupBy groupBy) {
     final train = record.train.trim();
     final loco = record.loco.trim();
+    final locoType = record.locoType.trim();
     final latestTrain = latest.train.trim();
     final latestLoco = latest.loco.trim();
+    final latestLocoType = latest.locoType.trim();
 
     switch (groupBy) {
       case GroupBy.trainOnly:
-        return loco != latestLoco && loco.isNotEmpty ? loco : "";
+        if (loco != latestLoco && loco.isNotEmpty) {
+          return _formatLocoInfo(record);
+        }
+        return "";
       case GroupBy.locoOnly:
         return train != latestTrain && train.isNotEmpty ? train : "";
       case GroupBy.trainOrLoco:
-        if (train.isNotEmpty && train != latestTrain) return train;
-        if (loco.isNotEmpty && loco != latestLoco) return loco;
+        final trainDiff = train.isNotEmpty && train != latestTrain ? train : "";
+        final locoDiff = loco.isNotEmpty && loco != latestLoco
+            ? _formatLocoInfo(record)
+            : "";
+
+        if (trainDiff.isNotEmpty && locoDiff.isNotEmpty) {
+          return "$trainDiff $locoDiff";
+        } else if (trainDiff.isNotEmpty) {
+          return trainDiff;
+        } else if (locoDiff.isNotEmpty) {
+          return locoDiff;
+        }
         return "";
       case GroupBy.trainAndLoco:
+        if (train.isNotEmpty && train != latestTrain) {
+          final locoInfo = _formatLocoInfo(record);
+          if (locoInfo.isNotEmpty) {
+            return "$train $locoInfo";
+          }
+          return train;
+        }
+        if (loco.isNotEmpty && loco != latestLoco) {
+          return _formatLocoInfo(record);
+        }
         return "";
     }
   }
