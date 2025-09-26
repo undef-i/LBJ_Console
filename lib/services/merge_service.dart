@@ -96,6 +96,7 @@ class MergeService {
 
   static List<Object> _groupByTrainOrLoco(List<TrainRecord> records) {
     final List<MergedTrainRecord> mergedRecords = [];
+    final List<TrainRecord> singleRecords = [];
     final Set<String> usedRecordIds = {};
 
     for (int i = 0; i < records.length; i++) {
@@ -103,7 +104,6 @@ class MergeService {
       if (usedRecordIds.contains(record.uniqueId)) continue;
 
       final group = <TrainRecord>[record];
-      usedRecordIds.add(record.uniqueId);
 
       for (int j = i + 1; j < records.length; j++) {
         final otherRecord = records[j];
@@ -137,11 +137,14 @@ class MergeService {
 
         if (trainMatch || locoMatch || (bothTrainEmpty && locoMatch)) {
           group.add(otherRecord);
-          usedRecordIds.add(otherRecord.uniqueId);
         }
       }
 
       if (group.length >= 2) {
+        for (final record in group) {
+          usedRecordIds.add(record.uniqueId);
+        }
+
         final firstRecord = group.first;
         final train = firstRecord.train.trim();
         final loco = firstRecord.loco.trim();
@@ -168,11 +171,11 @@ class MergeService {
           records: group,
           latestRecord: group.first,
         ));
+      } else {
+        singleRecords.add(record);
+        usedRecordIds.add(record.uniqueId);
       }
     }
-
-    final singleRecords =
-        records.where((r) => !usedRecordIds.contains(r.uniqueId)).toList();
 
     final List<Object> result = [...mergedRecords, ...singleRecords];
     result.sort((a, b) {
