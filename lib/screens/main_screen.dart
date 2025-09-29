@@ -6,6 +6,7 @@ import 'package:lbjconsole/models/merged_record.dart';
 import 'package:lbjconsole/models/train_record.dart';
 import 'package:lbjconsole/screens/history_screen.dart';
 import 'package:lbjconsole/screens/map_screen.dart';
+import 'package:lbjconsole/screens/map_webview_screen.dart';
 import 'package:lbjconsole/screens/settings_screen.dart';
 import 'package:lbjconsole/services/ble_service.dart';
 import 'package:lbjconsole/services/database_service.dart';
@@ -174,6 +175,7 @@ class MainScreen extends StatefulWidget {
 
 class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   int _currentIndex = 0;
+  String _mapType = 'webview';
 
   late final BLEService _bleService;
   final NotificationService _notificationService = NotificationService();
@@ -195,7 +197,18 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     _initializeServices();
     _checkAndStartBackgroundService();
     _setupLastReceivedTimeListener();
+    _loadMapType();
   }
+
+  Future<void> _loadMapType() async {
+    final settings = await DatabaseService.instance.getAllSettings() ?? {};
+    if (mounted) {
+      setState(() {
+        _mapType = settings['mapType']?.toString() ?? 'webview';
+      });
+    }
+  }
+
 
   Future<void> _checkAndStartBackgroundService() async {
     final settings = await DatabaseService.instance.getAllSettings() ?? {};
@@ -231,6 +244,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _bleService.onAppResume();
+      _loadMapType();
     }
   }
 
@@ -380,8 +394,12 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         onEditModeChanged: _handleHistoryEditModeChanged,
         onSelectionChanged: _handleSelectionChanged,
       ),
-      const MapScreen(),
-      const SettingsScreen(),
+      _mapType == 'map' ? const MapScreen() : const MapWebViewScreen(),
+      SettingsScreen(
+        onSettingsChanged: () {
+          _loadMapType();
+        },
+      ),
     ];
 
     return Scaffold(
@@ -398,6 +416,10 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         onDestinationSelected: (index) {
           if (_currentIndex == 2 && index == 0) {
             _historyScreenKey.currentState?.reloadRecords();
+          }
+          // 如果从设置页面切换到地图页面，重新加载地图类型
+          if (_currentIndex == 2 && index == 1) {
+            _loadMapType();
           }
           setState(() {
             if (_isHistoryEditMode) _isHistoryEditMode = false;

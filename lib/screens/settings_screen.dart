@@ -17,7 +17,9 @@ import 'package:share_plus/share_plus.dart';
 import 'package:cross_file/cross_file.dart';
 
 class SettingsScreen extends StatefulWidget {
-  const SettingsScreen({super.key});
+  final VoidCallback? onSettingsChanged;
+
+  const SettingsScreen({super.key, this.onSettingsChanged});
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -33,8 +35,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   int _recordCount = 0;
   bool _mergeRecordsEnabled = false;
   bool _hideTimeOnlyRecords = false;
+  bool _hideUngroupableRecords = false;
   GroupBy _groupBy = GroupBy.trainAndLoco;
   TimeWindow _timeWindow = TimeWindow.unlimited;
+  String _mapType = 'map';
 
   @override
   void initState() {
@@ -63,8 +67,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _notificationsEnabled = (settingsMap['notificationEnabled'] ?? 1) == 1;
         _mergeRecordsEnabled = settings.enabled;
         _hideTimeOnlyRecords = (settingsMap['hideTimeOnlyRecords'] ?? 0) == 1;
+        _hideUngroupableRecords = settings.hideUngroupableRecords;
         _groupBy = settings.groupBy;
         _timeWindow = settings.timeWindow;
+        _mapType = settingsMap['mapType']?.toString() ?? 'webview';
       });
     }
   }
@@ -85,9 +91,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
       'notificationEnabled': _notificationsEnabled ? 1 : 0,
       'mergeRecordsEnabled': _mergeRecordsEnabled ? 1 : 0,
       'hideTimeOnlyRecords': _hideTimeOnlyRecords ? 1 : 0,
+      'hideUngroupableRecords': _hideUngroupableRecords ? 1 : 0,
       'groupBy': _groupBy.name,
       'timeWindow': _timeWindow.name,
+      'mapType': _mapType,
     });
+    widget.onSettingsChanged?.call();
   }
 
   @override
@@ -236,6 +245,43 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     _saveSettings();
                   },
                   activeColor: Theme.of(context).colorScheme.primary,
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('地图显示方式', style: AppTheme.bodyLarge),
+                    Text('选择地图组件类型', style: AppTheme.caption),
+                  ],
+                ),
+                DropdownButton<String>(
+                  value: _mapType,
+                  items: [
+                    DropdownMenuItem(
+                      value: 'webview',
+                      child: Text('矢量铁路地图', style: AppTheme.bodyMedium),
+                    ),
+                    DropdownMenuItem(
+                      value: 'map',
+                      child: Text('栅格铁路地图', style: AppTheme.bodyMedium),
+                    ),
+                  ],
+                  onChanged: (value) {
+                    if (value != null) {
+                      setState(() {
+                        _mapType = value;
+                      });
+                      _saveSettings();
+                    }
+                  },
+                  dropdownColor: AppTheme.secondaryBlack,
+                  style: AppTheme.bodyMedium,
+                  underline: Container(height: 0),
                 ),
               ],
             ),
@@ -398,6 +444,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     dropdownColor: AppTheme.secondaryBlack,
                     style: AppTheme.bodyMedium,
                   ),
+                  const SizedBox(height: 16),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('隐藏不可分组记录', style: AppTheme.bodyLarge),
+                          Text('不显示无法分组的记录', style: AppTheme.caption),
+                        ],
+                      ),
+                      Switch(
+                        value: _hideUngroupableRecords,
+                        onChanged: (value) {
+                          setState(() {
+                            _hideUngroupableRecords = value;
+                          });
+                          _saveSettings();
+                        },
+                        activeColor: Theme.of(context).colorScheme.primary,
+                      ),
+                    ],
+                  ),
                 ],
               ),
             ),
@@ -421,7 +490,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           children: [
             Row(
               children: [
-                Icon(Icons.storage, color: Theme.of(context).colorScheme.primary),
+                Icon(Icons.storage,
+                    color: Theme.of(context).colorScheme.primary),
                 const SizedBox(width: 12),
                 Text('数据管理', style: AppTheme.titleMedium),
               ],

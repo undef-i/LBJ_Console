@@ -1383,7 +1383,7 @@ class _DelayedMultiMarkerMapState extends State<_DelayedMultiMarkerMap> {
     return FlutterMap(
       options: MapOptions(
         onPositionChanged: (position, hasGesture) => _onCameraMove(),
-        minZoom: 5,
+        minZoom: 8,
         maxZoom: 18,
       ),
       mapController: _mapController,

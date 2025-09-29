@@ -26,7 +26,7 @@ if (flutterVersionName == null) {
 android {
     namespace = "org.noxylva.lbjconsole.flutter"
     compileSdk = 36
-    ndkVersion = "26.1.10909125"
+    ndkVersion = "28.1.13356709"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11

@@ -18,11 +18,12 @@ class MergeSettings {
   final bool enabled;
   final GroupBy groupBy;
   final TimeWindow timeWindow;
-
+  final bool hideUngroupableRecords;
   MergeSettings({
     this.enabled = true,
     this.groupBy = GroupBy.trainAndLoco,
     this.timeWindow = TimeWindow.unlimited,
+    this.hideUngroupableRecords = false,
   });
 
   factory MergeSettings.fromMap(Map<String, dynamic> map) {
@@ -36,6 +37,7 @@ class MergeSettings {
         (e) => e.name == map['timeWindow'],
         orElse: () => TimeWindow.unlimited,
       ),
+      hideUngroupableRecords: (map['hideUngroupableRecords'] ?? 0) == 1,
     );
   }
 }

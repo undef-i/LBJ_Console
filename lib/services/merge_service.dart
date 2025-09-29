@@ -2,6 +2,37 @@ import 'package:lbjconsole/models/train_record.dart';
 import 'package:lbjconsole/models/merged_record.dart';
 
 class MergeService {
+  static bool isNeverGroupableRecord(TrainRecord record, GroupBy groupBy) {
+    final train = record.train.trim();
+    final loco = record.loco.trim();
+
+    final hasValidTrain =
+        train.isNotEmpty && train != "<NUL>" && !train.contains("-----");
+    final hasValidLoco = loco.isNotEmpty && loco != "<NUL>";
+
+    switch (groupBy) {
+      case GroupBy.trainOnly:
+        return !hasValidTrain;
+
+      case GroupBy.locoOnly:
+        return !hasValidLoco;
+
+      case GroupBy.trainAndLoco:
+        return !hasValidTrain || !hasValidLoco;
+
+      case GroupBy.trainOrLoco:
+        return !hasValidTrain && !hasValidLoco;
+    }
+  }
+
+  static List<TrainRecord> filterUngroupableRecords(
+      List<TrainRecord> records, GroupBy groupBy, bool hideUngroupable) {
+    if (!hideUngroupable) return records;
+    return records
+        .where((record) => !isNeverGroupableRecord(record, groupBy))
+        .toList();
+  }
+
   static String? _generateGroupKey(TrainRecord record, GroupBy groupBy) {
     final train = record.train.trim();
     final loco = record.loco.trim();
@@ -36,15 +67,19 @@ class MergeService {
       return allRecords;
     }
 
-    allRecords
+    final filteredRecords = filterUngroupableRecords(
+        allRecords, settings.groupBy, settings.hideUngroupableRecords);
+
+    filteredRecords
         .sort((a, b) => b.receivedTimestamp.compareTo(a.receivedTimestamp));
 
     if (settings.groupBy == GroupBy.trainOrLoco) {
-      return _groupByTrainOrLocoWithTimeWindow(allRecords, settings.timeWindow);
+      return _groupByTrainOrLocoWithTimeWindow(
+          filteredRecords, settings.timeWindow);
     }
 
     final groupedRecords = <String, List<TrainRecord>>{};
-    for (final record in allRecords) {
+    for (final record in filteredRecords) {
       final key = _generateGroupKey(record, settings.groupBy);
       if (key != null) {
         groupedRecords.putIfAbsent(key, () => []).add(record);
@@ -79,8 +114,9 @@ class MergeService {
     final reusedRecords = _reuseDiscardedRecords(
         discardedRecords, mergedRecordIds, settings.groupBy);
 
-    final singleRecords =
-        allRecords.where((r) => !mergedRecordIds.contains(r.uniqueId)).toList();
+    final singleRecords = filteredRecords
+        .where((r) => !mergedRecordIds.contains(r.uniqueId))
+        .toList();
 
     final List<Object> mixedList = [...mergedRecords, ...singleRecords];
     mixedList.sort((a, b) {
@@ -219,7 +255,6 @@ class MergeService {
           latestRecord: processedGroup.first,
         ));
       } else {
-        // 处理被丢弃的记录
         for (final record in group) {
           if (!processedGroup.contains(record)) {
             singleRecords.add(record);

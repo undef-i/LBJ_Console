@@ -22,7 +22,7 @@ class _MapScreenState extends State<MapScreen> {
   LatLng? _currentLocation;
   LatLng? _lastTrainLocation;
   LatLng? _userLocation;
-  double _currentZoom = 12.0;
+  double _currentZoom = 14.0;
   double _currentRotation = 0.0;
 
   bool _isMapInitialized = false;
@@ -51,8 +51,17 @@ class _MapScreenState extends State<MapScreen> {
     _loadSettings().then((_) {
       _loadTrainRecords().then((_) {
         _startLocationUpdates();
+        if (!_isMapInitialized && (_currentLocation != null || _lastTrainLocation != null || _userLocation != null)) {
+          _initializeMapPosition();
+        }
       });
     });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _loadSettings();
   }
 
   Future<void> _checkDatabaseSettings() async {
@@ -226,6 +235,8 @@ class _MapScreenState extends State<MapScreen> {
         settings['mapCenterLat'] = center.latitude;
         settings['mapCenterLon'] = center.longitude;
       }
+
+      settings['mapSettingsTimestamp'] = DateTime.now().millisecondsSinceEpoch;
 
       await DatabaseService.instance.updateSettings(settings);
     } catch (e) {}
@@ -734,11 +745,31 @@ class _MapScreenState extends State<MapScreen> {
       );
     }
 
+    final bool isDefaultLocation = _currentLocation == null && 
+                                   _lastTrainLocation == null && 
+                                   _userLocation == null;
+
     return Scaffold(
       backgroundColor: const Color(0xFF121212),
       body: Stack(
         children: [
-          FlutterMap(
+          if (isDefaultLocation)
+            const Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  CircularProgressIndicator(
+                    valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF007ACC)),
+                  ),
+                  SizedBox(height: 16),
+                  Text(
+                    '正在加载地图位置...',
+                    style: TextStyle(color: Colors.white, fontSize: 16),
+                  ),
+                ],
+              ),
+            )
+          else FlutterMap(
             mapController: _mapController,
             options: MapOptions(
               initialCenter: _currentLocation ??
@@ -747,7 +778,7 @@ class _MapScreenState extends State<MapScreen> {
                   const LatLng(39.9042, 116.4074),
               initialZoom: _currentZoom,
               initialRotation: _currentRotation,
-              minZoom: 4.0,
+              minZoom: 8.0,
               maxZoom: 18.0,
               onPositionChanged: (MapCamera camera, bool hasGesture) {
                 setState(() {

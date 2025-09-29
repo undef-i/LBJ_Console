@@ -13,7 +13,7 @@ class DatabaseService {
   DatabaseService._internal();
 
   static const String _databaseName = 'train_database';
-  static const _databaseVersion = 4;
+  static const _databaseVersion = 6;
 
   static const String trainRecordsTable = 'train_records';
   static const String appSettingsTable = 'app_settings';
@@ -21,21 +21,47 @@ class DatabaseService {
   Database? _database;
 
   Future<Database> get database async {
-    if (_database != null) return _database!;
-    _database = await _initDatabase();
-    return _database!;
+    try {
+      if (_database != null) {
+        return _database!;
+      }
+      _database = await _initDatabase();
+      return _database!;
+    } catch (e, stackTrace) {
+      rethrow;
+    }
+  }
+
+  Future<bool> isDatabaseConnected() async {
+    try {
+      if (_database == null) {
+        return false;
+      }
+
+      final db = await database;
+      final result = await db.rawQuery('SELECT 1');
+      return true;
+    } catch (e) {
+      return false;
+    }
   }
 
   Future<Database> _initDatabase() async {
-    final directory = await getApplicationDocumentsDirectory();
-    final path = join(directory.path, _databaseName);
+    try {
+      final directory = await getApplicationDocumentsDirectory();
+      final path = join(directory.path, _databaseName);
 
-    return await openDatabase(
-      path,
-      version: _databaseVersion,
-      onCreate: _onCreate,
-      onUpgrade: _onUpgrade,
-    );
+      final db = await openDatabase(
+        path,
+        version: _databaseVersion,
+        onCreate: _onCreate,
+        onUpgrade: _onUpgrade,
+      );
+
+      return db;
+    } catch (e, stackTrace) {
+      rethrow;
+    }
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
@@ -51,8 +77,15 @@ class DatabaseService {
       try {
         await db.execute(
             'ALTER TABLE $appSettingsTable ADD COLUMN mapTimeFilter TEXT NOT NULL DEFAULT "unlimited"');
-      } catch (e) {
-      }
+      } catch (e) {}
+    }
+    if (oldVersion < 5) {
+      await db.execute(
+          'ALTER TABLE $appSettingsTable ADD COLUMN mapType TEXT NOT NULL DEFAULT "webview"');
+    }
+    if (oldVersion < 6) {
+      await db.execute(
+          'ALTER TABLE $appSettingsTable ADD COLUMN hideUngroupableRecords INTEGER NOT NULL DEFAULT 0');
     }
   }
 
@@ -92,6 +125,7 @@ class DatabaseService {
         mapZoomLevel REAL NOT NULL DEFAULT 10.0,
         mapRailwayLayerVisible INTEGER NOT NULL DEFAULT 1,
         mapRotation REAL NOT NULL DEFAULT 0.0,
+        mapType TEXT NOT NULL DEFAULT 'webview',
         specifiedDeviceAddress TEXT,
         searchOrderList TEXT NOT NULL DEFAULT '',
         autoConnectEnabled INTEGER NOT NULL DEFAULT 1,
@@ -101,7 +135,8 @@ class DatabaseService {
         hideTimeOnlyRecords INTEGER NOT NULL DEFAULT 0,
         groupBy TEXT NOT NULL DEFAULT 'trainAndLoco',
         timeWindow TEXT NOT NULL DEFAULT 'unlimited',
-        mapTimeFilter TEXT NOT NULL DEFAULT 'unlimited'
+        mapTimeFilter TEXT NOT NULL DEFAULT 'unlimited',
+        hideUngroupableRecords INTEGER NOT NULL DEFAULT 0
       )
     ''');
 
@@ -118,6 +153,7 @@ class DatabaseService {
       'mapZoomLevel': 10.0,
       'mapRailwayLayerVisible': 1,
       'mapRotation': 0.0,
+      'mapType': 'webview',
       'searchOrderList': '',
       'autoConnectEnabled': 1,
       'backgroundServiceEnabled': 0,
@@ -127,6 +163,7 @@ class DatabaseService {
       'groupBy': 'trainAndLoco',
       'timeWindow': 'unlimited',
       'mapTimeFilter': 'unlimited',
+      'hideUngroupableRecords': 0,
     });
   }
 
@@ -140,12 +177,18 @@ class DatabaseService {
   }
 
   Future<List<TrainRecord>> getAllRecords() async {
-    final db = await database;
-    final result = await db.query(
-      trainRecordsTable,
-      orderBy: 'timestamp DESC',
-    );
-    return result.map((json) => TrainRecord.fromDatabaseJson(json)).toList();
+    try {
+      final db = await database;
+      final result = await db.query(
+        trainRecordsTable,
+        orderBy: 'timestamp DESC',
+      );
+      final records =
+          result.map((json) => TrainRecord.fromDatabaseJson(json)).toList();
+      return records;
+    } catch (e, stackTrace) {
+      rethrow;
+    }
   }
 
   Future<List<TrainRecord>> getRecordsWithinTimeRange(Duration duration) async {
@@ -162,15 +205,23 @@ class DatabaseService {
 
   Future<List<TrainRecord>> getRecordsWithinReceivedTimeRange(
       Duration duration) async {
-    final db = await database;
-    final cutoffTime = DateTime.now().subtract(duration).millisecondsSinceEpoch;
-    final result = await db.query(
-      trainRecordsTable,
-      where: 'receivedTimestamp >= ?',
-      whereArgs: [cutoffTime],
-      orderBy: 'receivedTimestamp DESC',
-    );
-    return result.map((json) => TrainRecord.fromDatabaseJson(json)).toList();
+    try {
+      final db = await database;
+      final cutoffTime =
+          DateTime.now().subtract(duration).millisecondsSinceEpoch;
+
+      final result = await db.query(
+        trainRecordsTable,
+        where: 'receivedTimestamp >= ?',
+        whereArgs: [cutoffTime],
+        orderBy: 'receivedTimestamp DESC',
+      );
+      final records =
+          result.map((json) => TrainRecord.fromDatabaseJson(json)).toList();
+      return records;
+    } catch (e, stackTrace) {
+      rethrow;
+    }
   }
 
   Future<int> deleteRecord(String uniqueId) async {
