@@ -32,13 +32,41 @@ class MapWebViewScreenState extends State<MapWebViewScreen>
   double _currentRotation = 0.0;
   LatLng? _currentLocation;
   LatLng? _lastTrainLocation;
+  bool _isDataLoaded = false;
+  final Completer<void> _webViewReadyCompleter = Completer<void>();
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _initializeWebView();
-    _initializeServices();
+    _startInitialization();
+  }
+
+  Future<void> _startInitialization() async {
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      await _loadSettings();
+      await _loadTrainRecordsFromDatabase();
+
+      await _webViewReadyCompleter.future;
+
+      _initializeMapCamera();
+
+      _initializeLocation();
+      _startAutoRefresh();
+    } catch (e, s) {
+      print('[Flutter] Init Map WebView Screen Failed: $e\n$s');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
   }
 
   @override
@@ -48,16 +76,7 @@ class MapWebViewScreenState extends State<MapWebViewScreen>
     }
   }
 
-  Future<void> _initializeServices() async {
-    try {
-      await _loadSettings();
-      await _loadTrainRecordsFromDatabase();
-      _initializeLocation();
-      _startAutoRefresh();
-    } catch (e) {}
-  }
-
-  void _initializeWebView() {
+  Future<void> _initializeWebView() async {
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setBackgroundColor(const Color(0xFF121212))
@@ -92,9 +111,8 @@ class MapWebViewScreenState extends State<MapWebViewScreen>
               _isLoading = false;
             });
 
-            if (mounted) {
-              _initializeMap();
-              _initializeLocation();
+            if (!_webViewReadyCompleter.isCompleted) {
+              _webViewReadyCompleter.complete();
             }
           },
           onWebResourceError: (WebResourceError error) {
@@ -107,6 +125,8 @@ class MapWebViewScreenState extends State<MapWebViewScreen>
       ..loadFlutterAsset('assets/mapbox_map.html')
           .then((_) {})
           .catchError((error) {});
+
+    await Future.delayed(const Duration(milliseconds: 500));
   }
 
   Future<void> _initializeLocation() async {
@@ -266,10 +286,6 @@ class MapWebViewScreenState extends State<MapWebViewScreen>
             } else {}
           } else {}
         } else {}
-
-        if (mounted) {
-          _initializeMapPosition();
-        }
       });
 
       Future.delayed(const Duration(milliseconds: 3000), () {
@@ -351,25 +367,38 @@ class MapWebViewScreenState extends State<MapWebViewScreen>
     }
   }
 
-  void _initializeMapPosition() {
+  void _initializeMapCamera() {
     if (_isMapInitialized) return;
 
-    LatLng? targetLocation;
+    LatLng targetLocation;
+    double targetZoom = _currentZoom;
+    double targetRotation = _currentRotation;
 
-    if (_lastTrainLocation != null) {
-      targetLocation = _lastTrainLocation;
-    } else if (_currentPosition != null) {
-      targetLocation =
-          LatLng(_currentPosition!.latitude, _currentPosition!.longitude);
-    }
-
-    if (targetLocation != null) {
-      _centerMap(targetLocation,
-          zoom: _currentZoom, rotation: _currentRotation);
-      _isMapInitialized = true;
+    if (_currentLocation != null) {
+      targetLocation = _currentLocation!;
+    } else if (_lastTrainLocation != null) {
+      targetLocation = _lastTrainLocation!;
+      targetZoom = 14.0;
+      targetRotation = 0.0;
     } else {
-      _isMapInitialized = true;
+      targetLocation = const LatLng(39.9042, 116.4074);
+      targetZoom = 10.0;
     }
+
+    _centerMap(targetLocation, zoom: targetZoom, rotation: targetRotation);
+    _isMapInitialized = true;
+
+    Future.delayed(const Duration(milliseconds: 500), () {
+      if (mounted) {
+        _updateUserLocation();
+        _updateTrainMarkers();
+        _controller.runJavaScript('''
+          if (window.MapInterface) {
+            window.MapInterface.setRailwayVisible($_isRailwayLayerVisible);
+          }
+        ''');
+      }
+    });
   }
 
   void _centerMap(LatLng location, {double? zoom, double? rotation}) {
@@ -428,91 +457,6 @@ class MapWebViewScreenState extends State<MapWebViewScreen>
 
       await DatabaseService.instance.updateSettings(settings);
     } catch (e) {}
-  }
-
-  Future<void> _initializeMap() async {
-    try {
-      LatLng? targetLocation;
-      double targetZoom = 14.0;
-      double targetRotation = _currentRotation;
-
-      if (_lastTrainLocation != null) {
-        targetLocation = _lastTrainLocation;
-        targetZoom = 14.0;
-        targetRotation = 0.0;
-      } else if (_currentPosition != null) {
-        targetLocation =
-            LatLng(_currentPosition!.latitude, _currentPosition!.longitude);
-        targetZoom = 16.0;
-        targetRotation = 0.0;
-      }
-
-      if (targetLocation != null) {
-        _centerMap(targetLocation, zoom: targetZoom, rotation: targetRotation);
-
-        try {
-          await _controller.runJavaScript('''
-            (function() {
-              if (window.map && window.map.getContainer) {
-                window.map.getContainer().style.opacity = '1';
-                return true;
-              } else {
-                return false;
-              }
-            })();
-          ''');
-        } catch (e) {
-          print('显示地图失败: $e');
-          Future.delayed(const Duration(milliseconds: 500), () {
-            _controller.runJavaScript('''
-              (function() {
-                if (window.map && window.map.getContainer) {
-                  window.map.getContainer().style.opacity = '1';
-                  console.log('延迟显示地图成功');
-                }
-              })();
-            ''');
-          });
-        }
-      }
-
-      setState(() {
-        _isMapInitialized = true;
-      });
-    } catch (e, stackTrace) {}
-
-    Future.delayed(const Duration(milliseconds: 1000), () {
-      if (mounted && _isMapInitialized) {
-        _updateTrainMarkers();
-
-        _controller.runJavaScript('''
-            (function() {
-              if (window.MapInterface) {
-                try {
-                  window.MapInterface.setRailwayVisible($_isRailwayLayerVisible);
-                  console.log('初始化铁路图层状态: $_isRailwayLayerVisible');
-                } catch (error) {
-                  console.error('初始化铁路图层失败:', error);
-                }
-              }
-            })();
-          ''');
-      }
-    });
-
-    Future.delayed(const Duration(milliseconds: 3000), () {
-      if (mounted && _isMapInitialized) {
-        _updateTrainMarkers();
-      }
-    });
-
-    Future.delayed(const Duration(seconds: 5), () {
-      if (mounted && _isLoading) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
-    });
   }
 
   LatLng? _parseDmsCoordinate(String? positionInfo) {
@@ -943,10 +887,10 @@ class MapWebViewScreenState extends State<MapWebViewScreen>
 
   void _onMapStateChanged(Map<String, dynamic> mapState) {
     try {
-      final lat = mapState['lat'] as double;
-      final lng = mapState['lng'] as double;
-      final zoom = mapState['zoom'] as double;
-      final bearing = mapState['bearing'] as double;
+      final lat = (mapState['lat'] as num).toDouble();
+      final lng = (mapState['lng'] as num).toDouble();
+      final zoom = (mapState['zoom'] as num).toDouble();
+      final bearing = (mapState['bearing'] as num).toDouble();
 
       setState(() {
         _currentLocation = LatLng(lat, lng);

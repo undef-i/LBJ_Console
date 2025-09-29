@@ -13,7 +13,7 @@ class DatabaseService {
   DatabaseService._internal();
 
   static const String _databaseName = 'train_database';
-  static const _databaseVersion = 6;
+  static const _databaseVersion = 7;
 
   static const String trainRecordsTable = 'train_records';
   static const String appSettingsTable = 'app_settings';
@@ -87,6 +87,10 @@ class DatabaseService {
       await db.execute(
           'ALTER TABLE $appSettingsTable ADD COLUMN hideUngroupableRecords INTEGER NOT NULL DEFAULT 0');
     }
+    if (oldVersion < 7) {
+      await db.execute(
+          'ALTER TABLE $appSettingsTable ADD COLUMN mapSettingsTimestamp INTEGER');
+    }
   }
 
   Future<void> _onCreate(Database db, int version) async {
@@ -136,7 +140,8 @@ class DatabaseService {
         groupBy TEXT NOT NULL DEFAULT 'trainAndLoco',
         timeWindow TEXT NOT NULL DEFAULT 'unlimited',
         mapTimeFilter TEXT NOT NULL DEFAULT 'unlimited',
-        hideUngroupableRecords INTEGER NOT NULL DEFAULT 0
+        hideUngroupableRecords INTEGER NOT NULL DEFAULT 0,
+        mapSettingsTimestamp INTEGER
       )
     ''');
 
@@ -164,6 +169,7 @@ class DatabaseService {
       'timeWindow': 'unlimited',
       'mapTimeFilter': 'unlimited',
       'hideUngroupableRecords': 0,
+      'mapSettingsTimestamp': null,
     });
   }
 

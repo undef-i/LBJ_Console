@@ -14848,8 +14848,8 @@
         el.addEventListener("click", function (e) {
           e.stopPropagation();
           showTrainDetails(lat, lng, recordData);
-          if (window.flutter_inappwebview) {
-            window.flutter_inappwebview.callHandler("showTrainDetails", {
+          if (window.showTrainDetails) {
+            window.showTrainDetails.postMessage(JSON.stringify({
               id: recordData.id || Date.now(),
               trainNumber: trainNumber || "未知车次",
               trainType: recordData.trainType || "未知类型",
@@ -14858,7 +14858,7 @@
               latitude: lat,
               longitude: lng,
               timestamp: Date.now(),
-            });
+            }));
           }
         });
         const marker = new maplibregl.Marker({
@@ -14931,11 +14931,21 @@
           .addTo(map);
       }
       function setCenter(lat, lng, zoom, bearing) {
-        map.jumpTo({
+        if (!window.map) {
+          console.error("[JS] Map object not ready in setCenter");
+          return;
+        }
+        
+        window.map.jumpTo({
           center: [lng, lat],
-          zoom: zoom !== undefined ? zoom : map.getZoom(),
-          bearing: bearing !== undefined ? bearing : map.getBearing(),
+          zoom: zoom !== undefined ? zoom : window.map.getZoom(),
+          bearing: bearing !== undefined ? bearing : window.map.getBearing(),
         });
+
+        const mapContainer = window.map.getContainer();
+        if (mapContainer.style.opacity === "0") {
+          mapContainer.style.opacity = "1";
+        }
       }
       function getMapState() {
         const center = map.getCenter();
@@ -14948,17 +14958,19 @@
       }
       function setupMapEventListeners() {
         if (!map) return;
-        map.on("moveend", function () {
+        map.on("move", function () {
           const center = map.getCenter();
           const zoom = map.getZoom();
           const bearing = map.getBearing();
-          if (window.flutter_inappwebview) {
-            window.flutter_inappwebview.callHandler("onMapStateChanged", {
+
+          if (window.onMapStateChanged) {
+            const mapState = JSON.stringify({
               lat: center.lat,
               lng: center.lng,
               zoom: zoom,
               bearing: bearing,
             });
+            window.onMapStateChanged.postMessage(mapState);
           }
         });
       }
