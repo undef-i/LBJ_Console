@@ -1,9 +1,7 @@
 import 'dart:math' as math;
 import 'dart:isolate';
 import 'dart:async';
-import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
@@ -33,6 +31,10 @@ class HistoryScreenState extends State<HistoryScreen> {
   final List<Object> _displayItems = [];
   bool _isLoading = true;
   bool _isEditMode = false;
+  int? _anchorIndex;
+  double? _anchorOffset;
+  double? _oldCardHeight;
+  double? _oldScrollOffset;
   final Set<String> _selectedRecords = {};
   final Map<String, bool> _expandedStates = {};
   final ScrollController _scrollController = ScrollController();
@@ -41,7 +43,6 @@ class HistoryScreenState extends State<HistoryScreen> {
   late final ChatScrollObserver _chatObserver;
   bool _isAtTop = true;
   MergeSettings _mergeSettings = MergeSettings();
-  double _itemHeightCache = 0.0;
 
   final Map<String, double> _mapOptimalZoom = {};
   final Map<String, bool> _mapCalculating = {};
@@ -74,15 +75,21 @@ class HistoryScreenState extends State<HistoryScreen> {
     super.initState();
     _chatObserver = ChatScrollObserver(_observerController)
       ..toRebuildScrollViewCallback = () {
-        setState(() {});
+        if (mounted) {
+          setState(() {});
+        }
       };
     _scrollController.addListener(() {
       if (_scrollController.position.atEdge) {
         if (_scrollController.position.pixels == 0) {
-          if (!_isAtTop) setState(() => _isAtTop = true);
+          if (!_isAtTop) {
+            setState(() => _isAtTop = true);
+          }
         }
       } else {
-        if (_isAtTop) setState(() => _isAtTop = false);
+        if (_isAtTop) {
+          setState(() => _isAtTop = false);
+        }
       }
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -109,17 +116,19 @@ class HistoryScreenState extends State<HistoryScreen> {
 
       List<TrainRecord> filteredRecords = allRecords;
       if ((settingsMap['hideTimeOnlyRecords'] ?? 0) == 1) {
-        int hiddenCount = 0;
-        int shownCount = 0;
-
         filteredRecords = allRecords.where((record) {
           bool isFieldMeaningful(String field) {
-            if (field.isEmpty) return false;
-            String cleaned = field.replaceAll('<NUL>', '').trim();
-            if (cleaned.isEmpty) return false;
-            if (cleaned.runes
-                .every((r) => r == '*'.runes.first || r == ' '.runes.first))
+            if (field.isEmpty) {
               return false;
+            }
+            String cleaned = field.replaceAll('<NUL>', '').trim();
+            if (cleaned.isEmpty) {
+              return false;
+            }
+            if (cleaned.runes
+                .every((r) => r == '*'.runes.first || r == ' '.runes.first)) {
+              return false;
+            }
             return true;
           }
 
@@ -160,12 +169,6 @@ class HistoryScreenState extends State<HistoryScreen> {
               hasLbjClass ||
               hasTrain;
 
-          if (!shouldShow) {
-            hiddenCount++;
-          } else {
-            shownCount++;
-          }
-
           return shouldShow;
         }).toList();
       }
@@ -192,7 +195,9 @@ class HistoryScreenState extends State<HistoryScreen> {
         }
       }
     } catch (e) {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
@@ -201,57 +206,7 @@ class HistoryScreenState extends State<HistoryScreen> {
       final settingsMap = await DatabaseService.instance.getAllSettings() ?? {};
       _mergeSettings = MergeSettings.fromMap(settingsMap);
 
-      if ((settingsMap['hideTimeOnlyRecords'] ?? 0) == 1) {
-        bool isFieldMeaningful(String field) {
-          if (field.isEmpty) return false;
-          String cleaned = field.replaceAll('<NUL>', '').trim();
-          if (cleaned.isEmpty) return false;
-          if (cleaned.runes
-              .every((r) => r == '*'.runes.first || r == ' '.runes.first))
-            return false;
-          return true;
-        }
-
-        final hasTrainNumber = isFieldMeaningful(newRecord.fullTrainNumber) &&
-            !newRecord.fullTrainNumber.contains("-----");
-
-        final hasDirection =
-            newRecord.direction == 1 || newRecord.direction == 3;
-
-        final hasLocoInfo = isFieldMeaningful(newRecord.locoType) ||
-            isFieldMeaningful(newRecord.loco);
-
-        final hasRoute = isFieldMeaningful(newRecord.route);
-
-        final hasPosition = isFieldMeaningful(newRecord.position);
-
-        final hasSpeed =
-            isFieldMeaningful(newRecord.speed) && newRecord.speed != "NUL";
-
-        final hasPositionInfo = isFieldMeaningful(newRecord.positionInfo);
-
-        final hasTrainType = isFieldMeaningful(newRecord.trainType) &&
-            newRecord.trainType != "未知";
-
-        final hasLbjClass =
-            isFieldMeaningful(newRecord.lbjClass) && newRecord.lbjClass != "NA";
-
-        final hasTrain = isFieldMeaningful(newRecord.train) &&
-            !newRecord.train.contains("-----");
-
-        if (!hasTrainNumber &&
-            !hasDirection &&
-            !hasLocoInfo &&
-            !hasRoute &&
-            !hasPosition &&
-            !hasSpeed &&
-            !hasPositionInfo &&
-            !hasTrainType &&
-            !hasLbjClass &&
-            !hasTrain) {
-          return;
-        }
-      }
+      if ((settingsMap['hideTimeOnlyRecords'] ?? 0) == 1) {}
 
       final isNewRecord = !_displayItems.any((item) {
         if (item is TrainRecord) {
@@ -261,30 +216,130 @@ class HistoryScreenState extends State<HistoryScreen> {
         }
         return false;
       });
-
       if (!isNewRecord) return;
 
-      final allRecords = await DatabaseService.instance.getAllRecords();
-      final items = MergeService.getMixedList(allRecords, _mergeSettings);
-
       if (mounted) {
-        if (!_isAtTop) {
-          _chatObserver.standby();
-        }
-
-        final hasDataChanged = _hasDataChanged(items);
-        if (hasDataChanged) {
+        if (_isAtTop) {
           setState(() {
-            _displayItems.clear();
-            _displayItems.addAll(items);
+            bool isMerge = false;
+            Object? mergeResult;
+            if (_displayItems.isNotEmpty) {
+              final firstItem = _displayItems.first;
+              List<TrainRecord> tempRecords = [newRecord];
+              if (firstItem is MergedTrainRecord) {
+                tempRecords.addAll(firstItem.records);
+              } else if (firstItem is TrainRecord) {
+                tempRecords.add(firstItem);
+              }
+              final mergeCheckResult =
+                  MergeService.getMixedList(tempRecords, _mergeSettings);
+              if (mergeCheckResult.length == 1 &&
+                  mergeCheckResult.first is MergedTrainRecord) {
+                isMerge = true;
+                mergeResult = mergeCheckResult.first;
+              }
+            }
+            if (isMerge) {
+              _displayItems[0] = mergeResult!;
+            } else {
+              _displayItems.insert(0, newRecord);
+            }
           });
+          if (_scrollController.hasClients) {
+            _scrollController.jumpTo(0.0);
+          }
+          return;
         }
 
-        if (_isAtTop && _scrollController.hasClients) {
-          _scrollController.jumpTo(0.0);
+        final anchorModel = _observerController.observeFirstItem();
+        if (anchorModel == null) {
+          return;
         }
+
+        _anchorIndex = anchorModel.index;
+        if (_anchorIndex! > 0) {
+          _anchorOffset = anchorModel.layoutOffset;
+        } else {
+          _oldCardHeight = anchorModel.size.height;
+          _oldScrollOffset = _scrollController.offset;
+        }
+
+        bool isMerge = false;
+        Object? mergeResult;
+        final firstItem = _displayItems.first;
+        List<TrainRecord> tempRecords = [newRecord];
+        if (firstItem is MergedTrainRecord) {
+          tempRecords.addAll(firstItem.records);
+        } else if (firstItem is TrainRecord) {
+          tempRecords.add(firstItem);
+        }
+        final mergeCheckResult =
+            MergeService.getMixedList(tempRecords, _mergeSettings);
+        if (mergeCheckResult.length == 1 &&
+            mergeCheckResult.first is MergedTrainRecord) {
+          isMerge = true;
+          mergeResult = mergeCheckResult.first;
+        }
+
+        setState(() {
+          if (isMerge) {
+            _displayItems[0] = mergeResult!;
+          } else {
+            _displayItems.insert(0, newRecord);
+          }
+        });
+
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted || _anchorIndex == null) return;
+
+          if (_anchorIndex! > 0) {
+            final newAnchorIndex = isMerge ? _anchorIndex! : _anchorIndex! + 1;
+            final newAnchorModel =
+                _observerController.observeItem(index: newAnchorIndex);
+            if (newAnchorModel != null && _anchorOffset != null) {
+              final newOffset = newAnchorModel.layoutOffset;
+              final delta = newOffset - _anchorOffset!;
+              if (delta.abs() > 0.1) {
+                _scrollController.jumpTo(_scrollController.offset + delta);
+              }
+            }
+          } else {
+            final newAnchorModel = _observerController.observeItem(index: 0);
+            if (newAnchorModel != null &&
+                _oldCardHeight != null &&
+                _oldScrollOffset != null) {
+              final newHeight = newAnchorModel.size.height;
+              final heightDelta = newHeight - _oldCardHeight!;
+              if (heightDelta.abs() > 0.1) {
+                _scrollController.jumpTo(_oldScrollOffset! + heightDelta);
+              }
+            }
+          }
+
+          _anchorIndex = null;
+          _anchorOffset = null;
+          _oldCardHeight = null;
+          _oldScrollOffset = null;
+        });
       }
     } catch (e) {}
+  }
+
+  String _getGroupKeyForRecord(TrainRecord record, MergeSettings settings) {
+    switch (settings.groupBy) {
+      case GroupBy.trainOnly:
+        return record.train.trim();
+      case GroupBy.locoOnly:
+        return record.loco.trim();
+      case GroupBy.trainAndLoco:
+        return '${record.train.trim()}-${record.loco.trim()}';
+      case GroupBy.trainOrLoco:
+        final train = record.train.trim();
+        if (train.isNotEmpty) return train;
+        final loco = record.loco.trim();
+        if (loco.isNotEmpty) return loco;
+        return '';
+    }
   }
 
   bool _hasDataChanged(List<Object> newItems) {
@@ -303,7 +358,6 @@ class HistoryScreenState extends State<HistoryScreen> {
         if (oldItem.records.length != newItem.records.length) return true;
       }
     }
-
     return false;
   }
 
@@ -346,6 +400,7 @@ class HistoryScreenState extends State<HistoryScreen> {
         mergedRecord.records.any((r) => _selectedRecords.contains(r.uniqueId));
     final isExpanded = _expandedStates[mergedRecord.groupKey] ?? false;
     return Card(
+        key: ValueKey(mergedRecord.groupKey),
         color: isSelected && _isEditMode
             ? const Color(0xFF2E2E2E)
             : const Color(0xFF1E1E1E),
@@ -389,7 +444,9 @@ class HistoryScreenState extends State<HistoryScreen> {
               }
             },
             onLongPress: () {
-              if (!_isEditMode) setEditMode(true);
+              if (!_isEditMode) {
+                setEditMode(true);
+              }
               setState(() {
                 final allIdsInGroup =
                     mergedRecord.records.map((r) => r.uniqueId).toSet();
@@ -488,10 +545,8 @@ class HistoryScreenState extends State<HistoryScreen> {
       TrainRecord record, TrainRecord latest, GroupBy groupBy) {
     final train = record.train.trim();
     final loco = record.loco.trim();
-    final locoType = record.locoType.trim();
     final latestTrain = latest.train.trim();
     final latestLoco = latest.loco.trim();
-    final latestLocoType = latest.locoType.trim();
 
     switch (groupBy) {
       case GroupBy.trainOnly:
@@ -530,77 +585,14 @@ class HistoryScreenState extends State<HistoryScreen> {
     }
   }
 
-  double _calculateOptimalZoom(List<LatLng> positions,
-      {double containerWidth = 400, double containerHeight = 220}) {
-    if (positions.length == 1) return 17.0;
-
-    double minLat = positions[0].latitude;
-    double maxLat = positions[0].latitude;
-    double minLng = positions[0].longitude;
-    double maxLng = positions[0].longitude;
-
-    for (final pos in positions) {
-      minLat = math.min(minLat, pos.latitude);
-      maxLat = math.max(maxLat, pos.latitude);
-      minLng = math.min(minLng, pos.longitude);
-      maxLng = math.max(maxLng, pos.longitude);
-    }
-
-    double latToY(double lat) {
-      final latRad = lat * math.pi / 180.0;
-      return math.log(math.tan(latRad) + 1.0 / math.cos(latRad));
-    }
-
-    double lngToX(double lng) {
-      return lng * math.pi / 180.0;
-    }
-
-    final minX = lngToX(minLng);
-    final maxX = lngToX(maxLng);
-    final minY = latToY(minLat);
-    final maxY = latToY(maxLat);
-
-    const worldSize = 2.0 * math.pi;
-
-    final widthWorld = (maxX - minX) / worldSize;
-    final heightWorld = (maxY - minY) / worldSize;
-
-    const paddingRatio = 0.8;
-
-    final widthZoom =
-        math.log((containerWidth * paddingRatio) / (widthWorld * 256.0)) /
-            math.log(2.0);
-    final heightZoom =
-        math.log((containerHeight * paddingRatio) / (heightWorld * 256.0)) /
-            math.log(2.0);
-
-    final optimalZoom = math.min(widthZoom, heightZoom);
-
-    return math.max(1.0, math.min(20.0, optimalZoom));
-  }
-
-  double _calculateDistance(LatLng pos1, LatLng pos2) {
-    const earthRadius = 6371000;
-    final lat1 = pos1.latitude * math.pi / 180;
-    final lat2 = pos2.latitude * math.pi / 180;
-    final deltaLat = (pos2.latitude - pos1.latitude) * math.pi / 180;
-    final deltaLng = (pos2.longitude - pos1.longitude) * math.pi / 180;
-
-    final a = math.sin(deltaLat / 2) * math.sin(deltaLat / 2) +
-        math.cos(lat1) *
-            math.cos(lat2) *
-            math.sin(deltaLng / 2) *
-            math.sin(deltaLng / 2);
-    final c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
-
-    return earthRadius * c;
-  }
-
   String _getLocationInfo(TrainRecord record) {
     List<String> parts = [];
-    if (record.route.isNotEmpty && record.route != "<NUL>")
+    if (record.route.isNotEmpty && record.route != "<NUL>") {
       parts.add(record.route);
-    if (record.direction != 0) parts.add(record.direction == 1 ? "下" : "上");
+    }
+    if (record.direction != 0) {
+      parts.add(record.direction == 1 ? "下" : "上");
+    }
     if (record.position.isNotEmpty && record.position != "<NUL>") {
       final position = record.position;
       final cleanPosition = position.endsWith('.')
@@ -616,7 +608,9 @@ class HistoryScreenState extends State<HistoryScreen> {
         .map((record) => _parsePosition(record.positionInfo))
         .whereType<LatLng>()
         .toList();
-    if (positions.isEmpty) return const SizedBox.shrink();
+    if (positions.isEmpty) {
+      return const SizedBox.shrink();
+    }
 
     final mapId = records.map((r) => r.uniqueId).join('_');
     final bounds = LatLngBounds.fromPoints(positions);
@@ -674,12 +668,6 @@ class HistoryScreenState extends State<HistoryScreen> {
     ]);
   }
 
-  double _getDefaultZoom(List<LatLng> positions) {
-    if (positions.length == 1) return 15.0;
-    if (positions.length < 10) return 12.0;
-    return 10.0;
-  }
-
   Future<void> _requestLocationPermission() async {
     bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) {
@@ -695,23 +683,30 @@ class HistoryScreenState extends State<HistoryScreen> {
       return;
     }
 
-    setState(() {
-      _isLocationPermissionGranted = true;
-    });
+    if (mounted) {
+      setState(() {
+        _isLocationPermissionGranted = true;
+      });
+    }
 
     _getCurrentLocation();
   }
 
   Future<void> _getCurrentLocation() async {
     try {
+      final locationSettings = AndroidSettings(
+        accuracy: LocationAccuracy.high,
+        forceLocationManager: true,
+      );
       Position position = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
-        forceAndroidLocationManager: true,
+        locationSettings: locationSettings,
       );
 
-      setState(() {
-        _currentUserLocation = LatLng(position.latitude, position.longitude);
-      });
+      if (mounted) {
+        setState(() {
+          _currentUserLocation = LatLng(position.latitude, position.longitude);
+        });
+      }
     } catch (e) {}
   }
 
@@ -731,10 +726,8 @@ class HistoryScreenState extends State<HistoryScreen> {
     final isExpanded =
         !isSubCard && (_expandedStates[record.uniqueId] ?? false);
 
-    final GlobalKey itemKey = GlobalKey();
-
-    final Widget card = Card(
-        key: key ?? itemKey,
+    return Card(
+        key: key,
         color: isSelected && _isEditMode
             ? const Color(0xFF2E2E2E)
             : const Color(0xFF1E1E1E),
@@ -762,7 +755,9 @@ class HistoryScreenState extends State<HistoryScreen> {
               }
             },
             onLongPress: () {
-              if (!_isEditMode) setEditMode(true);
+              if (!_isEditMode) {
+                setEditMode(true);
+              }
               setState(() {
                 _selectedRecords.add(record.uniqueId);
                 widget.onSelectionChanged();
@@ -778,21 +773,6 @@ class HistoryScreenState extends State<HistoryScreen> {
                       _buildLocoInfo(record),
                       if (isExpanded) _buildExpandedContent(record),
                     ]))));
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_itemHeightCache <= 0 && itemKey.currentContext != null) {
-        final RenderBox renderBox =
-            itemKey.currentContext!.findRenderObject() as RenderBox;
-        final double realHeight = renderBox.size.height;
-        if (realHeight > 0) {
-          setState(() {
-            _itemHeightCache = realHeight;
-          });
-        }
-      }
-    });
-
-    return card;
   }
 
   Widget _buildRecordHeader(TrainRecord record, {bool isMerged = false}) {
@@ -885,7 +865,9 @@ class HistoryScreenState extends State<HistoryScreen> {
 
   Widget _buildLocoInfo(TrainRecord record) {
     final locoInfo = record.locoInfo;
-    if (locoInfo == null || locoInfo.isEmpty) return const SizedBox.shrink();
+    if (locoInfo == null || locoInfo.isEmpty) {
+      return const SizedBox.shrink();
+    }
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       const SizedBox(height: 4),
       Text(locoInfo,
@@ -910,8 +892,9 @@ class HistoryScreenState extends State<HistoryScreen> {
             .every((r) => r == '*'.runes.first || r == '-'.runes.first) &&
         speed != "NUL" &&
         speed != "<NUL>";
-    if (!isValidRoute && !isValidPosition && !isValidSpeed)
+    if (!isValidRoute && !isValidPosition && !isValidSpeed) {
       return const SizedBox.shrink();
+    }
     return Padding(
         padding: const EdgeInsets.only(top: 4.0),
         child:
@@ -1002,8 +985,11 @@ class HistoryScreenState extends State<HistoryScreen> {
   }
 
   LatLng? _parsePosition(String? positionInfo) {
-    if (positionInfo == null || positionInfo.isEmpty || positionInfo == '<NUL>')
+    if (positionInfo == null ||
+        positionInfo.isEmpty ||
+        positionInfo == '<NUL>') {
       return null;
+    }
     try {
       final parts = positionInfo.trim().split(RegExp(r'\s+'));
       if (parts.length >= 2) {
@@ -1022,14 +1008,22 @@ class HistoryScreenState extends State<HistoryScreen> {
   double? _parseDmsCoordinate(String dmsStr) {
     try {
       final degreeIndex = dmsStr.indexOf('°');
-      if (degreeIndex == -1) return null;
+      if (degreeIndex == -1) {
+        return null;
+      }
       final degrees = double.tryParse(dmsStr.substring(0, degreeIndex));
-      if (degrees == null) return null;
+      if (degrees == null) {
+        return null;
+      }
       final minuteIndex = dmsStr.indexOf('′');
-      if (minuteIndex == -1) return degrees;
+      if (minuteIndex == -1) {
+        return degrees;
+      }
       final minutes =
           double.tryParse(dmsStr.substring(degreeIndex + 1, minuteIndex));
-      if (minutes == null) return degrees;
+      if (minutes == null) {
+        return degrees;
+      }
       return degrees + (minutes / 60.0);
     } catch (e) {
       return null;
@@ -1140,12 +1134,12 @@ class _DelayedMapWithMarker extends StatefulWidget {
   final LatLng? currentUserLocation;
 
   const _DelayedMapWithMarker({
-    Key? key,
+    super.key,
     required this.position,
     required this.zoom,
     required this.recordId,
     this.currentUserLocation,
-  }) : super(key: key);
+  });
 
   @override
   State<_DelayedMapWithMarker> createState() => _DelayedMapWithMarkerState();
@@ -1175,13 +1169,17 @@ class _DelayedMapWithMarkerState extends State<_DelayedMapWithMarker> {
         _mapController.rotate(savedState.bearing);
       }
     }
-    setState(() {
-      _isInitializing = false;
-    });
+    if (mounted) {
+      setState(() {
+        _isInitializing = false;
+      });
+    }
   }
 
   void _onCameraMove() {
-    if (_isInitializing) return;
+    if (_isInitializing) {
+      return;
+    }
 
     final camera = _mapController.camera;
     final state = MapState(
@@ -1280,13 +1278,13 @@ class _DelayedMultiMarkerMap extends StatefulWidget {
   final LatLng? currentUserLocation;
 
   const _DelayedMultiMarkerMap({
-    Key? key,
+    super.key,
     required this.positions,
     required this.center,
     required this.zoom,
     required this.groupKey,
     this.currentUserLocation,
-  }) : super(key: key);
+  });
 
   @override
   State<_DelayedMultiMarkerMap> createState() => _DelayedMultiMarkerMapState();
@@ -1318,13 +1316,17 @@ class _DelayedMultiMarkerMapState extends State<_DelayedMultiMarkerMap> {
     } else if (mounted) {
       _mapController.move(widget.center, widget.zoom);
     }
-    setState(() {
-      _isInitializing = false;
-    });
+    if (mounted) {
+      setState(() {
+        _isInitializing = false;
+      });
+    }
   }
 
   void _onCameraMove() {
-    if (_isInitializing) return;
+    if (_isInitializing) {
+      return;
+    }
 
     final camera = _mapController.camera;
     final state = MapState(
@@ -1352,7 +1354,7 @@ class _DelayedMultiMarkerMapState extends State<_DelayedMultiMarkerMap> {
           height: 24,
           child: Container(
               decoration: BoxDecoration(
-                  color: Colors.red.withOpacity(0.8),
+                  color: Colors.red.withAlpha((255 * 0.8).round()),
                   shape: BoxShape.circle,
                   border: Border.all(color: Colors.white, width: 1.5)),
               child: const Icon(Icons.train, color: Colors.white, size: 12)))),
