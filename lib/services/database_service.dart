@@ -232,16 +232,28 @@ class DatabaseService {
 
   Future<int> deleteRecord(String uniqueId) async {
     final db = await database;
-    return await db.delete(
+    final result = await db.delete(
       trainRecordsTable,
       where: 'uniqueId = ?',
       whereArgs: [uniqueId],
     );
+
+    if (result > 0) {
+      _notifyRecordDeleted([uniqueId]);
+    }
+
+    return result;
   }
 
   Future<int> deleteAllRecords() async {
     final db = await database;
-    return await db.delete(trainRecordsTable);
+    final result = await db.delete(trainRecordsTable);
+
+    if (result > 0) {
+      _notifyRecordDeleted([]);
+    }
+
+    return result;
   }
 
   Future<int> getRecordCount() async {
@@ -279,20 +291,31 @@ class DatabaseService {
 
   Future<int> updateSettings(Map<String, dynamic> settings) async {
     final db = await database;
-    return await db.update(
+    final result = await db.update(
       appSettingsTable,
       settings,
       where: 'id = 1',
     );
+    if (result > 0) {
+      _notifySettingsChanged(settings);
+    }
+    return result;
   }
 
   Future<int> setSetting(String key, dynamic value) async {
     final db = await database;
-    return await db.update(
+    final result = await db.update(
       appSettingsTable,
       {key: value},
       where: 'id = 1',
     );
+    if (result > 0) {
+      final currentSettings = await getAllSettings();
+      if (currentSettings != null) {
+        _notifySettingsChanged(currentSettings);
+      }
+    }
+    return result;
   }
 
   Future<List<String>> getSearchOrderList() async {
@@ -349,6 +372,42 @@ class DatabaseService {
         whereArgs: [id],
       );
     }
+    _notifyRecordDeleted(uniqueIds);
+  }
+
+  final List<Function(List<String>)> _recordDeleteListeners = [];
+
+  final List<Function(Map<String, dynamic>)> _settingsListeners = [];
+
+  StreamSubscription<void> onRecordDeleted(Function(List<String>) listener) {
+    _recordDeleteListeners.add(listener);
+    return Stream.value(null).listen((_) {})
+      ..onData((_) {})
+      ..onDone(() {
+        _recordDeleteListeners.remove(listener);
+      });
+  }
+
+  void _notifyRecordDeleted(List<String> deletedIds) {
+    for (final listener in _recordDeleteListeners) {
+      listener(deletedIds);
+    }
+  }
+
+  StreamSubscription<void> onSettingsChanged(
+      Function(Map<String, dynamic>) listener) {
+    _settingsListeners.add(listener);
+    return Stream.value(null).listen((_) {})
+      ..onData((_) {})
+      ..onDone(() {
+        _settingsListeners.remove(listener);
+      });
+  }
+
+  void _notifySettingsChanged(Map<String, dynamic> settings) {
+    for (final listener in _settingsListeners) {
+      listener(settings);
+    }
   }
 
   Future<void> close() async {
@@ -403,6 +462,11 @@ class DatabaseService {
           }
         }
       });
+
+      final currentSettings = await getAllSettings();
+      if (currentSettings != null) {
+        _notifySettingsChanged(currentSettings);
+      }
 
       return true;
     } catch (e) {

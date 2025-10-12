@@ -7,6 +7,7 @@ import 'package:lbjconsole/models/train_record.dart';
 import 'package:lbjconsole/screens/history_screen.dart';
 import 'package:lbjconsole/screens/map_screen.dart';
 import 'package:lbjconsole/screens/map_webview_screen.dart';
+import 'package:lbjconsole/screens/realtime_screen.dart';
 import 'package:lbjconsole/screens/settings_screen.dart';
 import 'package:lbjconsole/services/ble_service.dart';
 import 'package:lbjconsole/services/database_service.dart';
@@ -183,10 +184,13 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   StreamSubscription? _connectionSubscription;
   StreamSubscription? _dataSubscription;
   StreamSubscription? _lastReceivedTimeSubscription;
+  StreamSubscription? _settingsSubscription;
   DateTime? _lastReceivedTime;
   bool _isHistoryEditMode = false;
   final GlobalKey<HistoryScreenState> _historyScreenKey =
       GlobalKey<HistoryScreenState>();
+  final GlobalKey<RealtimeScreenState> _realtimeScreenKey =
+      GlobalKey<RealtimeScreenState>();
 
   @override
   void initState() {
@@ -197,6 +201,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     _initializeServices();
     _checkAndStartBackgroundService();
     _setupLastReceivedTimeListener();
+    _setupSettingsListener();
     _loadMapType();
   }
 
@@ -208,7 +213,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       });
     }
   }
-
 
   Future<void> _checkAndStartBackgroundService() async {
     final settings = await DatabaseService.instance.getAllSettings() ?? {};
@@ -231,11 +235,21 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     });
   }
 
+  void _setupSettingsListener() {
+    _settingsSubscription =
+        DatabaseService.instance.onSettingsChanged((settings) {
+      if (mounted && _currentIndex == 1) {
+        _realtimeScreenKey.currentState?.loadRecords(scrollToTop: false);
+      }
+    });
+  }
+
   @override
   void dispose() {
     _connectionSubscription?.cancel();
     _dataSubscription?.cancel();
     _lastReceivedTimeSubscription?.cancel();
+    _settingsSubscription?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -255,6 +269,9 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       _notificationService.showTrainNotification(record);
       if (_historyScreenKey.currentState != null) {
         _historyScreenKey.currentState!.addNewRecord(record);
+      }
+      if (_realtimeScreenKey.currentState != null) {
+        _realtimeScreenKey.currentState!.addNewRecord(record);
       }
     });
   }
@@ -302,7 +319,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       backgroundColor: AppTheme.primaryBlack,
       elevation: 0,
       title: Text(
-        ['列车记录', '位置地图', '设置'][_currentIndex],
+        ['列车记录', '数据监控', '位置地图', '设置'][_currentIndex],
         style: const TextStyle(
             color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
       ),
@@ -394,6 +411,9 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         onEditModeChanged: _handleHistoryEditModeChanged,
         onSelectionChanged: _handleSelectionChanged,
       ),
+      RealtimeScreen(
+        key: _realtimeScreenKey,
+      ),
       _mapType == 'map' ? const MapScreen() : const MapWebViewScreen(),
       SettingsScreen(
         onSettingsChanged: () {
@@ -411,14 +431,16 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       ),
       bottomNavigationBar: NavigationBar(
         backgroundColor: AppTheme.secondaryBlack,
-        indicatorColor: AppTheme.accentBlue.withOpacity(0.2),
+        indicatorColor: AppTheme.accentBlue.withValues(alpha: 0.2),
         selectedIndex: _currentIndex,
         onDestinationSelected: (index) {
-          if (_currentIndex == 2 && index == 0) {
+          if (index == 0) {
             _historyScreenKey.currentState?.reloadRecords();
           }
-          // 如果从设置页面切换到地图页面，重新加载地图类型
-          if (_currentIndex == 2 && index == 1) {
+          if (index == 1) {
+            _realtimeScreenKey.currentState?.loadRecords(scrollToTop: false);
+          }
+          if (_currentIndex == 3 && index == 2) {
             _loadMapType();
           }
           setState(() {
@@ -429,6 +451,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         destinations: const [
           NavigationDestination(
               icon: Icon(Icons.directions_railway), label: '列车记录'),
+          NavigationDestination(icon: Icon(Icons.speed), label: '数据监控'),
           NavigationDestination(icon: Icon(Icons.location_on), label: '位置地图'),
           NavigationDestination(icon: Icon(Icons.settings), label: '设置'),
         ],
