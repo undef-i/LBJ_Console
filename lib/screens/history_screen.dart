@@ -221,28 +221,43 @@ class HistoryScreenState extends State<HistoryScreen> {
       if (mounted) {
         if (_isAtTop) {
           setState(() {
-            bool isMerge = false;
-            Object? mergeResult;
-            if (_displayItems.isNotEmpty) {
-              final firstItem = _displayItems.first;
-              List<TrainRecord> tempRecords = [newRecord];
-              if (firstItem is MergedTrainRecord) {
-                tempRecords.addAll(firstItem.records);
-              } else if (firstItem is TrainRecord) {
-                tempRecords.add(firstItem);
-              }
-              final mergeCheckResult =
-                  MergeService.getMixedList(tempRecords, _mergeSettings);
-              if (mergeCheckResult.length == 1 &&
-                  mergeCheckResult.first is MergedTrainRecord) {
-                isMerge = true;
-                mergeResult = mergeCheckResult.first;
+            List<TrainRecord> allRecords = [];
+            Set<String> selectedRecordIds = {};
+
+            for (final item in _displayItems) {
+              if (item is MergedTrainRecord) {
+                allRecords.addAll(item.records);
+                if (_selectedRecords.contains(item.records.first.uniqueId)) {
+                  selectedRecordIds.addAll(item.records.map((r) => r.uniqueId));
+                }
+              } else if (item is TrainRecord) {
+                allRecords.add(item);
+                if (_selectedRecords.contains(item.uniqueId)) {
+                  selectedRecordIds.add(item.uniqueId);
+                }
               }
             }
-            if (isMerge) {
-              _displayItems[0] = mergeResult!;
-            } else {
-              _displayItems.insert(0, newRecord);
+
+            allRecords.insert(0, newRecord);
+
+            final mergedItems =
+                MergeService.getMixedList(allRecords, _mergeSettings);
+
+            _displayItems.clear();
+            _displayItems.addAll(mergedItems);
+
+            _selectedRecords.clear();
+            for (final item in _displayItems) {
+              if (item is MergedTrainRecord) {
+                if (item.records
+                    .any((r) => selectedRecordIds.contains(r.uniqueId))) {
+                  _selectedRecords.addAll(item.records.map((r) => r.uniqueId));
+                }
+              } else if (item is TrainRecord) {
+                if (selectedRecordIds.contains(item.uniqueId)) {
+                  _selectedRecords.add(item.uniqueId);
+                }
+              }
             }
           });
           if (_scrollController.hasClients) {
@@ -723,8 +738,6 @@ class HistoryScreenState extends State<HistoryScreen> {
   Widget _buildRecordCard(TrainRecord record,
       {bool isSubCard = false, Key? key}) {
     final isSelected = _selectedRecords.contains(record.uniqueId);
-    final isExpanded =
-        !isSubCard && (_expandedStates[record.uniqueId] ?? false);
 
     return Card(
         key: key,
@@ -752,6 +765,11 @@ class HistoryScreenState extends State<HistoryScreen> {
                   }
                   widget.onSelectionChanged();
                 });
+              } else {
+                setState(() {
+                  _expandedStates[record.uniqueId] =
+                      !(_expandedStates[record.uniqueId] ?? false);
+                });
               }
             },
             onLongPress: () {
@@ -771,7 +789,8 @@ class HistoryScreenState extends State<HistoryScreen> {
                       _buildRecordHeader(record),
                       _buildPositionAndSpeed(record),
                       _buildLocoInfo(record),
-                      if (isExpanded) _buildExpandedContent(record),
+                      if (_expandedStates[record.uniqueId] ?? false)
+                        _buildExpandedContent(record),
                     ]))));
   }
 
@@ -803,6 +822,7 @@ class HistoryScreenState extends State<HistoryScreen> {
     final hasLocoInfo =
         formattedLocoInfo.isNotEmpty && formattedLocoInfo != "<NUL>";
     final shouldShowTrainRow = hasTrainNumber || hasDirection || hasLocoInfo;
+    final hasPosition = _parsePosition(record.positionInfo) != null;
 
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
@@ -856,7 +876,8 @@ class HistoryScreenState extends State<HistoryScreen> {
                   ])),
               if (hasLocoInfo)
                 Text(formattedLocoInfo,
-                    style: const TextStyle(fontSize: 14, color: Colors.white70))
+                    style:
+                        const TextStyle(fontSize: 14, color: Colors.white70)),
             ]),
         const SizedBox(height: 2)
       ]

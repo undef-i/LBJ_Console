@@ -142,7 +142,6 @@ class RealtimeScreenState extends State<RealtimeScreen> {
         }
       } catch (e) {
         _selectedGroupKeys.remove(groupKey);
-        print('记录不存在，移除选中状态: $groupKey');
       }
     }
 
@@ -227,7 +226,6 @@ class RealtimeScreenState extends State<RealtimeScreen> {
         }
       } catch (e) {
         _selectedGroupKeys.remove(groupKey);
-        print('记录不存在，移除选中状态: $groupKey');
       }
     }
 
@@ -275,7 +273,6 @@ class RealtimeScreenState extends State<RealtimeScreen> {
         }
       } catch (e) {
         _selectedGroupKeys.remove(groupKey);
-        print('记录不存在，移除选中状态: $groupKey');
       }
     }
 
@@ -460,25 +457,19 @@ class RealtimeScreenState extends State<RealtimeScreen> {
   void initState() {
     super.initState();
     _scrollController.addListener(() {
-      print(
-          '滚动监听器触发 - 当前位置: ${_scrollController.position.pixels}, maxScrollExtent: ${_scrollController.position.maxScrollExtent}, isAtTop: $_isAtTop');
-
       if (_scrollController.position.atEdge) {
         if (_scrollController.position.pixels ==
             _scrollController.position.maxScrollExtent) {
-          print('到达底部（反转后的"顶部"）- 设置 _isAtTop = true');
           if (!_isAtTop) {
             setState(() => _isAtTop = true);
           }
         } else if (_scrollController.position.pixels == 0) {
-          print('到达顶部（反转后的"底部"）- 设置 _isAtTop = false');
           if (_isAtTop) {
             setState(() => _isAtTop = false);
           }
         }
       } else {
         if (_isAtTop) {
-          print('离开底部（反转后的"顶部"）- 设置 _isAtTop = false');
           setState(() => _isAtTop = false);
         }
       }
@@ -501,16 +492,12 @@ class RealtimeScreenState extends State<RealtimeScreen> {
       if (mounted && _scrollController.hasClients && _displayItems.isNotEmpty) {
         try {
           final maxScrollExtent = _scrollController.position.maxScrollExtent;
-          print('初始滚动执行：maxScrollExtent=$maxScrollExtent');
           _scrollController.jumpTo(maxScrollExtent);
-          print('初始滚动完成：位置=${_scrollController.position.pixels}');
 
           if (!_isAtTop) {
             setState(() => _isAtTop = true);
           }
-        } catch (e) {
-          print('初始滚动错误：$e');
-        }
+        } catch (e) {}
       }
     });
   }
@@ -675,13 +662,8 @@ class RealtimeScreenState extends State<RealtimeScreen> {
             try {
               final maxScrollExtent =
                   _scrollController.position.maxScrollExtent;
-              print('loadRecords - 滚动到底部, maxScrollExtent: $maxScrollExtent');
               _scrollController.jumpTo(maxScrollExtent);
-              print(
-                  'loadRecords - 滚动完成，新位置: ${_scrollController.position.pixels}');
-            } catch (e) {
-              print('loadRecords - 滚动错误: $e');
-            }
+            } catch (e) {}
           }
         } else {
           if (_isLoading) {
@@ -697,11 +679,9 @@ class RealtimeScreenState extends State<RealtimeScreen> {
   }
 
   Future<void> addNewRecord(TrainRecord newRecord) async {
-    print('addNewRecord - 开始添加新记录, 当前_isAtTop=$_isAtTop');
     try {
       final position = _parsePositionFromRecord(newRecord);
       if (position == null) {
-        print('addNewRecord - 记录没有位置信息，忽略');
         return;
       }
 
@@ -721,41 +701,44 @@ class RealtimeScreenState extends State<RealtimeScreen> {
       if (!isNewRecord) return;
 
       if (mounted) {
-        setState(() {
-          bool isMerge = false;
-          Object? mergeResult;
-          String? oldSingleRecordKey;
+        List<TrainRecord> allRecords = [];
+        Set<String> selectedRecordIds = {};
 
-          if (_displayItems.isNotEmpty) {
-            final firstItem = _displayItems.first;
-            List<TrainRecord> tempRecords = [newRecord];
-            if (firstItem is MergedTrainRecord) {
-              tempRecords.addAll(firstItem.records);
-            } else if (firstItem is TrainRecord) {
-              tempRecords.add(firstItem);
-
-              oldSingleRecordKey = "single:${firstItem.uniqueId}";
+        for (final item in _displayItems) {
+          if (item is MergedTrainRecord) {
+            allRecords.addAll(item.records);
+            if (_selectedGroupKeys.contains(item.groupKey)) {
+              selectedRecordIds.addAll(item.records.map((r) => r.uniqueId));
             }
-            final mergeCheckResult =
-                MergeService.getMixedList(tempRecords, _mergeSettings);
-            if (mergeCheckResult.length == 1 &&
-                mergeCheckResult.first is MergedTrainRecord) {
-              isMerge = true;
-              mergeResult = mergeCheckResult.first;
+          } else if (item is TrainRecord) {
+            allRecords.add(item);
+            if (_selectedGroupKeys.contains("single:${item.uniqueId}")) {
+              selectedRecordIds.add(item.uniqueId);
             }
           }
+        }
 
-          if (isMerge) {
-            final mergedRecord = mergeResult as MergedTrainRecord;
-            _displayItems[0] = mergedRecord;
+        allRecords.insert(0, newRecord);
 
-            if (oldSingleRecordKey != null &&
-                _selectedGroupKeys.contains(oldSingleRecordKey)) {
-              _selectedGroupKeys.remove(oldSingleRecordKey);
-              _selectedGroupKeys.add(mergedRecord.groupKey);
+        final mergedItems =
+            MergeService.getMixedList(allRecords, _mergeSettings);
+
+        setState(() {
+          _displayItems.clear();
+          _displayItems.addAll(mergedItems);
+
+          _selectedGroupKeys.clear();
+          for (final item in _displayItems) {
+            if (item is MergedTrainRecord) {
+              if (item.records
+                  .any((r) => selectedRecordIds.contains(r.uniqueId))) {
+                _selectedGroupKeys.add(item.groupKey);
+              }
+            } else if (item is TrainRecord) {
+              if (selectedRecordIds.contains(item.uniqueId)) {
+                _selectedGroupKeys.add("single:${item.uniqueId}");
+              }
             }
-          } else {
-            _displayItems.insert(0, newRecord);
           }
         });
 
@@ -765,23 +748,16 @@ class RealtimeScreenState extends State<RealtimeScreen> {
           _adjustMapViewToSelectedGroups();
         }
 
-        print(
-            'addNewRecord - 检查滚动条件: _isAtTop=$_isAtTop, hasClients=${_scrollController.hasClients}, 当前位置: ${_scrollController.position.pixels}');
         if (_isAtTop && _scrollController.hasClients) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted && _scrollController.hasClients) {
               final newMaxScrollExtent =
                   _scrollController.position.maxScrollExtent;
-              print(
-                  'addNewRecord - 执行滚动到底部, maxScrollExtent: $newMaxScrollExtent');
+
               _scrollController.jumpTo(newMaxScrollExtent);
-              print(
-                  'addNewRecord - 滚动完成，新位置: ${_scrollController.position.pixels}');
             }
           });
-        } else {
-          print('addNewRecord - 不执行滚动，条件不满足');
-        }
+        } else {}
       }
     } catch (e) {}
   }
