@@ -51,7 +51,10 @@ class _MapScreenState extends State<MapScreen> {
     _loadSettings().then((_) {
       _loadTrainRecords().then((_) {
         _startLocationUpdates();
-        if (!_isMapInitialized && (_currentLocation != null || _lastTrainLocation != null || _userLocation != null)) {
+        if (!_isMapInitialized &&
+            (_currentLocation != null ||
+                _lastTrainLocation != null ||
+                _userLocation != null)) {
           _initializeMapPosition();
         }
       });
@@ -418,8 +421,6 @@ class _MapScreenState extends State<MapScreen> {
                         fontSize: 8,
                         fontWeight: FontWeight.bold,
                       ),
-                      overflow: TextOverflow.ellipsis,
-                      maxLines: 1,
                     ),
                   ),
                 ],
@@ -745,9 +746,9 @@ class _MapScreenState extends State<MapScreen> {
       );
     }
 
-    final bool isDefaultLocation = _currentLocation == null && 
-                                   _lastTrainLocation == null && 
-                                   _userLocation == null;
+    final bool isDefaultLocation = _currentLocation == null &&
+        _lastTrainLocation == null &&
+        _userLocation == null;
 
     return Scaffold(
       backgroundColor: const Color(0xFF121212),
@@ -759,7 +760,8 @@ class _MapScreenState extends State<MapScreen> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   CircularProgressIndicator(
-                    valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF007ACC)),
+                    valueColor:
+                        AlwaysStoppedAnimation<Color>(Color(0xFF007ACC)),
                   ),
                   SizedBox(height: 16),
                   Text(
@@ -769,44 +771,45 @@ class _MapScreenState extends State<MapScreen> {
                 ],
               ),
             )
-          else FlutterMap(
-            mapController: _mapController,
-            options: MapOptions(
-              initialCenter: _currentLocation ??
-                  _lastTrainLocation ??
-                  _userLocation ??
-                  const LatLng(39.9042, 116.4074),
-              initialZoom: _currentZoom,
-              initialRotation: _currentRotation,
-              minZoom: 8.0,
-              maxZoom: 18.0,
-              onPositionChanged: (MapCamera camera, bool hasGesture) {
-                setState(() {
-                  _currentLocation = camera.center;
-                  _currentZoom = camera.zoom;
-                  _currentRotation = camera.rotation;
-                });
+          else
+            FlutterMap(
+              mapController: _mapController,
+              options: MapOptions(
+                initialCenter: _currentLocation ??
+                    _lastTrainLocation ??
+                    _userLocation ??
+                    const LatLng(39.9042, 116.4074),
+                initialZoom: _currentZoom,
+                initialRotation: _currentRotation,
+                minZoom: 2.0,
+                maxZoom: 18.0,
+                onPositionChanged: (MapCamera camera, bool hasGesture) {
+                  setState(() {
+                    _currentLocation = camera.center;
+                    _currentZoom = camera.zoom;
+                    _currentRotation = camera.rotation;
+                  });
 
-                _saveSettings();
-              },
-            ),
-            children: [
-              TileLayer(
-                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                userAgentPackageName: 'org.noxylva.lbjconsole',
+                  _saveSettings();
+                },
               ),
-              if (_railwayLayerVisible)
+              children: [
                 TileLayer(
-                  urlTemplate:
-                      'https://{s}.tiles.openrailwaymap.org/standard/{z}/{x}/{y}.png',
-                  subdomains: const ['a', 'b', 'c'],
+                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                   userAgentPackageName: 'org.noxylva.lbjconsole',
                 ),
-              MarkerLayer(
-                markers: markers,
-              ),
-            ],
-          ),
+                if (_railwayLayerVisible)
+                  TileLayer(
+                    urlTemplate:
+                        'https://{s}.tiles.openrailwaymap.org/standard/{z}/{x}/{y}.png',
+                    subdomains: const ['a', 'b', 'c'],
+                    userAgentPackageName: 'org.noxylva.lbjconsole.flutter',
+                  ),
+                MarkerLayer(
+                  markers: markers,
+                ),
+              ],
+            ),
           if (_isLoading)
             const Center(
               child: CircularProgressIndicator(

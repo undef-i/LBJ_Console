@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:geolocator/geolocator.dart';
 import '../models/merged_record.dart';
 import '../services/database_service.dart';
 import '../models/train_record.dart';
@@ -30,6 +31,10 @@ class RealtimeScreenState extends State<RealtimeScreen> {
   List<Marker> _mapMarkers = [];
   bool _showMap = true;
   Set<String> _selectedGroupKeys = {};
+  LatLng? _userLocation;
+  bool _isLocationPermissionGranted = false;
+  Timer? _locationTimer;
+  StreamSubscription<Position>? _positionStreamSubscription;
 
   List<Object> getDisplayItems() => _displayItems;
 
@@ -85,6 +90,28 @@ class RealtimeScreenState extends State<RealtimeScreen> {
           .where((marker) => marker != null)
           .cast<Marker>()
           .toList();
+
+      if (_userLocation != null) {
+        _mapMarkers.add(
+          Marker(
+            point: _userLocation!,
+            width: 24,
+            height: 24,
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.blue,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.white, width: 1),
+              ),
+              child: const Icon(
+                Icons.my_location,
+                color: Colors.white,
+                size: 12,
+              ),
+            ),
+          ),
+        );
+      }
     });
   }
 
@@ -166,19 +193,29 @@ class RealtimeScreenState extends State<RealtimeScreen> {
                 markers: [
                   Marker(
                     point: position,
-                    width: 60,
-                    height: 20,
-                    child: Container(
-                      color: Colors.black,
-                      alignment: Alignment.center,
-                      child: Text(
-                        _getTrainDisplayName(singleRecord),
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
+                    width: 80,
+                    height: 16,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withOpacity(0.8),
+                            borderRadius: BorderRadius.circular(3),
+                          ),
+                          child: Text(
+                            _getTrainDisplayName(singleRecord),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 8,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
                         ),
-                      ),
+                      ],
                     ),
                   ),
                 ],
@@ -204,19 +241,29 @@ class RealtimeScreenState extends State<RealtimeScreen> {
                 markers: [
                   Marker(
                     point: routePoints.last,
-                    width: 60,
-                    height: 20,
-                    child: Container(
-                      color: Colors.black,
-                      alignment: Alignment.center,
-                      child: Text(
-                        _getTrainDisplayName(mergedRecord.latestRecord),
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
+                    width: 80,
+                    height: 16,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withOpacity(0.8),
+                            borderRadius: BorderRadius.circular(3),
+                          ),
+                          child: Text(
+                            _getTrainDisplayName(mergedRecord.latestRecord),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 8,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
                         ),
-                      ),
+                      ],
                     ),
                   ),
                 ],
@@ -485,6 +532,7 @@ class RealtimeScreenState extends State<RealtimeScreen> {
     });
     _setupRecordDeleteListener();
     _setupSettingsListener();
+    _startLocationUpdates();
   }
 
   void _scheduleInitialScroll() {
@@ -507,6 +555,8 @@ class RealtimeScreenState extends State<RealtimeScreen> {
     _scrollController.dispose();
     _recordDeleteSubscription?.cancel();
     _settingsSubscription?.cancel();
+    _locationTimer?.cancel();
+    _positionStreamSubscription?.cancel();
     super.dispose();
   }
 
@@ -526,6 +576,70 @@ class RealtimeScreenState extends State<RealtimeScreen> {
         loadRecords(scrollToTop: false);
       }
     });
+  }
+
+  Future<void> _requestLocationPermission() async {
+    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      return;
+    }
+
+    LocationPermission permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+    }
+
+    if (permission == LocationPermission.deniedForever) {
+      return;
+    }
+
+    setState(() {
+      _isLocationPermissionGranted = true;
+    });
+
+    _getCurrentLocation();
+    _startRealtimeLocationUpdates();
+  }
+
+  Future<void> _getCurrentLocation() async {
+    try {
+      Position position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+        forceAndroidLocationManager: true,
+      );
+
+      final newLocation = LatLng(position.latitude, position.longitude);
+      setState(() {
+        _userLocation = newLocation;
+      });
+
+      _updateAllRecordMarkers();
+    } catch (e) {}
+  }
+
+  void _startLocationUpdates() {
+    _requestLocationPermission();
+  }
+
+  void _startRealtimeLocationUpdates() {
+    _positionStreamSubscription?.cancel();
+
+    _positionStreamSubscription = Geolocator.getPositionStream(
+      locationSettings: const LocationSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 1,
+        timeLimit: Duration(seconds: 30),
+      ),
+    ).listen(
+      (Position position) {
+        final newLocation = LatLng(position.latitude, position.longitude);
+        setState(() {
+          _userLocation = newLocation;
+        });
+        _updateAllRecordMarkers();
+      },
+      onError: (error) {},
+    );
   }
 
   Future<void> loadRecords({bool scrollToTop = true}) async {
@@ -1169,13 +1283,23 @@ class RealtimeScreenState extends State<RealtimeScreen> {
     }
 
     final latestRoute = getValidRoute(latestRecord);
-    final previousRoute =
-        previousRecord != null ? getValidRoute(previousRecord) : "";
 
-    final bool needsSpecialDisplay = previousRecord != null &&
-        latestRoute.isNotEmpty &&
-        previousRoute.isNotEmpty &&
-        latestRoute != previousRoute;
+    String displayRoute = latestRoute;
+    bool isDisplayingLatestNormal = true;
+
+    if (latestRoute.isEmpty || latestRoute.contains('*')) {
+      for (final record in mergedRecord.records) {
+        final route = getValidRoute(record);
+        if (route.isNotEmpty && !route.contains('*')) {
+          displayRoute = route;
+          isDisplayingLatestNormal = (record == latestRecord);
+          break;
+        }
+      }
+    }
+
+    final bool needsSpecialDisplay = !isDisplayingLatestNormal ||
+        (latestRoute.contains('*') && displayRoute != latestRoute);
 
     final position = latestRecord.position.trim();
     final speed = latestRecord.speed.trim();
@@ -1203,10 +1327,10 @@ class RealtimeScreenState extends State<RealtimeScreen> {
                 child: Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                if (latestRoute.isNotEmpty) ...[
+                if (displayRoute.isNotEmpty) ...[
                   if (needsSpecialDisplay) ...[
                     Flexible(
-                        child: Text(previousRoute,
+                        child: Text(displayRoute,
                             style: const TextStyle(
                               fontSize: 16,
                               color: Colors.white,
@@ -1221,18 +1345,25 @@ class RealtimeScreenState extends State<RealtimeScreen> {
                           context: context,
                           builder: (context) => AlertDialog(
                             backgroundColor: const Color(0xFF1E1E1E),
-                            title: const Text("路线变化",
+                            title: const Text("路线信息",
                                 style: TextStyle(color: Colors.white)),
                             content: Column(
                               mainAxisSize: MainAxisSize.min,
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text("上一条: $previousRoute",
-                                    style: const TextStyle(color: Colors.grey)),
-                                const SizedBox(height: 8),
-                                Text("当前: $latestRoute",
-                                    style:
-                                        const TextStyle(color: Colors.white)),
+                                if (!isDisplayingLatestNormal) ...[
+                                  Text("显示路线: $displayRoute",
+                                      style:
+                                          const TextStyle(color: Colors.white)),
+                                  const SizedBox(height: 8),
+                                ],
+                                Text(
+                                    "最新路线: ${latestRoute.isNotEmpty ? latestRoute : '无效路线'}",
+                                    style: TextStyle(
+                                      color: latestRoute.isNotEmpty
+                                          ? Colors.grey
+                                          : Colors.red,
+                                    )),
                               ],
                             ),
                             actions: [
@@ -1261,7 +1392,7 @@ class RealtimeScreenState extends State<RealtimeScreen> {
                     const SizedBox(width: 4),
                   ] else
                     Flexible(
-                        child: Text(latestRoute,
+                        child: Text(displayRoute,
                             style: const TextStyle(
                                 fontSize: 16, color: Colors.white),
                             overflow: TextOverflow.ellipsis)),
