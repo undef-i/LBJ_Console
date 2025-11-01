@@ -28,6 +28,8 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   late DatabaseService _databaseService;
   late TextEditingController _deviceNameController;
+  late TextEditingController _rtlTcpHostController;
+  late TextEditingController _rtlTcpPortController;
 
   String _deviceName = '';
   bool _backgroundServiceEnabled = false;
@@ -39,19 +41,143 @@ class _SettingsScreenState extends State<SettingsScreen> {
   GroupBy _groupBy = GroupBy.trainAndLoco;
   TimeWindow _timeWindow = TimeWindow.unlimited;
   String _mapType = 'map';
+  bool _rtlTcpEnabled = false;
+  String _rtlTcpHost = '127.0.0.1';
+  String _rtlTcpPort = '14423';
 
   @override
   void initState() {
     super.initState();
     _databaseService = DatabaseService.instance;
     _deviceNameController = TextEditingController();
+    _rtlTcpHostController = TextEditingController();
+    _rtlTcpPortController = TextEditingController();
     _loadSettings();
     _loadRecordCount();
+  }
+
+  Widget _buildRtlTcpSettings() {
+    return Card(
+      color: AppTheme.tertiaryBlack,
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16.0),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(20.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.wifi,
+                    color: Theme.of(context).colorScheme.primary),
+                const SizedBox(width: 12),
+                Text('RTL-TCP 接收', style: AppTheme.titleMedium),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('启用RTL-TCP接收', style: AppTheme.bodyLarge),
+                  ],
+                ),
+                Switch(
+                  value: _rtlTcpEnabled,
+                  onChanged: (value) {
+                    setState(() {
+                      _rtlTcpEnabled = value;
+                    });
+                    _saveSettings();
+                  },
+                  activeColor: Theme.of(context).colorScheme.primary,
+                ),
+              ],
+            ),
+            Visibility(
+              visible: _rtlTcpEnabled,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const SizedBox(height: 16),
+                  TextField(
+                    decoration: InputDecoration(
+                      labelText: '服务器地址',
+                      hintText: '输入RTL-TCP服务器地址',
+                      labelStyle: const TextStyle(color: Colors.white70),
+                      hintStyle: const TextStyle(color: Colors.white54),
+                      border: OutlineInputBorder(
+                        borderSide: const BorderSide(color: Colors.white54),
+                        borderRadius: BorderRadius.circular(12.0),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderSide: const BorderSide(color: Colors.white54),
+                        borderRadius: BorderRadius.circular(12.0),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderSide:
+                            BorderSide(color: Theme.of(context).colorScheme.primary),
+                        borderRadius: BorderRadius.circular(12.0),
+                      ),
+                    ),
+                    style: const TextStyle(color: Colors.white),
+                    controller: _rtlTcpHostController,
+                    onChanged: (value) {
+                      setState(() {
+                        _rtlTcpHost = value;
+                      });
+                      _saveSettings();
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    decoration: InputDecoration(
+                      labelText: '服务器端口',
+                      hintText: '输入RTL-TCP服务器端口',
+                      labelStyle: const TextStyle(color: Colors.white70),
+                      hintStyle: const TextStyle(color: Colors.white54),
+                      border: OutlineInputBorder(
+                        borderSide: const BorderSide(color: Colors.white54),
+                        borderRadius: BorderRadius.circular(12.0),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderSide: const BorderSide(color: Colors.white54),
+                        borderRadius: BorderRadius.circular(12.0),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderSide:
+                            BorderSide(color: Theme.of(context).colorScheme.primary),
+                        borderRadius: BorderRadius.circular(12.0),
+                      ),
+                    ),
+                    style: const TextStyle(color: Colors.white),
+                    controller: _rtlTcpPortController,
+                    keyboardType: TextInputType.number,
+                    onChanged: (value) {
+                      setState(() {
+                        _rtlTcpPort = value;
+                      });
+                      _saveSettings();
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
   void dispose() {
     _deviceNameController.dispose();
+    _rtlTcpHostController.dispose();
+    _rtlTcpPortController.dispose();
     super.dispose();
   }
 
@@ -71,6 +197,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _groupBy = settings.groupBy;
         _timeWindow = settings.timeWindow;
         _mapType = settingsMap['mapType']?.toString() ?? 'webview';
+        _rtlTcpEnabled = (settingsMap['rtlTcpEnabled'] ?? 0) == 1;
+        _rtlTcpHost = settingsMap['rtlTcpHost']?.toString() ?? '127.0.0.1';
+        _rtlTcpPort = settingsMap['rtlTcpPort']?.toString() ?? '14423';
+        _rtlTcpHostController.text = _rtlTcpHost;
+        _rtlTcpPortController.text = _rtlTcpPort;
       });
     }
   }
@@ -95,6 +226,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       'groupBy': _groupBy.name,
       'timeWindow': _timeWindow.name,
       'mapType': _mapType,
+      'rtlTcpEnabled': _rtlTcpEnabled ? 1 : 0,
+      'rtlTcpHost': _rtlTcpHost,
+      'rtlTcpPort': _rtlTcpPort,
     });
     widget.onSettingsChanged?.call();
   }
@@ -109,6 +243,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _buildBluetoothSettings(),
           const SizedBox(height: 20),
           _buildAppSettings(),
+          const SizedBox(height: 20),
+          _buildRtlTcpSettings(),
           const SizedBox(height: 20),
           _buildMergeSettings(),
           const SizedBox(height: 20),
@@ -204,7 +340,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('后台保活服务', style: AppTheme.bodyLarge),
-                    Text('保持应用在后台运行', style: AppTheme.caption),
                   ],
                 ),
                 Switch(
@@ -232,8 +367,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('LBJ消息通知', style: AppTheme.bodyLarge),
-                    Text('接收LBJ消息通知', style: AppTheme.caption),
+                    Text('通知服务', style: AppTheme.bodyLarge),
                   ],
                 ),
                 Switch(
@@ -255,8 +389,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('地图显示方式', style: AppTheme.bodyLarge),
-                    Text('选择地图组件类型', style: AppTheme.caption),
+                    Text('地图组件类型', style: AppTheme.bodyLarge),
                   ],
                 ),
                 DropdownButton<String>(
@@ -293,7 +426,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('隐藏只有时间有效的记录', style: AppTheme.bodyLarge),
-                    Text('不显示只有时间信息的记录', style: AppTheme.caption),
                   ],
                 ),
                 Switch(
@@ -342,7 +474,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('启用记录合并', style: AppTheme.bodyLarge),
-                    Text('合并相同内容的LBJ记录', style: AppTheme.caption),
                   ],
                 ),
                 Switch(
@@ -452,7 +583,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text('隐藏不可分组记录', style: AppTheme.bodyLarge),
-                          Text('不显示无法分组的记录', style: AppTheme.caption),
                         ],
                       ),
                       Switch(

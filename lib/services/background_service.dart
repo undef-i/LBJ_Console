@@ -12,6 +12,7 @@ const String _notificationChannelName = 'LBJ Console 后台服务';
 const String _notificationChannelDescription = '保持蓝牙连接稳定';
 const int _notificationId = 114514;
 
+@pragma('vm:entry-point')
 class BackgroundService {
   static final FlutterBackgroundService _service = FlutterBackgroundService();
   static bool _isInitialized = false;

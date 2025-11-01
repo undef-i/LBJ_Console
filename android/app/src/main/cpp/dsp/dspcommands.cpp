@@ -1,0 +1,48 @@
+///////////////////////////////////////////////////////////////////////////////////
+// Copyright (C) 2012 maintech GmbH, Otto-Hahn-Str. 15, 97204 Hoechberg, Germany //
+// written by Christian Daniel                                                   //
+// Copyright (C) 2015-2016, 2018-2019, 2022 Edouard Griffiths, F4EXB <f4exb06@gmail.com> //
+//                                                                               //
+// This program is free software; you can redistribute it and/or modify          //
+// it under the terms of the GNU General Public License as published by          //
+// the Free Software Foundation as version 3 of the License, or                  //
+// (at your option) any later version.                                           //
+//                                                                               //
+// This program is distributed in the hope that it will be useful,               //
+// but WITHOUT ANY WARRANTY; without even the implied warranty of                //
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the                  //
+// GNU General Public License V3 for more details.                               //
+//                                                                               //
+// You should have received a copy of the GNU General Public License             //
+// along with this program. If not, see <http://www.gnu.org/licenses/>.          //
+///////////////////////////////////////////////////////////////////////////////////
+
+#include "dsp/dspcommands.h"
+
+MESSAGE_CLASS_DEFINITION(DSPAcquisitionInit, Message)
+MESSAGE_CLASS_DEFINITION(DSPAcquisitionStart, Message)
+MESSAGE_CLASS_DEFINITION(DSPAcquisitionStop, Message)
+MESSAGE_CLASS_DEFINITION(DSPGenerationInit, Message)
+MESSAGE_CLASS_DEFINITION(DSPGenerationStart, Message)
+MESSAGE_CLASS_DEFINITION(DSPGenerationStop, Message)
+MESSAGE_CLASS_DEFINITION(DSPGetSourceDeviceDescription, Message)
+MESSAGE_CLASS_DEFINITION(DSPGetSinkDeviceDescription, Message)
+MESSAGE_CLASS_DEFINITION(DSPGetErrorMessage, Message)
+MESSAGE_CLASS_DEFINITION(DSPSetSource, Message)
+MESSAGE_CLASS_DEFINITION(DSPSetSink, Message)
+MESSAGE_CLASS_DEFINITION(DSPAddBasebandSampleSink, Message)
+MESSAGE_CLASS_DEFINITION(DSPAddSpectrumSink, Message)
+MESSAGE_CLASS_DEFINITION(DSPAddBasebandSampleSource, Message)
+MESSAGE_CLASS_DEFINITION(DSPRemoveBasebandSampleSink, Message)
+MESSAGE_CLASS_DEFINITION(DSPRemoveSpectrumSink, Message)
+MESSAGE_CLASS_DEFINITION(DSPRemoveBasebandSampleSource, Message)
+MESSAGE_CLASS_DEFINITION(DSPAddAudioSink, Message)
+MESSAGE_CLASS_DEFINITION(DSPRemoveAudioSink, Message)
+MESSAGE_CLASS_DEFINITION(DSPConfigureCorrection, Message)
+MESSAGE_CLASS_DEFINITION(DSPEngineReport, Message)
+MESSAGE_CLASS_DEFINITION(DSPConfigureScopeVis, Message)
+MESSAGE_CLASS_DEFINITION(DSPSignalNotification, Message)
+MESSAGE_CLASS_DEFINITION(DSPMIMOSignalNotification, Message)
+MESSAGE_CLASS_DEFINITION(DSPConfigureChannelizer, Message)
+MESSAGE_CLASS_DEFINITION(DSPConfigureAudio, Message)
+MESSAGE_CLASS_DEFINITION(DSPPushMbeFrame, Message)

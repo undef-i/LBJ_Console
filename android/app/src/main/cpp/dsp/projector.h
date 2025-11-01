@@ -1,0 +1,69 @@
+///////////////////////////////////////////////////////////////////////////////////
+// Copyright (C) 2012 maintech GmbH, Otto-Hahn-Str. 15, 97204 Hoechberg, Germany //
+// written by Christian Daniel                                                   //
+// Copyright (C) 2015-2019, 2021 Edouard Griffiths, F4EXB <f4exb06@gmail.com>    //
+// Copyright (C) 2015 John Greb <hexameron@spam.no>                              //
+//                                                                               //
+// This program is free software; you can redistribute it and/or modify          //
+// it under the terms of the GNU General Public License as published by          //
+// the Free Software Foundation as version 3 of the License, or                  //
+// (at your option) any later version.                                           //
+//                                                                               //
+// This program is distributed in the hope that it will be useful,               //
+// but WITHOUT ANY WARRANTY; without even the implied warranty of                //
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the                  //
+// GNU General Public License V3 for more details.                               //
+//                                                                               //
+// You should have received a copy of the GNU General Public License             //
+// along with this program. If not, see <http://www.gnu.org/licenses/>.          //
+///////////////////////////////////////////////////////////////////////////////////
+
+#ifndef SDRBASE_DSP_PROJECTOR_H
+#define SDRBASE_DSP_PROJECTOR_H
+
+#include "export.h"
+#include "dsp/dsptypes.h"
+
+class SDRBASE_API Projector
+{
+public:
+    enum ProjectionType
+    {
+        ProjectionReal = 0, //!< Extract real part
+        ProjectionImag,     //!< Extract imaginary part
+        ProjectionMagLin,   //!< Calculate linear magnitude or modulus
+        ProjectionMagSq,    //!< Calculate linear squared magnitude or power
+        ProjectionDMagSq,   //!< Calculate time derivative of linear squared magnitude or power
+        ProjectionMagDB,    //!< Calculate logarithmic (dB) of squared magnitude
+        ProjectionPhase,    //!< Calculate phase
+        ProjectionDOAP,     //!< Calculate ambiguous DOA from phase as phase difference (assuming positive)
+        ProjectionDOAN,     //!< Calculate ambiguous DOA from phase as phase difference (assuming negative)
+        ProjectionDPhase,   //!< Calculate phase derivative i.e. instantaneous frequency scaled to sample rate
+        ProjectionBPSK,     //!< Phase comparator BPSK evaluation
+        ProjectionQPSK,     //!< Phase comparator QPSK evaluation
+        Projection8PSK,     //!< Phase comparator 8-PSK evaluation
+        Projection16PSK,    //!< Phase comparator 16-PSK evaluation
+		nbProjectionTypes   //!< Gives the number of projections in the enum
+    };
+
+    Projector(ProjectionType projectionType);
+    ~Projector();
+
+    ProjectionType getProjectionType() const { return m_projectionType; }
+    void settProjectionType(ProjectionType projectionType) { m_projectionType = projectionType; }
+    void setCache(Real *cache) { m_cache = cache; }
+    void setCacheMaster(bool cacheMaster) { m_cacheMaster = cacheMaster; }
+
+    Real run(const Sample& s);
+    Real run(const std::complex<float>& s);
+
+private:
+    static Real normalizeAngle(Real angle);
+    ProjectionType m_projectionType;
+    Real m_prevArg;
+    Real m_prevVal;
+    Real *m_cache;
+    bool m_cacheMaster;
+};
+
+#endif // SDRBASE_DSP_PROJECTOR_H

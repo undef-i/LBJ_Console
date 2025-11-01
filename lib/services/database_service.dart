@@ -13,7 +13,7 @@ class DatabaseService {
   DatabaseService._internal();
 
   static const String _databaseName = 'train_database';
-  static const _databaseVersion = 7;
+  static const _databaseVersion = 8;
 
   static const String trainRecordsTable = 'train_records';
   static const String appSettingsTable = 'app_settings';
@@ -91,6 +91,14 @@ class DatabaseService {
       await db.execute(
           'ALTER TABLE $appSettingsTable ADD COLUMN mapSettingsTimestamp INTEGER');
     }
+    if (oldVersion < 8) {
+      await db.execute(
+          'ALTER TABLE $appSettingsTable ADD COLUMN rtlTcpEnabled INTEGER NOT NULL DEFAULT 0');
+      await db.execute(
+          'ALTER TABLE $appSettingsTable ADD COLUMN rtlTcpHost TEXT NOT NULL DEFAULT "127.0.0.1"');
+      await db.execute(
+          'ALTER TABLE $appSettingsTable ADD COLUMN rtlTcpPort TEXT NOT NULL DEFAULT "14423"');
+    }
   }
 
   Future<void> _onCreate(Database db, int version) async {
@@ -141,7 +149,10 @@ class DatabaseService {
         timeWindow TEXT NOT NULL DEFAULT 'unlimited',
         mapTimeFilter TEXT NOT NULL DEFAULT 'unlimited',
         hideUngroupableRecords INTEGER NOT NULL DEFAULT 0,
-        mapSettingsTimestamp INTEGER
+        mapSettingsTimestamp INTEGER,
+        rtlTcpEnabled INTEGER NOT NULL DEFAULT 0,
+        rtlTcpHost TEXT NOT NULL DEFAULT '127.0.0.1',
+        rtlTcpPort TEXT NOT NULL DEFAULT '14423'
       )
     ''');
 
@@ -168,8 +179,11 @@ class DatabaseService {
       'groupBy': 'trainAndLoco',
       'timeWindow': 'unlimited',
       'mapTimeFilter': 'unlimited',
-      'hideUngroupableRecords': 0,
-      'mapSettingsTimestamp': null,
+        'hideUngroupableRecords': 0,
+        'mapSettingsTimestamp': null,
+        'rtlTcpEnabled': 0,
+        'rtlTcpHost': '127.0.0.1',
+        'rtlTcpPort': '14423',
     });
   }
 

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:async';
+import 'dart:developer' as developer;
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:lbjconsole/models/merged_record.dart';
 import 'package:lbjconsole/models/train_record.dart';
@@ -13,15 +14,25 @@ import 'package:lbjconsole/services/ble_service.dart';
 import 'package:lbjconsole/services/database_service.dart';
 import 'package:lbjconsole/services/notification_service.dart';
 import 'package:lbjconsole/services/background_service.dart';
+import 'package:lbjconsole/services/rtl_tcp_service.dart';
 import 'package:lbjconsole/themes/app_theme.dart';
+import 'dart:convert';
 
 class _ConnectionStatusWidget extends StatefulWidget {
   final BLEService bleService;
+  final RtlTcpService rtlTcpService;
   final DateTime? lastReceivedTime;
+  final DateTime? rtlTcpLastReceivedTime;
+  final bool rtlTcpEnabled;
+  final bool rtlTcpConnected;
 
   const _ConnectionStatusWidget({
     required this.bleService,
+    required this.rtlTcpService,
     required this.lastReceivedTime,
+    required this.rtlTcpLastReceivedTime,
+    required this.rtlTcpEnabled,
+    required this.rtlTcpConnected,
   });
 
   @override
@@ -58,19 +69,32 @@ class _ConnectionStatusWidgetState extends State<_ConnectionStatusWidget> {
 
   @override
   Widget build(BuildContext context) {
+    final isRtlTcpMode = widget.rtlTcpEnabled;
+    final rtlTcpConnected = widget.rtlTcpConnected;
+    
+    final isConnected = isRtlTcpMode ? rtlTcpConnected : _isConnected;
+    final statusColor = isRtlTcpMode 
+        ? (rtlTcpConnected ? Colors.green : Colors.red)
+        : (_isConnected ? Colors.green : Colors.red);
+    final statusText = isRtlTcpMode 
+        ? (rtlTcpConnected ? '已连接' : '未连接')
+        : _deviceStatus;
+    
+    final lastReceivedTime = isRtlTcpMode ? widget.rtlTcpLastReceivedTime : widget.lastReceivedTime;
+    
     return Row(
       children: [
         Column(
           mainAxisAlignment: MainAxisAlignment.center,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (widget.lastReceivedTime == null || !_isConnected) ...[
-              Text(_deviceStatus,
+            if (lastReceivedTime == null || !isConnected) ...[
+              Text(statusText,
                   style: const TextStyle(color: Colors.white70, fontSize: 12)),
             ],
             _LastReceivedTimeWidget(
-              lastReceivedTime: widget.lastReceivedTime,
-              isConnected: _isConnected,
+              lastReceivedTime: lastReceivedTime,
+              isConnected: isConnected,
             ),
           ],
         ),
@@ -79,7 +103,7 @@ class _ConnectionStatusWidgetState extends State<_ConnectionStatusWidget> {
           width: 8,
           height: 8,
           decoration: BoxDecoration(
-            color: _isConnected ? Colors.green : Colors.red,
+            color: statusColor,
             shape: BoxShape.circle,
           ),
         ),
@@ -179,14 +203,23 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   String _mapType = 'webview';
 
   late final BLEService _bleService;
+  late final RtlTcpService _rtlTcpService;
   final NotificationService _notificationService = NotificationService();
+  final DatabaseService _databaseService = DatabaseService.instance;
 
   StreamSubscription? _connectionSubscription;
+  StreamSubscription? _rtlTcpConnectionSubscription;
   StreamSubscription? _dataSubscription;
+  StreamSubscription? _rtlTcpDataSubscription;
   StreamSubscription? _lastReceivedTimeSubscription;
+  StreamSubscription? _rtlTcpLastReceivedTimeSubscription;
   StreamSubscription? _settingsSubscription;
   DateTime? _lastReceivedTime;
+  DateTime? _rtlTcpLastReceivedTime;
   bool _isHistoryEditMode = false;
+  bool _rtlTcpEnabled = false;
+  bool _rtlTcpConnected = false;
+  bool _isConnected = false;
   final GlobalKey<HistoryScreenState> _historyScreenKey =
       GlobalKey<HistoryScreenState>();
   final GlobalKey<RealtimeScreenState> _realtimeScreenKey =
@@ -197,20 +230,44 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _bleService = BLEService();
+    _rtlTcpService = RtlTcpService();
     _bleService.initialize();
+    _loadRtlTcpSettings();
     _initializeServices();
     _checkAndStartBackgroundService();
+    _setupConnectionListener();
     _setupLastReceivedTimeListener();
     _setupSettingsListener();
     _loadMapType();
   }
 
   Future<void> _loadMapType() async {
-    final settings = await DatabaseService.instance.getAllSettings() ?? {};
+    final settings = await DatabaseService.instance.getAllSettings();
     if (mounted) {
       setState(() {
-        _mapType = settings['mapType']?.toString() ?? 'webview';
+        _mapType = settings?['mapType']?.toString() ?? 'webview';
       });
+    }
+  }
+
+  void _loadRtlTcpSettings() async {
+    developer.log('rtl_tcp: load_settings');
+    final settings = await _databaseService.getAllSettings();
+    developer.log('rtl_tcp: settings_loaded: enabled=${(settings?['rtlTcpEnabled'] ?? 0) == 1}, host=${settings?['rtlTcpHost']?.toString() ?? '127.0.0.1'}, port=${settings?['rtlTcpPort']?.toString() ?? '14423'}');
+    if (mounted) {
+      setState(() {
+        _rtlTcpEnabled = (settings?['rtlTcpEnabled'] ?? 0) == 1;
+        _rtlTcpConnected = _rtlTcpService.isConnected;
+      });
+      
+      if (_rtlTcpEnabled && !_rtlTcpConnected) {
+        final host = settings?['rtlTcpHost']?.toString() ?? '127.0.0.1';
+        final port = settings?['rtlTcpPort']?.toString() ?? '14423';
+        developer.log('rtl_tcp: auto_connect');
+        _connectToRtlTcp(host, port);
+      } else {
+        developer.log('rtl_tcp: skip_connect: enabled=$_rtlTcpEnabled, connected=$_rtlTcpConnected');
+      }
     }
   }
 
@@ -233,22 +290,92 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         });
       }
     });
+    
+    _rtlTcpLastReceivedTimeSubscription =
+        _rtlTcpService.lastReceivedTimeStream.listen((time) {
+      if (mounted) {
+        if (_rtlTcpEnabled) {
+          setState(() {
+            _rtlTcpLastReceivedTime = time;
+          });
+        }
+      }
+    });
   }
 
   void _setupSettingsListener() {
+    developer.log('rtl_tcp: setup_listener');
     _settingsSubscription =
         DatabaseService.instance.onSettingsChanged((settings) {
-      if (mounted && _currentIndex == 1) {
-        _realtimeScreenKey.currentState?.loadRecords(scrollToTop: false);
+      developer.log('rtl_tcp: settings_changed: enabled=${(settings?['rtlTcpEnabled'] ?? 0) == 1}, host=${settings?['rtlTcpHost']?.toString() ?? '127.0.0.1'}, port=${settings?['rtlTcpPort']?.toString() ?? '14423'}');
+      if (mounted) {
+        final rtlTcpEnabled = (settings?['rtlTcpEnabled'] ?? 0) == 1;
+        if (rtlTcpEnabled != _rtlTcpEnabled) {
+          setState(() {
+            _rtlTcpEnabled = rtlTcpEnabled;
+          });
+          
+          if (rtlTcpEnabled) {
+            final host = settings?['rtlTcpHost']?.toString() ?? '127.0.0.1';
+            final port = settings?['rtlTcpPort']?.toString() ?? '14423';
+            _connectToRtlTcp(host, port);
+          } else {
+          _rtlTcpConnectionSubscription?.cancel();
+          _rtlTcpDataSubscription?.cancel();
+          _rtlTcpLastReceivedTimeSubscription?.cancel();
+          _rtlTcpService.disconnect();
+          setState(() {
+            _rtlTcpConnected = false;
+            _rtlTcpLastReceivedTime = null;
+          });
+          }
+        }
+        
+        if (_currentIndex == 1) {
+          _realtimeScreenKey.currentState?.loadRecords(scrollToTop: false);
+        }
       }
     });
+  }
+
+  void _setupConnectionListener() {
+    _connectionSubscription = _bleService.connectionStream.listen((connected) {
+      if (mounted) {
+        setState(() {
+          _isConnected = connected;
+        });
+      }
+    });
+    
+    _rtlTcpConnectionSubscription = _rtlTcpService.connectionStream.listen((connected) {
+      if (mounted) {
+        if (_rtlTcpEnabled) {
+          setState(() {
+            _rtlTcpConnected = connected;
+          });
+        }
+      }
+    });
+  }
+
+  Future<void> _connectToRtlTcp(String host, String port) async {
+    developer.log('rtl_tcp: connect: $host:$port');
+    try {
+      await _rtlTcpService.connect(host: host, port: port);
+      developer.log('rtl_tcp: connect_req_sent');
+    } catch (e) {
+      developer.log('rtl_tcp: connect_fail: $e');
+    }
   }
 
   @override
   void dispose() {
     _connectionSubscription?.cancel();
+    _rtlTcpConnectionSubscription?.cancel();
     _dataSubscription?.cancel();
+    _rtlTcpDataSubscription?.cancel();
     _lastReceivedTimeSubscription?.cancel();
+    _rtlTcpLastReceivedTimeSubscription?.cancel();
     _settingsSubscription?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
@@ -274,6 +401,18 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         _realtimeScreenKey.currentState!.addNewRecord(record);
       }
     });
+
+    _rtlTcpDataSubscription = _rtlTcpService.dataStream.listen((record) {
+      developer.log('rtl_tcp: recv_data: train=${record.train}');
+      developer.log('rtl_tcp: recv_json: ${jsonEncode(record.toJson())}');
+      _notificationService.showTrainNotification(record);
+      if (_historyScreenKey.currentState != null) {
+        _historyScreenKey.currentState!.addNewRecord(record);
+      }
+      if (_realtimeScreenKey.currentState != null) {
+        _realtimeScreenKey.currentState!.addNewRecord(record);
+      }
+    });
   }
 
   void _showConnectionDialog() {
@@ -282,7 +421,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       context: context,
       barrierDismissible: true,
       builder: (context) =>
-          _PixelPerfectBluetoothDialog(bleService: _bleService),
+          _PixelPerfectBluetoothDialog(bleService: _bleService, rtlTcpEnabled: _rtlTcpEnabled),
     ).then((_) {
       _bleService.setAutoConnectBlocked(false);
       if (!_bleService.isManualDisconnect) {
@@ -325,19 +464,26 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       ),
       centerTitle: false,
       actions: [
-        Row(
-          children: [
-            _ConnectionStatusWidget(
-              bleService: _bleService,
-              lastReceivedTime: _lastReceivedTime,
-            ),
-            IconButton(
-              icon: const Icon(Icons.bluetooth, color: Colors.white),
-              onPressed: _showConnectionDialog,
-            ),
-          ],
-        ),
-      ],
+          Row(
+            children: [
+              _ConnectionStatusWidget(
+                bleService: _bleService,
+                rtlTcpService: _rtlTcpService,
+                lastReceivedTime: _lastReceivedTime,
+                rtlTcpLastReceivedTime: _rtlTcpLastReceivedTime,
+                rtlTcpEnabled: _rtlTcpEnabled,
+                rtlTcpConnected: _rtlTcpConnected,
+              ),
+              IconButton(
+                icon: Icon(
+                  _rtlTcpEnabled ? Icons.wifi : Icons.bluetooth,
+                  color: Colors.white,
+                ),
+                onPressed: _showConnectionDialog,
+              ),
+            ],
+          ),
+        ],
     );
   }
 
@@ -418,6 +564,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       SettingsScreen(
         onSettingsChanged: () {
           _loadMapType();
+          _loadRtlTcpSettings();
         },
       ),
     ];
@@ -464,7 +611,8 @@ enum _ScanState { initial, scanning, finished }
 
 class _PixelPerfectBluetoothDialog extends StatefulWidget {
   final BLEService bleService;
-  const _PixelPerfectBluetoothDialog({required this.bleService});
+  final bool rtlTcpEnabled;
+  const _PixelPerfectBluetoothDialog({required this.bleService, required this.rtlTcpEnabled});
   @override
   State<_PixelPerfectBluetoothDialog> createState() =>
       _PixelPerfectBluetoothDialogState();
@@ -477,13 +625,28 @@ class _PixelPerfectBluetoothDialogState
   StreamSubscription? _connectionSubscription;
   StreamSubscription? _lastReceivedTimeSubscription;
   DateTime? _lastReceivedTime;
+  StreamSubscription? _rtlTcpConnectionSubscription;
+  bool _rtlTcpConnected = false;
   @override
   void initState() {
     super.initState();
     _connectionSubscription = widget.bleService.connectionStream.listen((_) {
       if (mounted) setState(() {});
     });
-    if (!widget.bleService.isConnected) {
+    
+    _rtlTcpConnectionSubscription = widget.bleService.rtlTcpService?.connectionStream.listen((connected) {
+      if (mounted) {
+        setState(() {
+          _rtlTcpConnected = connected;
+        });
+      }
+    });
+    
+    if (widget.rtlTcpEnabled && widget.bleService.rtlTcpService != null) {
+      _rtlTcpConnected = widget.bleService.rtlTcpService!.isConnected;
+    }
+    
+    if (!widget.bleService.isConnected && !widget.rtlTcpEnabled) {
       _startScan();
     }
   }
@@ -491,6 +654,7 @@ class _PixelPerfectBluetoothDialogState
   @override
   void dispose() {
     _connectionSubscription?.cancel();
+    _rtlTcpConnectionSubscription?.cancel();
     _lastReceivedTimeSubscription?.cancel();
     super.dispose();
   }
@@ -536,13 +700,15 @@ class _PixelPerfectBluetoothDialogState
   Widget build(BuildContext context) {
     final isConnected = widget.bleService.isConnected;
     return AlertDialog(
-      title: const Text('蓝牙设备'),
+      title: Text(widget.rtlTcpEnabled ? 'RTL-TCP 模式' : '蓝牙设备'),
       content: SizedBox(
         width: double.maxFinite,
         child: SingleChildScrollView(
-          child: isConnected
-              ? _buildConnectedView(context, widget.bleService.connectedDevice)
-              : _buildDisconnectedView(context),
+          child: widget.rtlTcpEnabled
+              ? _buildRtlTcpView(context)
+              : (isConnected
+                  ? _buildConnectedView(context, widget.bleService.connectedDevice)
+                  : _buildDisconnectedView(context)),
         ),
       ),
       actions: [
@@ -602,6 +768,31 @@ class _PixelPerfectBluetoothDialogState
       const SizedBox(height: 16),
       if (_scanState == _ScanState.finished && _devices.isNotEmpty)
         _buildDeviceListView()
+    ]);
+  }
+
+  Widget _buildRtlTcpView(BuildContext context) {
+    final isConnected = _rtlTcpConnected;
+    final currentAddress = widget.bleService.rtlTcpService?.currentAddress ?? '未配置';
+    
+    return Column(mainAxisSize: MainAxisSize.min, children: [
+      Icon(Icons.wifi, size: 48, color: isConnected ? Colors.green : Colors.red),
+      const SizedBox(height: 16),
+      Text(isConnected ? '已连接' : '未连接',
+          style: Theme.of(context)
+              .textTheme
+              .titleMedium
+              ?.copyWith(fontWeight: FontWeight.bold)),
+      const SizedBox(height: 8),
+      Text('$currentAddress',
+          style: TextStyle(color: isConnected ? Colors.green : Colors.grey)),
+      const SizedBox(height: 16),
+      if (_lastReceivedTime != null && isConnected) ...[
+        _LastReceivedTimeWidget(
+          lastReceivedTime: _lastReceivedTime,
+          isConnected: isConnected,
+        ),
+      ],
     ]);
   }
 

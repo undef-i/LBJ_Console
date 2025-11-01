@@ -5,11 +5,17 @@ import 'dart:math';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:lbjconsole/models/train_record.dart';
 import 'package:lbjconsole/services/database_service.dart';
+import 'package:lbjconsole/services/rtl_tcp_service.dart';
 
 class BLEService {
   static final BLEService _instance = BLEService._internal();
   factory BLEService() => _instance;
-  BLEService._internal();
+  BLEService._internal() {
+    _rtlTcpService = RtlTcpService();
+  }
+
+  late final RtlTcpService _rtlTcpService;
+  RtlTcpService? get rtlTcpService => _rtlTcpService;
 
   static const String TAG = "LBJ_BT_FLUTTER";
   static final Guid serviceUuid = Guid("0000ffe0-0000-1000-8000-00805f9b34fb");
