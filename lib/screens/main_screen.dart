@@ -3,8 +3,6 @@ import 'package:flutter/services.dart';
 import 'dart:async';
 import 'dart:developer' as developer;
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
-import 'package:lbjconsole/models/merged_record.dart';
-import 'package:lbjconsole/models/train_record.dart';
 import 'package:lbjconsole/screens/history_screen.dart';
 import 'package:lbjconsole/screens/map_screen.dart';
 import 'package:lbjconsole/screens/map_webview_screen.dart';
@@ -307,17 +305,17 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     developer.log('rtl_tcp: setup_listener');
     _settingsSubscription =
         DatabaseService.instance.onSettingsChanged((settings) {
-      developer.log('rtl_tcp: settings_changed: enabled=${(settings?['rtlTcpEnabled'] ?? 0) == 1}, host=${settings?['rtlTcpHost']?.toString() ?? '127.0.0.1'}, port=${settings?['rtlTcpPort']?.toString() ?? '14423'}');
+      developer.log('rtl_tcp: settings_changed: enabled=${(settings['rtlTcpEnabled'] ?? 0) == 1}, host=${settings['rtlTcpHost']?.toString() ?? '127.0.0.1'}, port=${settings['rtlTcpPort']?.toString() ?? '14423'}');
       if (mounted) {
-        final rtlTcpEnabled = (settings?['rtlTcpEnabled'] ?? 0) == 1;
+        final rtlTcpEnabled = (settings['rtlTcpEnabled'] ?? 0) == 1;
         if (rtlTcpEnabled != _rtlTcpEnabled) {
           setState(() {
             _rtlTcpEnabled = rtlTcpEnabled;
           });
           
           if (rtlTcpEnabled) {
-            final host = settings?['rtlTcpHost']?.toString() ?? '127.0.0.1';
-            final port = settings?['rtlTcpPort']?.toString() ?? '14423';
+            final host = settings['rtlTcpHost']?.toString() ?? '127.0.0.1';
+            final port = settings['rtlTcpPort']?.toString() ?? '14423';
             _connectToRtlTcp(host, port);
           } else {
           _rtlTcpConnectionSubscription?.cancel();
@@ -661,11 +659,12 @@ class _PixelPerfectBluetoothDialogState
 
   Future<void> _startScan() async {
     if (_scanState == _ScanState.scanning) return;
-    if (mounted)
+    if (mounted) {
       setState(() {
         _devices.clear();
         _scanState = _ScanState.scanning;
       });
+    }
     await widget.bleService.startScan(
       timeout: const Duration(seconds: 8),
       onScanResults: (devices) {
@@ -784,7 +783,7 @@ class _PixelPerfectBluetoothDialogState
               .titleMedium
               ?.copyWith(fontWeight: FontWeight.bold)),
       const SizedBox(height: 8),
-      Text('$currentAddress',
+      Text(currentAddress,
           style: TextStyle(color: isConnected ? Colors.green : Colors.grey)),
       const SizedBox(height: 16),
       if (_lastReceivedTime != null && isConnected) ...[

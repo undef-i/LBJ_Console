@@ -27,7 +27,7 @@ class DatabaseService {
       }
       _database = await _initDatabase();
       return _database!;
-    } catch (e, stackTrace) {
+    } catch (e) {
       rethrow;
     }
   }
@@ -38,8 +38,6 @@ class DatabaseService {
         return false;
       }
 
-      final db = await database;
-      final result = await db.rawQuery('SELECT 1');
       return true;
     } catch (e) {
       return false;
@@ -59,7 +57,7 @@ class DatabaseService {
       );
 
       return db;
-    } catch (e, stackTrace) {
+    } catch (e) {
       rethrow;
     }
   }
@@ -206,7 +204,7 @@ class DatabaseService {
       final records =
           result.map((json) => TrainRecord.fromDatabaseJson(json)).toList();
       return records;
-    } catch (e, stackTrace) {
+    } catch (e) {
       rethrow;
     }
   }
@@ -239,7 +237,7 @@ class DatabaseService {
       final records =
           result.map((json) => TrainRecord.fromDatabaseJson(json)).toList();
       return records;
-    } catch (e, stackTrace) {
+    } catch (e) {
       rethrow;
     }
   }

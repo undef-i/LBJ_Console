@@ -340,22 +340,6 @@ class HistoryScreenState extends State<HistoryScreen> {
     } catch (e) {}
   }
 
-  String _getGroupKeyForRecord(TrainRecord record, MergeSettings settings) {
-    switch (settings.groupBy) {
-      case GroupBy.trainOnly:
-        return record.train.trim();
-      case GroupBy.locoOnly:
-        return record.loco.trim();
-      case GroupBy.trainAndLoco:
-        return '${record.train.trim()}-${record.loco.trim()}';
-      case GroupBy.trainOrLoco:
-        final train = record.train.trim();
-        if (train.isNotEmpty) return train;
-        final loco = record.loco.trim();
-        if (loco.isNotEmpty) return loco;
-        return '';
-    }
-  }
 
   bool _hasDataChanged(List<Object> newItems) {
     if (_displayItems.length != newItems.length) return true;

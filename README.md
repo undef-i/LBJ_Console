@@ -10,6 +10,8 @@ LBJ Console 是一款应用程序，用于通过 BLE 从 [SX1276_Receive_LBJ](ht
 
 [android](https://github.com/undef-i/LBJ_Console/tree/android) 分支包含项目早期基于 Android 平台的实现代码，已实现基本功能，现已停止开发。
 
+本项目为个人业余项目，代码质量和实现细节可能不尽如人意，敬请见谅。
+
 ## 数据文件
 
 LBJ Console 依赖以下数据文件，位于 `assets` 目录，用于支持机车配属和车次信息的展示：

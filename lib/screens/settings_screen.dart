@@ -4,17 +4,13 @@ import 'dart:io';
 
 import 'package:lbjconsole/models/merged_record.dart';
 import 'package:lbjconsole/services/database_service.dart';
-import 'package:lbjconsole/services/ble_service.dart';
 import 'package:lbjconsole/services/background_service.dart';
 import 'package:lbjconsole/themes/app_theme.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'package:file_picker/file_picker.dart';
-import 'package:path/path.dart' as path;
-import 'package:path_provider/path_provider.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:share_plus/share_plus.dart';
-import 'package:cross_file/cross_file.dart';
 
 class SettingsScreen extends StatefulWidget {
   final VoidCallback? onSettingsChanged;
@@ -73,14 +69,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 Icon(Icons.wifi,
                     color: Theme.of(context).colorScheme.primary),
                 const SizedBox(width: 12),
-                Text('RTL-TCP 源', style: AppTheme.titleMedium),
+                const Text('RTL-TCP 源', style: AppTheme.titleMedium),
               ],
             ),
             const SizedBox(height: 16),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Column(
+                const Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('启用 RTL-TCP 源', style: AppTheme.bodyLarge),
@@ -94,7 +90,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     });
                     _saveSettings();
                   },
-                  activeColor: Theme.of(context).colorScheme.primary,
+                  activeThumbColor: Theme.of(context).colorScheme.primary,
                 ),
               ],
             ),
@@ -273,7 +269,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 Icon(Icons.bluetooth,
                     color: Theme.of(context).colorScheme.primary),
                 const SizedBox(width: 12),
-                Text('蓝牙设备', style: AppTheme.titleMedium),
+                const Text('蓝牙设备', style: AppTheme.titleMedium),
               ],
             ),
             const SizedBox(height: 16),
@@ -329,14 +325,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 Icon(Icons.settings,
                     color: Theme.of(context).colorScheme.primary),
                 const SizedBox(width: 12),
-                Text('应用设置', style: AppTheme.titleMedium),
+                const Text('应用设置', style: AppTheme.titleMedium),
               ],
             ),
             const SizedBox(height: 16),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Column(
+                const Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('后台保活服务', style: AppTheme.bodyLarge),
@@ -356,7 +352,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       await BackgroundService.stopService();
                     }
                   },
-                  activeColor: Theme.of(context).colorScheme.primary,
+                  activeThumbColor: Theme.of(context).colorScheme.primary,
                 ),
               ],
             ),
@@ -364,7 +360,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Column(
+                const Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('通知服务', style: AppTheme.bodyLarge),
@@ -378,7 +374,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     });
                     _saveSettings();
                   },
-                  activeColor: Theme.of(context).colorScheme.primary,
+                  activeThumbColor: Theme.of(context).colorScheme.primary,
                 ),
               ],
             ),
@@ -386,7 +382,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Column(
+                const Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('地图组件类型', style: AppTheme.bodyLarge),
@@ -394,7 +390,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
                 DropdownButton<String>(
                   value: _mapType,
-                  items: [
+                  items: const [
                     DropdownMenuItem(
                       value: 'webview',
                       child: Text('矢量铁路地图', style: AppTheme.bodyMedium),
@@ -422,7 +418,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Column(
+                const Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('隐藏只有时间有效的记录', style: AppTheme.bodyLarge),
@@ -436,7 +432,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     });
                     _saveSettings();
                   },
-                  activeColor: Theme.of(context).colorScheme.primary,
+                  activeThumbColor: Theme.of(context).colorScheme.primary,
                 ),
               ],
             ),
@@ -463,14 +459,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 Icon(Icons.merge_type,
                     color: Theme.of(context).colorScheme.primary),
                 const SizedBox(width: 12),
-                Text('记录合并', style: AppTheme.titleMedium),
+                const Text('记录合并', style: AppTheme.titleMedium),
               ],
             ),
             const SizedBox(height: 16),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Column(
+                const Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('启用记录合并', style: AppTheme.bodyLarge),
@@ -484,7 +480,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     });
                     _saveSettings();
                   },
-                  activeColor: Theme.of(context).colorScheme.primary,
+                  activeThumbColor: Theme.of(context).colorScheme.primary,
                 ),
               ],
             ),
@@ -494,11 +490,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const SizedBox(height: 16),
-                  Text('分组方式', style: AppTheme.bodyLarge),
+                  const Text('分组方式', style: AppTheme.bodyLarge),
                   const SizedBox(height: 8),
                   DropdownButtonFormField<GroupBy>(
-                    value: _groupBy,
-                    items: [
+                    initialValue: _groupBy,
+                    items: const [
                       DropdownMenuItem(
                           value: GroupBy.trainOnly,
                           child: Text('仅车次号', style: AppTheme.bodyMedium)),
@@ -532,11 +528,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     style: AppTheme.bodyMedium,
                   ),
                   const SizedBox(height: 16),
-                  Text('时间窗口', style: AppTheme.bodyLarge),
+                  const Text('时间窗口', style: AppTheme.bodyLarge),
                   const SizedBox(height: 8),
                   DropdownButtonFormField<TimeWindow>(
-                    value: _timeWindow,
-                    items: [
+                    initialValue: _timeWindow,
+                    items: const [
                       DropdownMenuItem(
                           value: TimeWindow.oneHour,
                           child: Text('1小时内', style: AppTheme.bodyMedium)),
@@ -579,7 +575,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Column(
+                      const Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text('隐藏不可分组记录', style: AppTheme.bodyLarge),
@@ -593,7 +589,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           });
                           _saveSettings();
                         },
-                        activeColor: Theme.of(context).colorScheme.primary,
+                        activeThumbColor: Theme.of(context).colorScheme.primary,
                       ),
                     ],
                   ),
@@ -623,7 +619,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 Icon(Icons.storage,
                     color: Theme.of(context).colorScheme.primary),
                 const SizedBox(width: 12),
-                Text('数据管理', style: AppTheme.titleMedium),
+                const Text('数据管理', style: AppTheme.titleMedium),
               ],
             ),
             const SizedBox(height: 16),
@@ -705,7 +701,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ],
               ),
             ),
-            Icon(
+            const Icon(
               Icons.chevron_right,
               color: Colors.white54,
               size: 20,
@@ -760,7 +756,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
         if (exportedPath != null) {
           final file = File(exportedPath);
-          final fileName = file.path.split(Platform.pathSeparator).last;
 
           await Share.shareXFiles(
             [XFile(file.path)],
@@ -954,11 +949,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
               children: [
                 Icon(Icons.info, color: Theme.of(context).colorScheme.primary),
                 const SizedBox(width: 12),
-                Text('关于', style: AppTheme.titleMedium),
+                const Text('关于', style: AppTheme.titleMedium),
               ],
             ),
             const SizedBox(height: 16),
-            Text('LBJ Console', style: AppTheme.titleMedium),
+            const Text('LBJ Console', style: AppTheme.titleMedium),
             const SizedBox(height: 8),
             FutureBuilder<String>(
               future: _getAppVersion(),
@@ -979,7 +974,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   await launchUrl(url);
                 }
               },
-              child: Text(
+              child: const Text(
                 'https://github.com/undef-i/LBJConsole',
                 style: AppTheme.caption,
               ),

@@ -9,13 +9,11 @@ class AppTheme {
       canvasColor: Colors.black,
       cardColor: const Color(0xFF121212),
       primaryColor: Colors.blue,
-      colorScheme: ColorScheme.dark(
+      colorScheme: const ColorScheme.dark(
         primary: Colors.blue,
         secondary: Colors.blueAccent,
-        surface: const Color(0xFF121212),
-        background: Colors.black,
+        surface: Color(0xFF121212),
         onSurface: Colors.white,
-        onBackground: Colors.white,
       ),
       appBarTheme: const AppBarTheme(
         backgroundColor: Colors.black,
@@ -67,16 +65,16 @@ class AppTheme {
         thickness: 1,
       ),
       switchTheme: SwitchThemeData(
-        thumbColor: MaterialStateProperty.resolveWith<Color?>(
-            (Set<MaterialState> states) {
-          if (states.contains(MaterialState.selected)) {
+        thumbColor: WidgetStateProperty.resolveWith<Color?>(
+            (Set<WidgetState> states) {
+          if (states.contains(WidgetState.selected)) {
             return Colors.blue;
           }
           return Colors.grey;
         }),
-        trackColor: MaterialStateProperty.resolveWith<Color?>(
-            (Set<MaterialState> states) {
-          if (states.contains(MaterialState.selected)) {
+        trackColor: WidgetStateProperty.resolveWith<Color?>(
+            (Set<WidgetState> states) {
+          if (states.contains(WidgetState.selected)) {
             return Colors.blue.withOpacity(0.5);
           }
           return Colors.grey.withOpacity(0.5);

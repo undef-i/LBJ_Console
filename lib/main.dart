@@ -3,9 +3,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:lbjconsole/screens/main_screen.dart';
 import 'package:lbjconsole/util/train_type_util.dart';
 import 'package:lbjconsole/util/loco_info_util.dart';
-import 'package:lbjconsole/util/loco_type_util.dart';
 import 'package:lbjconsole/services/loco_type_service.dart';
-import 'package:lbjconsole/services/database_service.dart';
 import 'package:lbjconsole/services/background_service.dart';
 
 void main() async {

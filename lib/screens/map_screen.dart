@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:math' show sin, cos, sqrt, atan2, pi;
+import 'dart:math' show sin, cos, sqrt, atan2;
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -26,19 +26,19 @@ class _MapScreenState extends State<MapScreen> {
   double _currentRotation = 0.0;
 
   bool _isMapInitialized = false;
-  bool _isFollowingLocation = false;
+  final bool _isFollowingLocation = false;
   bool _isLocationPermissionGranted = false;
   Timer? _locationTimer;
 
   String _selectedTimeFilter = 'unlimited';
   final Map<String, Duration> _timeFilterOptions = {
     'unlimited': Duration.zero,
-    '1hour': Duration(hours: 1),
-    '6hours': Duration(hours: 6),
-    '12hours': Duration(hours: 12),
-    '24hours': Duration(hours: 24),
-    '7days': Duration(days: 7),
-    '30days': Duration(days: 30),
+    '1hour': const Duration(hours: 1),
+    '6hours': const Duration(hours: 6),
+    '12hours': const Duration(hours: 12),
+    '24hours': const Duration(hours: 24),
+    '7days': const Duration(days: 7),
+    '30days': const Duration(days: 30),
   };
 
   @override
@@ -81,8 +81,8 @@ class _MapScreenState extends State<MapScreen> {
           if (lat == 39.9042 && lon == 116.4074) {
           } else if (lat == 0.0 && lon == 0.0) {
           } else {
-            final beijingLat = 39.9042;
-            final beijingLon = 116.4074;
+            const beijingLat = 39.9042;
+            const beijingLon = 116.4074;
             final distance =
                 _calculateDistance(lat, lon, beijingLat, beijingLon);
 
@@ -411,7 +411,7 @@ class _MapScreenState extends State<MapScreen> {
                     padding:
                         const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                     decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.8),
+                      color: Colors.black.withValues(alpha: 0.8),
                       borderRadius: BorderRadius.circular(3),
                     ),
                     child: Text(
@@ -572,8 +572,8 @@ class _MapScreenState extends State<MapScreen> {
                   decoration: BoxDecoration(
                     color: Theme.of(context)
                         .colorScheme
-                        .surfaceVariant
-                        .withOpacity(0.3),
+                        .surfaceContainerHighest
+                        .withValues(alpha: 0.3),
                     borderRadius: BorderRadius.circular(16),
                   ),
                   child: Padding(

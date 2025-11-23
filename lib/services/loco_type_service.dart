@@ -1,4 +1,3 @@
-import 'package:lbjconsole/util/loco_type_util.dart';
 
 class LocoTypeService {
   static final LocoTypeService _instance = LocoTypeService._internal();

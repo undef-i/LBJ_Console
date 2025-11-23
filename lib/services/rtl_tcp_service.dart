@@ -149,8 +149,9 @@ class _LbJState {
         break;
 
       case _lbjSyncAddr:
-        if (numeric.length >= 5)
+        if (numeric.length >= 5) {
           time = "${numeric.substring(1, 3)}:${numeric.substring(3, 5)}";
+        }
         break;
     }
   }
@@ -167,11 +168,11 @@ class _LbJState {
 
     String gpsPosition = "";
     if (posLatDeg.isNotEmpty && posLatMin.isNotEmpty) {
-      gpsPosition = "${posLatDeg}°${posLatMin}′";
+      gpsPosition = "$posLatDeg°$posLatMin′";
     }
     if (posLonDeg.isNotEmpty && posLonMin.isNotEmpty) {
       gpsPosition +=
-          (gpsPosition.isEmpty ? "" : " ") + "${posLonDeg}°${posLonMin}′";
+          "${gpsPosition.isEmpty ? "" : " "}$posLonDeg°$posLonMin′";
     }
 
     String kmPosition = positionKm.replaceAll(' <NUL>', '');

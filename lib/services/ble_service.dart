@@ -145,7 +145,9 @@ class BLEService {
       if (isConnected ||
           _isConnecting ||
           _isManualDisconnect ||
-          _isAutoConnectBlocked) return;
+          _isAutoConnectBlocked) {
+        return;
+      }
 
       for (var device in allFoundDevices) {
         if (_shouldAutoConnectTo(device)) {
@@ -168,10 +170,13 @@ class BLEService {
     final deviceAddress = device.remoteId.str;
 
     if (_targetDeviceName.isNotEmpty &&
-        deviceName.toLowerCase() == _targetDeviceName.toLowerCase())
+        deviceName.toLowerCase() == _targetDeviceName.toLowerCase()) {
       return true;
+    }
     if (_lastKnownDeviceAddress != null &&
-        _lastKnownDeviceAddress == deviceAddress) return true;
+        _lastKnownDeviceAddress == deviceAddress) {
+      return true;
+    }
 
     return false;
   }

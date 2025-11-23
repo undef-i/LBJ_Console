@@ -3,7 +3,6 @@ import 'dart:io';
 import 'dart:ui';
 
 import 'package:flutter_background_service/flutter_background_service.dart';
-import 'package:flutter_background_service_android/flutter_background_service_android.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:lbjconsole/services/ble_service.dart';
 
@@ -107,7 +106,7 @@ class BackgroundService {
             _notificationId,
             'LBJ Console',
             '蓝牙连接监控中',
-            NotificationDetails(
+            const NotificationDetails(
               android: AndroidNotificationDetails(
                 _notificationChannelId,
                 _notificationChannelName,
@@ -146,7 +145,7 @@ class BackgroundService {
               _notificationId,
               'LBJ Console',
               isConnected ? '蓝牙已连接 - $deviceStatus' : '蓝牙未连接 - 自动重连中',
-              NotificationDetails(
+              const NotificationDetails(
                 android: AndroidNotificationDetails(
                   _notificationChannelId,
                   _notificationChannelName,

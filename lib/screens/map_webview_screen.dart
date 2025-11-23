@@ -32,7 +32,7 @@ class MapWebViewScreenState extends State<MapWebViewScreen>
   double _currentRotation = 0.0;
   LatLng? _currentLocation;
   LatLng? _lastTrainLocation;
-  bool _isDataLoaded = false;
+  final bool _isDataLoaded = false;
   final Completer<void> _webViewReadyCompleter = Completer<void>();
 
   @override
@@ -299,7 +299,7 @@ class MapWebViewScreenState extends State<MapWebViewScreen>
           _updateTrainMarkers();
         }
       });
-    } catch (e, stackTrace) {
+    } catch (e) {
       setState(() {
         _isLoading = false;
       });

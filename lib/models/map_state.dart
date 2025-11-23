@@ -45,7 +45,7 @@ class MapState {
 
   @override
   String toString() {
-    return 'MapState(zoom: ' + zoom.toString() + ', centerLat: ' + centerLat.toString() + ', centerLng: ' + centerLng.toString() + ', bearing: ' + bearing.toString() + ')';
+    return 'MapState(zoom: $zoom, centerLat: $centerLat, centerLng: $centerLng, bearing: $bearing)';
   }
 
   @override

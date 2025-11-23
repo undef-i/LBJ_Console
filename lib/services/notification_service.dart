@@ -20,7 +20,7 @@ class NotificationService {
     const AndroidInitializationSettings initializationSettingsAndroid =
         AndroidInitializationSettings('@mipmap/ic_launcher');
 
-    final InitializationSettings initializationSettings =
+    const InitializationSettings initializationSettings =
         InitializationSettings(
       android: initializationSettingsAndroid,
     );
@@ -61,7 +61,7 @@ class NotificationService {
       return;
     }
 
-    final String title = '列车信息';
+    const String title = '列车信息';
     final String body = _buildNotificationContent(record);
 
     final AndroidNotificationDetails androidPlatformChannelSpecifics =

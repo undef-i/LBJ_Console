@@ -30,7 +30,7 @@ class RealtimeScreenState extends State<RealtimeScreen> {
   List<LatLng> _selectedGroupRoute = [];
   List<Marker> _mapMarkers = [];
   bool _showMap = true;
-  Set<String> _selectedGroupKeys = {};
+  final Set<String> _selectedGroupKeys = {};
   LatLng? _userLocation;
   bool _isLocationPermissionGranted = false;
   Timer? _locationTimer;
@@ -376,8 +376,7 @@ class RealtimeScreenState extends State<RealtimeScreen> {
   }
 
   LatLng? _parsePositionFromRecord(TrainRecord record) {
-    if (record.positionInfo == null ||
-        record.positionInfo.isEmpty ||
+    if (record.positionInfo.isEmpty ||
         record.positionInfo == '<NUL>') {
       return null;
     }
@@ -916,8 +915,8 @@ class RealtimeScreenState extends State<RealtimeScreen> {
             flex: 1,
             child: FlutterMap(
               mapController: _mapController,
-              options: MapOptions(
-                initialCenter: const LatLng(35.8617, 104.1954),
+              options: const MapOptions(
+                initialCenter: LatLng(35.8617, 104.1954),
                 initialZoom: 2.0,
               ),
               children: [
