@@ -700,7 +700,7 @@ class _PixelPerfectBluetoothDialogState
   Widget build(BuildContext context) {
     final isConnected = widget.bleService.isConnected;
     return AlertDialog(
-      title: Text(widget.rtlTcpEnabled ? 'RTL-TCP 模式' : '蓝牙设备'),
+      title: Text(widget.rtlTcpEnabled ? 'RTL-TCP 服务器' : '蓝牙设备'),
       content: SizedBox(
         width: double.maxFinite,
         child: SingleChildScrollView(

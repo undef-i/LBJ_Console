@@ -73,7 +73,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 Icon(Icons.wifi,
                     color: Theme.of(context).colorScheme.primary),
                 const SizedBox(width: 12),
-                Text('RTL-TCP 接收', style: AppTheme.titleMedium),
+                Text('RTL-TCP 源', style: AppTheme.titleMedium),
               ],
             ),
             const SizedBox(height: 16),
@@ -83,7 +83,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('启用RTL-TCP接收', style: AppTheme.bodyLarge),
+                    Text('启用 RTL-TCP 源', style: AppTheme.bodyLarge),
                   ],
                 ),
                 Switch(
@@ -280,7 +280,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             TextField(
               controller: _deviceNameController,
               decoration: InputDecoration(
-                labelText: '设备名称 (用于自动连接)',
+                labelText: '设备名称',
                 hintText: '输入设备名称',
                 labelStyle: const TextStyle(color: Colors.white70),
                 hintStyle: const TextStyle(color: Colors.white54),
@@ -637,7 +637,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             _buildActionButton(
               icon: Icons.file_download,
               title: '导入数据',
-              subtitle: '从JSON文件导入记录和设置',
+              subtitle: '从 JSON 文件导入记录和设置',
               onTap: _importData,
             ),
             const SizedBox(height: 12),
