@@ -221,15 +221,15 @@ void decodeBatch()
 
                 alpha_bit_buffer = (alpha_bit_buffer << 20) | messageBits;
                 alpha_bit_buffer_bits += 20;
-                while (alpha_bit_buffer_bits >= 7)
+                while (alpha_bit_buffer_bits >= 8)
                 {
-                    char c = (alpha_bit_buffer >> (alpha_bit_buffer_bits - 7)) & 0x7f;
-                    c = reverse(c) >> (32 - 7);
+                    unsigned char c = (alpha_bit_buffer >> (alpha_bit_buffer_bits - 8)) & 0xff;
+                    c = reverse(c) >> (32 - 8);
                     if (c != 0 && c != 0x3 && c != 0x4)
                     {
                         alpha_msg.push_back(c);
                     }
-                    alpha_bit_buffer_bits -= 7;
+                    alpha_bit_buffer_bits -= 8;
                     if (alpha_bit_buffer_bits == 0)
                     {
                         alpha_bit_buffer = 0;

@@ -64,8 +64,13 @@ class _LbJState {
   String _gbkToUtf8(List<int> gbkBytes) {
     try {
       final validBytes = gbkBytes.where((b) => b != 0).toList();
-      return gbk.decode(validBytes);
+      print('gbkBytes: ${validBytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join(',')}');
+      
+      final result = gbk_bytes.decode(validBytes);
+      print('gbk decoded: $result');
+      return result;
     } catch (e) {
+      print('gbk decode error: $e');
       return "";
     }
   }
@@ -99,6 +104,8 @@ class _LbJState {
         String buffer = numeric;
         if (buffer.length < 50) return;
         _info2Hex = _recodeBCD(buffer);
+        print('info2 raw: $buffer');
+        print('info2 hex: $_info2Hex');
 
         if (_info2Hex.length >= 4) {
           try {

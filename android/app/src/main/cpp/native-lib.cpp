@@ -5,6 +5,7 @@
 #include <mutex>
 #include <vector>
 #include <sstream>
+#include <iomanip>
 #include <chrono>
 #include <unistd.h>
 #include <arpa/inet.h>
@@ -134,7 +135,7 @@ Java_org_noxylva_lbjconsole_flutter_AudioInputHandler_clearMessageBuffer(JNIEnv 
     alpha_msg.clear();
 }
 
-extern "C" JNIEXPORT jstring JNICALL
+extern "C" JNIEXPORT jbyteArray JNICALL
 Java_org_noxylva_lbjconsole_flutter_AudioInputHandler_pollMessages(JNIEnv *env, jobject)
 {
     std::lock_guard<std::mutex> demodLock(demodDataMutex);
@@ -142,13 +143,17 @@ Java_org_noxylva_lbjconsole_flutter_AudioInputHandler_pollMessages(JNIEnv *env, 
 
     if (messageBuffer.empty())
     {
-        return env->NewStringUTF("");
+        return env->NewByteArray(0);
     }
     std::ostringstream ss;
     for (auto &msg : messageBuffer)
         ss << msg << "\n";
     messageBuffer.clear();
-    return env->NewStringUTF(ss.str().c_str());
+    
+    std::string result = ss.str();
+    jbyteArray byteArray = env->NewByteArray(result.size());
+    env->SetByteArrayRegion(byteArray, 0, result.size(), (const jbyte*)result.c_str());
+    return byteArray;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
@@ -157,7 +162,7 @@ Java_org_noxylva_lbjconsole_flutter_RtlTcpChannelHandler_isConnected(JNIEnv *, j
     return (running && sockfd_atomic.load() >= 0) ? JNI_TRUE : JNI_FALSE;
 }
 
-extern "C" JNIEXPORT jstring JNICALL
+extern "C" JNIEXPORT jbyteArray JNICALL
 Java_org_noxylva_lbjconsole_flutter_RtlTcpChannelHandler_pollMessages(JNIEnv *env, jobject /*this*/)
 {
     std::lock_guard<std::mutex> demodLock(demodDataMutex);
@@ -166,13 +171,17 @@ Java_org_noxylva_lbjconsole_flutter_RtlTcpChannelHandler_pollMessages(JNIEnv *en
 
     if (messageBuffer.empty())
     {
-        return env->NewStringUTF("");
+        return env->NewByteArray(0);
     }
     std::ostringstream ss;
     for (auto &msg : messageBuffer)
         ss << msg << "\n";
     messageBuffer.clear();
-    return env->NewStringUTF(ss.str().c_str());
+    
+    std::string result = ss.str();
+    jbyteArray byteArray = env->NewByteArray(result.size());
+    env->SetByteArrayRegion(byteArray, 0, result.size(), (const jbyte*)result.c_str());
+    return byteArray;
 }
 
 void clientThread(std::string host, int port)
@@ -259,6 +268,13 @@ void clientThread(std::string host, int port)
                 {
                     std::ostringstream ss;
                     std::lock_guard<std::mutex> msgLock(msgMutex);
+
+                    std::ostringstream alpha_hex;
+                    for (unsigned char ch : alpha_msg) {
+                        alpha_hex << std::hex << std::uppercase << (int)ch << ",";
+                    }
+                    __android_log_print(ANDROID_LOG_DEBUG, "RTL-TCP", "alpha_msg_bytes: %s", alpha_hex.str().c_str());
+                    __android_log_print(ANDROID_LOG_DEBUG, "RTL-TCP", "numeric_msg: %s func=%d", numeric_msg.c_str(), function_bits);
 
                     std::string message_content;
                     if (function_bits == 3) {

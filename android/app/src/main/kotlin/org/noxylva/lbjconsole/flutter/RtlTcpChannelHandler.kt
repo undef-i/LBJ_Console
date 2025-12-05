@@ -10,7 +10,7 @@ import java.nio.charset.Charset
 class RtlTcpChannelHandler : EventChannel.StreamHandler {
 
     private external fun startClientAsync(host: String, port: String)
-    private external fun pollMessages(): String
+    private external fun pollMessages(): ByteArray
     private external fun nativeStopClient()
     private external fun getSignalStrength(): Double
     private external fun isConnected(): Boolean 
@@ -92,20 +92,21 @@ class RtlTcpChannelHandler : EventChannel.StreamHandler {
                     0.0
                 }
 
-                val logs = try {
+                val logsBytes = try {
                     pollMessages()
                 } catch (e: Exception) {
                     android.util.Log.e("RTL-TCP", "pollMessages() failed", e)
-                    ""
+                    ByteArray(0)
                 }
 
-                val regex = "\\[MSG\\]\\s*(\\d+)\\|(-?\\d+)\\|(.*)".toRegex()
+                val regex = "\\[MSG\\]\\s*(\\d+)\\|(-?\\d+)\\|([^\\n]*)".toRegex()
 
-                android.util.Log.d("RTL-TCP", "poll: connected=$connected magsqRaw=$strength logsLen=${logs.length}")
-                if (logs.isNotEmpty()) {
-                    val preview = if (logs.length > 1000) logs.substring(0, 1000) + "..." else logs
-                    android.util.Log.d("RTL-TCP", "pollLogs: $preview")
+                if (logsBytes.isNotEmpty()) {
+                    val preview = if (logsBytes.size > 200) "${logsBytes.size} bytes" else logsBytes.contentToString()
+                    android.util.Log.d("RTL-TCP", "pollBytes: $preview")
                 }
+                
+                val logs = if (logsBytes.isNotEmpty()) String(logsBytes, Charsets.ISO_8859_1) else ""
 
                 if (connected != lastConnectedState) {
                     val statusMap = mutableMapOf<String, Any?>()
@@ -124,23 +125,12 @@ class RtlTcpChannelHandler : EventChannel.StreamHandler {
                         try {
                             val addr = match.groupValues[1]
                             val func = match.groupValues[2]
-                            val raw = match.groupValues[3]
-                            android.util.Log.d("RTL-TCP", "msg_match: addr=$addr func=$func raw_len=${raw.length}")
-
-                            val gbkBytes = raw.toByteArray(Charsets.ISO_8859_1)
-                            val utf8String = try {
-                                String(gbkBytes, Charset.forName("GBK"))
-                            } catch (e: Exception) {
-                                android.util.Log.e("RTL-TCP", "GBK decode failed", e)
-                                raw
-                            }
-
-                            android.util.Log.d("RTL-TCP", "msg_decoded: addr=$addr func=$func numeric=$utf8String")
+                            val content = match.groupValues[3]
 
                             val dataMap = mutableMapOf<String, Any?>()
                             dataMap["address"] = addr
                             dataMap["func"] = func
-                            dataMap["numeric"] = utf8String
+                            dataMap["numeric"] = content
                             dataMap["magsqRaw"] = strength
 
                             try {

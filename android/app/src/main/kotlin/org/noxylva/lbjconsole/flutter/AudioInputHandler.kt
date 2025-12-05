@@ -51,7 +51,7 @@ class AudioInputHandler(private val context: Context) : MethodChannel.MethodCall
     }
 
     private external fun nativePushAudio(data: ShortArray, size: Int)
-    private external fun pollMessages(): String
+    private external fun pollMessages(): ByteArray
     private external fun clearMessageBuffer()
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
@@ -93,7 +93,8 @@ class AudioInputHandler(private val context: Context) : MethodChannel.MethodCall
                 }
 
                 val recording = isRecording.get()
-                val logs = pollMessages()
+                val logsBytes = pollMessages()
+                val logs = if (logsBytes.isNotEmpty()) String(logsBytes, Charsets.ISO_8859_1) else ""
                 val regex = "\\[MSG\\]\\s*(\\d+)\\|(-?\\d+)\\|(.*)".toRegex()
 
                 val statusMap = mutableMapOf<String, Any?>()
@@ -106,10 +107,7 @@ class AudioInputHandler(private val context: Context) : MethodChannel.MethodCall
                             val dataMap = mutableMapOf<String, Any?>()
                             dataMap["address"] = match.groupValues[1]
                             dataMap["func"] = match.groupValues[2]
-
-                            val gbkBytes = match.groupValues[3].toByteArray(Charsets.ISO_8859_1)
-                            val utf8String = String(gbkBytes, Charset.forName("GBK"))
-                            dataMap["numeric"] = utf8String
+                            dataMap["numeric"] = match.groupValues[3]
 
                             eventSink?.success(dataMap)
                         } catch (e: Exception) {
