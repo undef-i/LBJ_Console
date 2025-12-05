@@ -250,7 +250,18 @@ void processBasebandSample(double sample)
     }
 
     double sample_val = filt - dc_offset;
-    double threshold = 0.05; 
+
+    static double peak_pos = 0.01;
+    static double peak_neg = -0.01;
+    
+    if (sample_val > peak_pos) peak_pos = sample_val;
+    else peak_pos *= 0.9999;
+    
+    if (sample_val < peak_neg) peak_neg = sample_val;
+    else peak_neg *= 0.9999;
+    
+    double threshold = (peak_pos - peak_neg) * 0.15;
+    if (threshold < 0.005) threshold = 0.005;
     
     if (sample_val > threshold) 
     {

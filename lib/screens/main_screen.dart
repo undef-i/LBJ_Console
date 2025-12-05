@@ -21,6 +21,7 @@ class _ConnectionStatusWidget extends StatefulWidget {
   final RtlTcpService rtlTcpService;
   final DateTime? lastReceivedTime;
   final DateTime? rtlTcpLastReceivedTime;
+  final DateTime? audioLastReceivedTime;
   final InputSource inputSource;
   final bool rtlTcpConnected;
 
@@ -29,6 +30,7 @@ class _ConnectionStatusWidget extends StatefulWidget {
     required this.rtlTcpService,
     required this.lastReceivedTime,
     required this.rtlTcpLastReceivedTime,
+    required this.audioLastReceivedTime,
     required this.inputSource,
     required this.rtlTcpConnected,
   });
@@ -92,7 +94,7 @@ class _ConnectionStatusWidgetState extends State<_ConnectionStatusWidget> {
         isConnected = AudioInputService().isListening;
         statusColor = isConnected ? Colors.green : Colors.red;
         statusText = isConnected ? '监听中' : '已停止';
-        displayTime = widget.rtlTcpLastReceivedTime ?? widget.lastReceivedTime;
+        displayTime = widget.audioLastReceivedTime;
         break;
       case InputSource.bluetooth:
         isConnected = _isConnected;
@@ -229,13 +231,17 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
   StreamSubscription? _connectionSubscription;
   StreamSubscription? _rtlTcpConnectionSubscription;
+  StreamSubscription? _audioConnectionSubscription;
   StreamSubscription? _dataSubscription;
   StreamSubscription? _rtlTcpDataSubscription;
+  StreamSubscription? _audioDataSubscription;
   StreamSubscription? _lastReceivedTimeSubscription;
   StreamSubscription? _rtlTcpLastReceivedTimeSubscription;
+  StreamSubscription? _audioLastReceivedTimeSubscription;
   StreamSubscription? _settingsSubscription;
   DateTime? _lastReceivedTime;
   DateTime? _rtlTcpLastReceivedTime;
+  DateTime? _audioLastReceivedTime;
   bool _isHistoryEditMode = false;
   
   InputSource _inputSource = InputSource.bluetooth;
@@ -277,11 +283,13 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     final sourceStr = settings?['inputSource'] as String? ?? 'bluetooth';
     
     if (mounted) {
+      final newSource = InputSource.values.firstWhere(
+        (e) => e.name == sourceStr,
+        orElse: () => InputSource.bluetooth,
+      );
+      
       setState(() {
-        _inputSource = InputSource.values.firstWhere(
-          (e) => e.name == sourceStr,
-          orElse: () => InputSource.bluetooth,
-        );
+        _inputSource = newSource;
         _rtlTcpConnected = _rtlTcpService.isConnected;
       });
       
@@ -324,6 +332,15 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         });
       }
     });
+    
+    _audioLastReceivedTimeSubscription =
+        AudioInputService().lastReceivedTimeStream.listen((time) {
+      if (mounted) {
+        setState(() {
+          _audioLastReceivedTime = time;
+        });
+      }
+    });
   }
 
   void _setupSettingsListener() {
@@ -331,13 +348,10 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         DatabaseService.instance.onSettingsChanged((settings) {
       if (mounted) {
         final sourceStr = settings['inputSource'] as String? ?? 'bluetooth';
-        print('[MainScreen] Settings changed: inputSource=$sourceStr');
         final newInputSource = InputSource.values.firstWhere(
           (e) => e.name == sourceStr,
           orElse: () => InputSource.bluetooth,
         );
-
-        print('[MainScreen] Current: $_inputSource, New: $newInputSource');
         
         setState(() {
           _inputSource = newInputSource;
@@ -348,7 +362,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
             setState(() {
               _rtlTcpConnected = _rtlTcpService.isConnected;
             });
-            print('[MainScreen] RTL-TCP mode, connected: $_rtlTcpConnected');
             break;
           case InputSource.audioInput:
             setState(() {});
@@ -385,6 +398,12 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         });
       }
     });
+    
+    _audioConnectionSubscription = AudioInputService().connectionStream.listen((listening) {
+      if (mounted) {
+        setState(() {});
+      }
+    });
   }
 
   Future<void> _connectToRtlTcp(String host, String port) async {
@@ -399,10 +418,13 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   void dispose() {
     _connectionSubscription?.cancel();
     _rtlTcpConnectionSubscription?.cancel();
+    _audioConnectionSubscription?.cancel();
     _dataSubscription?.cancel();
     _rtlTcpDataSubscription?.cancel();
+    _audioDataSubscription?.cancel();
     _lastReceivedTimeSubscription?.cancel();
     _rtlTcpLastReceivedTimeSubscription?.cancel();
+    _audioLastReceivedTimeSubscription?.cancel();
     _settingsSubscription?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
@@ -426,7 +448,13 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     });
 
     _rtlTcpDataSubscription = _rtlTcpService.dataStream.listen((record) {
-      if (_inputSource != InputSource.bluetooth) {
+      if (_inputSource == InputSource.rtlTcp) {
+        _processRecord(record);
+      }
+    });
+    
+    _audioDataSubscription = AudioInputService().dataStream.listen((record) {
+      if (_inputSource == InputSource.audioInput) {
         _processRecord(record);
       }
     });
@@ -503,6 +531,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                 rtlTcpService: _rtlTcpService,
                 lastReceivedTime: _lastReceivedTime,
                 rtlTcpLastReceivedTime: _rtlTcpLastReceivedTime,
+                audioLastReceivedTime: _audioLastReceivedTime,
                 inputSource: _inputSource,
                 rtlTcpConnected: _rtlTcpConnected,
               ),

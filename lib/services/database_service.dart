@@ -341,7 +341,10 @@ class DatabaseService {
       where: 'id = 1',
     );
     if (result > 0) {
-      _notifySettingsChanged(settings);
+      final currentSettings = await getAllSettings();
+      if (currentSettings != null) {
+        _notifySettingsChanged(currentSettings);
+      }
     }
     return result;
   }
@@ -447,7 +450,6 @@ class DatabaseService {
   }
 
   void _notifySettingsChanged(Map<String, dynamic> settings) {
-    print('[Database] Notifying ${_settingsListeners.length} settings listeners');
     for (final listener in _settingsListeners) {
       listener(settings);
     }

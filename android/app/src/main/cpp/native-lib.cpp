@@ -98,9 +98,6 @@ Java_org_noxylva_lbjconsole_flutter_AudioInputHandler_nativePushAudio(
 
     for (int i = 0; i < size; i++) {
         double sample = (double)samples[i] / 32768.0; 
-        
-        sample *= 5.0; 
-
         processBasebandSample(sample);
     }
 
@@ -125,6 +122,35 @@ Java_org_noxylva_lbjconsole_flutter_RtlTcpChannelHandler_getSignalStrength(JNIEn
 {
     return (jdouble)magsqRaw;
 }
+
+extern "C" JNIEXPORT void JNICALL
+Java_org_noxylva_lbjconsole_flutter_AudioInputHandler_clearMessageBuffer(JNIEnv *, jobject)
+{
+    std::lock_guard<std::mutex> demodLock(demodDataMutex);
+    std::lock_guard<std::mutex> msgLock(msgMutex);
+    messageBuffer.clear();
+    is_message_ready = false;
+    numeric_msg.clear();
+    alpha_msg.clear();
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_org_noxylva_lbjconsole_flutter_AudioInputHandler_pollMessages(JNIEnv *env, jobject)
+{
+    std::lock_guard<std::mutex> demodLock(demodDataMutex);
+    std::lock_guard<std::mutex> msgLock(msgMutex);
+
+    if (messageBuffer.empty())
+    {
+        return env->NewStringUTF("");
+    }
+    std::ostringstream ss;
+    for (auto &msg : messageBuffer)
+        ss << msg << "\n";
+    messageBuffer.clear();
+    return env->NewStringUTF(ss.str().c_str());
+}
+
 extern "C" JNIEXPORT jboolean JNICALL
 Java_org_noxylva_lbjconsole_flutter_RtlTcpChannelHandler_isConnected(JNIEnv *, jobject)
 {

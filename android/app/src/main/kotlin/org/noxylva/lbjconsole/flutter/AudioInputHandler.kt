@@ -6,14 +6,18 @@ import android.content.pm.PackageManager
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import androidx.core.content.ContextCompat
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
+import io.flutter.plugin.common.EventChannel
 import java.util.concurrent.atomic.AtomicBoolean
+import java.nio.charset.Charset
 
-class AudioInputHandler(private val context: Context) : MethodChannel.MethodCallHandler {
+class AudioInputHandler(private val context: Context) : MethodChannel.MethodCallHandler, EventChannel.StreamHandler {
     private var audioRecord: AudioRecord? = null
     private val isRecording = AtomicBoolean(false)
     private var recordingThread: Thread? = null
@@ -25,21 +29,35 @@ class AudioInputHandler(private val context: Context) : MethodChannel.MethodCall
         AudioFormat.ENCODING_PCM_16BIT
     ) * 2
 
+    private val handler = Handler(Looper.getMainLooper())
+    private var eventSink: EventChannel.EventSink? = null
+
     companion object {
-        private const val CHANNEL = "org.noxylva.lbjconsole/audio_input"
+        private const val METHOD_CHANNEL = "org.noxylva.lbjconsole/audio_input"
+        private const val EVENT_CHANNEL = "org.noxylva.lbjconsole/audio_input_event"
         private const val TAG = "AudioInputHandler"
 
+        init {
+            System.loadLibrary("railwaypagerdemod")
+        }
+
         fun registerWith(flutterEngine: FlutterEngine, context: Context) {
-            val channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
-            channel.setMethodCallHandler(AudioInputHandler(context))
+            val handler = AudioInputHandler(context)
+            val methodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, METHOD_CHANNEL)
+            methodChannel.setMethodCallHandler(handler)
+            val eventChannel = EventChannel(flutterEngine.dartExecutor.binaryMessenger, EVENT_CHANNEL)
+            eventChannel.setStreamHandler(handler)
         }
     }
 
     private external fun nativePushAudio(data: ShortArray, size: Int)
+    private external fun pollMessages(): String
+    private external fun clearMessageBuffer()
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
             "start" -> {
+                clearMessageBuffer()
                 if (startRecording()) {
                     result.success(null)
                 } else {
@@ -48,10 +66,61 @@ class AudioInputHandler(private val context: Context) : MethodChannel.MethodCall
             }
             "stop" -> {
                 stopRecording()
+                clearMessageBuffer()
                 result.success(null)
             }
             else -> result.notImplemented()
         }
+    }
+
+    override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+        Log.d(TAG, "EventChannel onListen")
+        this.eventSink = events
+        startPolling()
+    }
+
+    override fun onCancel(arguments: Any?) {
+        Log.d(TAG, "EventChannel onCancel")
+        handler.removeCallbacksAndMessages(null)
+        this.eventSink = null
+    }
+
+    private fun startPolling() {
+        handler.post(object : Runnable {
+            override fun run() {
+                if (eventSink == null) {
+                    return
+                }
+
+                val recording = isRecording.get()
+                val logs = pollMessages()
+                val regex = "\\[MSG\\]\\s*(\\d+)\\|(-?\\d+)\\|(.*)".toRegex()
+
+                val statusMap = mutableMapOf<String, Any?>()
+                statusMap["listening"] = recording
+                eventSink?.success(statusMap)
+
+                if (logs.isNotEmpty()) {
+                    regex.findAll(logs).forEach { match ->
+                        try {
+                            val dataMap = mutableMapOf<String, Any?>()
+                            dataMap["address"] = match.groupValues[1]
+                            dataMap["func"] = match.groupValues[2]
+
+                            val gbkBytes = match.groupValues[3].toByteArray(Charsets.ISO_8859_1)
+                            val utf8String = String(gbkBytes, Charset.forName("GBK"))
+                            dataMap["numeric"] = utf8String
+
+                            eventSink?.success(dataMap)
+                        } catch (e: Exception) {
+                            Log.e(TAG, "decode_fail", e)
+                        }
+                    }
+                }
+
+                handler.postDelayed(this, 200)
+            }
+        })
     }
 
     private fun startRecording(): Boolean {

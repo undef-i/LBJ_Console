@@ -29,6 +29,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late TextEditingController _rtlTcpHostController;
   late TextEditingController _rtlTcpPortController;
 
+  bool _settingsLoaded = false;
+  
   String _deviceName = '';
   bool _backgroundServiceEnabled = false;
   bool _notificationsEnabled = true;
@@ -83,11 +85,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
           (e) => e.name == sourceStr,
           orElse: () => InputSource.bluetooth,
         );
+        
+        _settingsLoaded = true;
       });
     }
   }
 
   Future<void> _saveSettings() async {
+    if (!_settingsLoaded) return;
+    
     await _databaseService.updateSettings({
       'deviceName': _deviceName,
       'backgroundServiceEnabled': _backgroundServiceEnabled ? 1 : 0,
@@ -667,7 +673,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             _buildActionButton(
               icon: Icons.share,
               title: '分享数据',
-              subtitle: '将记录分享为JSON文件',
+              subtitle: '将记录分享为 JSON 文件',
               onTap: _shareData,
             ),
             const SizedBox(height: 12),
