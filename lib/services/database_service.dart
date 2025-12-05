@@ -4,8 +4,15 @@ import 'package:path/path.dart';
 import 'package:path_provider/path_provider.dart';
 import 'dart:io';
 import 'dart:convert';
+import 'dart:developer' as developer;
 
 import 'package:lbjconsole/models/train_record.dart';
+
+enum InputSource {
+  bluetooth,
+  rtlTcp,
+  audioInput
+}
 
 class DatabaseService {
   static final DatabaseService instance = DatabaseService._internal();
@@ -13,7 +20,7 @@ class DatabaseService {
   DatabaseService._internal();
 
   static const String _databaseName = 'train_database';
-  static const _databaseVersion = 8;
+  static const _databaseVersion = 9;
 
   static const String trainRecordsTable = 'train_records';
   static const String appSettingsTable = 'app_settings';
@@ -63,6 +70,8 @@ class DatabaseService {
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    developer.log('Database upgrading from $oldVersion to $newVersion', name: 'Database');
+
     if (oldVersion < 2) {
       await db.execute(
           'ALTER TABLE $appSettingsTable ADD COLUMN hideTimeOnlyRecords INTEGER NOT NULL DEFAULT 0');
@@ -96,6 +105,27 @@ class DatabaseService {
           'ALTER TABLE $appSettingsTable ADD COLUMN rtlTcpHost TEXT NOT NULL DEFAULT "127.0.0.1"');
       await db.execute(
           'ALTER TABLE $appSettingsTable ADD COLUMN rtlTcpPort TEXT NOT NULL DEFAULT "14423"');
+    }
+    if (oldVersion < 9) {
+      await db.execute(
+          'ALTER TABLE $appSettingsTable ADD COLUMN inputSource TEXT NOT NULL DEFAULT "bluetooth"');
+      
+      try {
+        final List<Map<String, dynamic>> results = await db.query(appSettingsTable, columns: ['rtlTcpEnabled'], where: 'id = 1');
+        if (results.isNotEmpty) {
+          final int rtlTcpEnabled = results.first['rtlTcpEnabled'] as int? ?? 0;
+          if (rtlTcpEnabled == 1) {
+            await db.update(
+              appSettingsTable, 
+              {'inputSource': 'rtlTcp'},
+              where: 'id = 1'
+            );
+            developer.log('Migrated V8 settings: inputSource set to rtlTcp', name: 'Database');
+          }
+        }
+      } catch (e) {
+        developer.log('Migration V8->V9 data update failed: $e', name: 'Database');
+      }
     }
   }
 
@@ -150,7 +180,8 @@ class DatabaseService {
         mapSettingsTimestamp INTEGER,
         rtlTcpEnabled INTEGER NOT NULL DEFAULT 0,
         rtlTcpHost TEXT NOT NULL DEFAULT '127.0.0.1',
-        rtlTcpPort TEXT NOT NULL DEFAULT '14423'
+        rtlTcpPort TEXT NOT NULL DEFAULT '14423',
+        inputSource TEXT NOT NULL DEFAULT 'bluetooth'
       )
     ''');
 
@@ -177,11 +208,12 @@ class DatabaseService {
       'groupBy': 'trainAndLoco',
       'timeWindow': 'unlimited',
       'mapTimeFilter': 'unlimited',
-        'hideUngroupableRecords': 0,
-        'mapSettingsTimestamp': null,
-        'rtlTcpEnabled': 0,
-        'rtlTcpHost': '127.0.0.1',
-        'rtlTcpPort': '14423',
+      'hideUngroupableRecords': 0,
+      'mapSettingsTimestamp': null,
+      'rtlTcpEnabled': 0,
+      'rtlTcpHost': '127.0.0.1',
+      'rtlTcpPort': '14423',
+      'inputSource': 'bluetooth',
     });
   }
 
@@ -409,14 +441,13 @@ class DatabaseService {
   StreamSubscription<void> onSettingsChanged(
       Function(Map<String, dynamic>) listener) {
     _settingsListeners.add(listener);
-    return Stream.value(null).listen((_) {})
-      ..onData((_) {})
-      ..onDone(() {
-        _settingsListeners.remove(listener);
-      });
+    return _SettingsListenerSubscription(() {
+      _settingsListeners.remove(listener);
+    });
   }
 
   void _notifySettingsChanged(Map<String, dynamic> settings) {
+    print('[Database] Notifying ${_settingsListeners.length} settings listeners');
     for (final listener in _settingsListeners) {
       listener(settings);
     }
@@ -498,4 +529,40 @@ class DatabaseService {
       return false;
     }
   }
+}
+
+class _SettingsListenerSubscription implements StreamSubscription<void> {
+  final void Function() _onCancel;
+  bool _isCanceled = false;
+
+  _SettingsListenerSubscription(this._onCancel);
+
+  @override
+  Future<void> cancel() async {
+    if (!_isCanceled) {
+      _isCanceled = true;
+      _onCancel();
+    }
+  }
+
+  @override
+  void onData(void Function(void data)? handleData) {}
+
+  @override
+  void onDone(void Function()? handleDone) {}
+
+  @override
+  void onError(Function? handleError) {}
+
+  @override
+  void pause([Future<void>? resumeSignal]) {}
+
+  @override
+  void resume() {}
+
+  @override
+  bool get isPaused => false;
+
+  @override
+  Future<E> asFuture<E>([E? futureValue]) => Future.value(futureValue);
 }

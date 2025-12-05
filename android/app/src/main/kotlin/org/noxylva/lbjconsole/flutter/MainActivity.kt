@@ -7,5 +7,6 @@ class MainActivity: FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         RtlTcpChannelHandler.registerWith(flutterEngine)
+        AudioInputHandler.registerWith(flutterEngine, applicationContext)
     }
 }

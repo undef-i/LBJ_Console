@@ -7,11 +7,25 @@ allprojects {
 }
 
 rootProject.buildDir = "../build"
+
 subprojects {
     project.buildDir = "${rootProject.buildDir}/${project.name}"
 }
+
 subprojects {
     project.evaluationDependsOn(":app")
+}
+
+subprojects {
+    if (project.name != "app") {
+        project.afterEvaluate {
+            if (project.hasProperty("android")) {
+                project.android {
+                    compileSdk 36
+                }
+            }
+        }
+    }
 }
 
 tasks.register("clean", Delete) {

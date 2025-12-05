@@ -5,6 +5,8 @@ import 'dart:io';
 import 'package:lbjconsole/models/merged_record.dart';
 import 'package:lbjconsole/services/database_service.dart';
 import 'package:lbjconsole/services/background_service.dart';
+import 'package:lbjconsole/services/audio_input_service.dart';
+import 'package:lbjconsole/services/rtl_tcp_service.dart';
 import 'package:lbjconsole/themes/app_theme.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -37,7 +39,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   GroupBy _groupBy = GroupBy.trainAndLoco;
   TimeWindow _timeWindow = TimeWindow.unlimited;
   String _mapType = 'map';
-  bool _rtlTcpEnabled = false;
+
+  InputSource _inputSource = InputSource.bluetooth;
+
   String _rtlTcpHost = '127.0.0.1';
   String _rtlTcpPort = '14423';
 
@@ -50,131 +54,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _rtlTcpPortController = TextEditingController();
     _loadSettings();
     _loadRecordCount();
-  }
-
-  Widget _buildRtlTcpSettings() {
-    return Card(
-      color: AppTheme.tertiaryBlack,
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16.0),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(20.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.wifi,
-                    color: Theme.of(context).colorScheme.primary),
-                const SizedBox(width: 12),
-                const Text('RTL-TCP 源', style: AppTheme.titleMedium),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('启用 RTL-TCP 源', style: AppTheme.bodyLarge),
-                  ],
-                ),
-                Switch(
-                  value: _rtlTcpEnabled,
-                  onChanged: (value) {
-                    setState(() {
-                      _rtlTcpEnabled = value;
-                    });
-                    _saveSettings();
-                  },
-                  activeThumbColor: Theme.of(context).colorScheme.primary,
-                ),
-              ],
-            ),
-            Visibility(
-              visible: _rtlTcpEnabled,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const SizedBox(height: 16),
-                  TextField(
-                    decoration: InputDecoration(
-                      labelText: '服务器地址',
-                      hintText: '输入RTL-TCP服务器地址',
-                      labelStyle: const TextStyle(color: Colors.white70),
-                      hintStyle: const TextStyle(color: Colors.white54),
-                      border: OutlineInputBorder(
-                        borderSide: const BorderSide(color: Colors.white54),
-                        borderRadius: BorderRadius.circular(12.0),
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderSide: const BorderSide(color: Colors.white54),
-                        borderRadius: BorderRadius.circular(12.0),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderSide:
-                            BorderSide(color: Theme.of(context).colorScheme.primary),
-                        borderRadius: BorderRadius.circular(12.0),
-                      ),
-                    ),
-                    style: const TextStyle(color: Colors.white),
-                    controller: _rtlTcpHostController,
-                    onChanged: (value) {
-                      setState(() {
-                        _rtlTcpHost = value;
-                      });
-                      _saveSettings();
-                    },
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    decoration: InputDecoration(
-                      labelText: '服务器端口',
-                      hintText: '输入RTL-TCP服务器端口',
-                      labelStyle: const TextStyle(color: Colors.white70),
-                      hintStyle: const TextStyle(color: Colors.white54),
-                      border: OutlineInputBorder(
-                        borderSide: const BorderSide(color: Colors.white54),
-                        borderRadius: BorderRadius.circular(12.0),
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderSide: const BorderSide(color: Colors.white54),
-                        borderRadius: BorderRadius.circular(12.0),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderSide:
-                            BorderSide(color: Theme.of(context).colorScheme.primary),
-                        borderRadius: BorderRadius.circular(12.0),
-                      ),
-                    ),
-                    style: const TextStyle(color: Colors.white),
-                    controller: _rtlTcpPortController,
-                    keyboardType: TextInputType.number,
-                    onChanged: (value) {
-                      setState(() {
-                        _rtlTcpPort = value;
-                      });
-                      _saveSettings();
-                    },
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  @override
-  void dispose() {
-    _deviceNameController.dispose();
-    _rtlTcpHostController.dispose();
-    _rtlTcpPortController.dispose();
-    super.dispose();
   }
 
   Future<void> _loadSettings() async {
@@ -193,20 +72,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _groupBy = settings.groupBy;
         _timeWindow = settings.timeWindow;
         _mapType = settingsMap['mapType']?.toString() ?? 'webview';
-        _rtlTcpEnabled = (settingsMap['rtlTcpEnabled'] ?? 0) == 1;
+
         _rtlTcpHost = settingsMap['rtlTcpHost']?.toString() ?? '127.0.0.1';
         _rtlTcpPort = settingsMap['rtlTcpPort']?.toString() ?? '14423';
         _rtlTcpHostController.text = _rtlTcpHost;
         _rtlTcpPortController.text = _rtlTcpPort;
-      });
-    }
-  }
 
-  Future<void> _loadRecordCount() async {
-    final count = await _databaseService.getRecordCount();
-    if (mounted) {
-      setState(() {
-        _recordCount = count;
+        final sourceStr = settingsMap['inputSource'] as String? ?? 'bluetooth';
+        _inputSource = InputSource.values.firstWhere(
+          (e) => e.name == sourceStr,
+          orElse: () => InputSource.bluetooth,
+        );
       });
     }
   }
@@ -222,37 +98,43 @@ class _SettingsScreenState extends State<SettingsScreen> {
       'groupBy': _groupBy.name,
       'timeWindow': _timeWindow.name,
       'mapType': _mapType,
-      'rtlTcpEnabled': _rtlTcpEnabled ? 1 : 0,
+      'inputSource': _inputSource.name,
       'rtlTcpHost': _rtlTcpHost,
       'rtlTcpPort': _rtlTcpPort,
     });
     widget.onSettingsChanged?.call();
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(20.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _buildBluetoothSettings(),
-          const SizedBox(height: 20),
-          _buildAppSettings(),
-          const SizedBox(height: 20),
-          _buildRtlTcpSettings(),
-          const SizedBox(height: 20),
-          _buildMergeSettings(),
-          const SizedBox(height: 20),
-          _buildDataManagement(),
-          const SizedBox(height: 20),
-          _buildAboutSection(),
-        ],
-      ),
-    );
+  Future<void> _switchInputSource(InputSource newSource) async {
+    await AudioInputService().stopListening();
+    await RtlTcpService().disconnect();
+    setState(() {
+      _inputSource = newSource;
+    });
+
+    switch (newSource) {
+      case InputSource.audioInput:
+        await AudioInputService().startListening();
+        break;
+      case InputSource.rtlTcp:
+        RtlTcpService().connect(host: _rtlTcpHost, port: _rtlTcpPort);
+        break;
+      case InputSource.bluetooth:
+        break;
+    }
+
+    _saveSettings();
   }
 
-  Widget _buildBluetoothSettings() {
+  @override
+  void dispose() {
+    _deviceNameController.dispose();
+    _rtlTcpHostController.dispose();
+    _rtlTcpPortController.dispose();
+    super.dispose();
+  }
+
+  Widget _buildInputSourceSettings() {
     return Card(
       color: AppTheme.tertiaryBlack,
       elevation: 0,
@@ -266,44 +148,209 @@ class _SettingsScreenState extends State<SettingsScreen> {
           children: [
             Row(
               children: [
-                Icon(Icons.bluetooth,
-                    color: Theme.of(context).colorScheme.primary),
+                Icon(Icons.input, color: Theme.of(context).colorScheme.primary),
                 const SizedBox(width: 12),
-                const Text('蓝牙设备', style: AppTheme.titleMedium),
+                const Text('信号源设置', style: AppTheme.titleMedium),
               ],
             ),
             const SizedBox(height: 16),
-            TextField(
-              controller: _deviceNameController,
-              decoration: InputDecoration(
-                labelText: '设备名称',
-                hintText: '输入设备名称',
-                labelStyle: const TextStyle(color: Colors.white70),
-                hintStyle: const TextStyle(color: Colors.white54),
-                border: OutlineInputBorder(
-                  borderSide: const BorderSide(color: Colors.white54),
-                  borderRadius: BorderRadius.circular(12.0),
+
+
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('信号源', style: AppTheme.bodyLarge),
+                DropdownButton<InputSource>(
+                  value: _inputSource,
+                  items: const [
+                    DropdownMenuItem(
+                      value: InputSource.bluetooth,
+                      child: Text('蓝牙设备', style: AppTheme.bodyMedium),
+                    ),
+                    DropdownMenuItem(
+                      value: InputSource.rtlTcp,
+                      child: Text('RTL-TCP', style: AppTheme.bodyMedium),
+                    ),
+                    DropdownMenuItem(
+                      value: InputSource.audioInput,
+                      child: Text('音频输入', style: AppTheme.bodyMedium),
+                    ),
+                  ],
+                  onChanged: (value) {
+                    if (value != null) {
+                      _switchInputSource(value);
+                    }
+                  },
+                  dropdownColor: AppTheme.secondaryBlack,
+                  style: AppTheme.bodyMedium,
+                  underline: Container(height: 0),
                 ),
-                enabledBorder: OutlineInputBorder(
-                  borderSide: const BorderSide(color: Colors.white54),
-                  borderRadius: BorderRadius.circular(12.0),
+              ],
+            ),
+
+            if (_inputSource == InputSource.bluetooth) ...[
+              const SizedBox(height: 16),
+              TextField(
+                controller: _deviceNameController,
+                decoration: InputDecoration(
+                  labelText: '蓝牙设备名称',
+                  hintText: '输入设备名称',
+                  labelStyle: const TextStyle(color: Colors.white70),
+                  hintStyle: const TextStyle(color: Colors.white54),
+                  border: OutlineInputBorder(
+                    borderSide: const BorderSide(color: Colors.white54),
+                    borderRadius: BorderRadius.circular(12.0),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderSide: const BorderSide(color: Colors.white54),
+                    borderRadius: BorderRadius.circular(12.0),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderSide: BorderSide(
+                        color: Theme.of(context).colorScheme.primary),
+                    borderRadius: BorderRadius.circular(12.0),
+                  ),
                 ),
-                focusedBorder: OutlineInputBorder(
-                  borderSide:
-                      BorderSide(color: Theme.of(context).colorScheme.primary),
-                  borderRadius: BorderRadius.circular(12.0),
+                style: const TextStyle(color: Colors.white),
+                onChanged: (value) {
+                  setState(() {
+                    _deviceName = value;
+                  });
+                  _saveSettings();
+                },
+              ),
+            ],
+
+            if (_inputSource == InputSource.rtlTcp) ...[
+              const SizedBox(height: 16),
+              TextField(
+                decoration: InputDecoration(
+                  labelText: '服务器地址',
+                  hintText: '127.0.0.1',
+                  labelStyle: const TextStyle(color: Colors.white70),
+                  hintStyle: const TextStyle(color: Colors.white54),
+                  border: OutlineInputBorder(
+                    borderSide: const BorderSide(color: Colors.white54),
+                    borderRadius: BorderRadius.circular(12.0),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderSide: const BorderSide(color: Colors.white54),
+                    borderRadius: BorderRadius.circular(12.0),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderSide: BorderSide(
+                        color: Theme.of(context).colorScheme.primary),
+                    borderRadius: BorderRadius.circular(12.0),
+                  ),
+                ),
+                style: const TextStyle(color: Colors.white),
+                controller: _rtlTcpHostController,
+                onChanged: (value) {
+                  setState(() {
+                    _rtlTcpHost = value;
+                  });
+                  _saveSettings();
+                },
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                decoration: InputDecoration(
+                  labelText: '服务器端口',
+                  hintText: '14423',
+                  labelStyle: const TextStyle(color: Colors.white70),
+                  hintStyle: const TextStyle(color: Colors.white54),
+                  border: OutlineInputBorder(
+                    borderSide: const BorderSide(color: Colors.white54),
+                    borderRadius: BorderRadius.circular(12.0),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderSide: const BorderSide(color: Colors.white54),
+                    borderRadius: BorderRadius.circular(12.0),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderSide: BorderSide(
+                        color: Theme.of(context).colorScheme.primary),
+                    borderRadius: BorderRadius.circular(12.0),
+                  ),
+                ),
+                style: const TextStyle(color: Colors.white),
+                controller: _rtlTcpPortController,
+                keyboardType: TextInputType.number,
+                onChanged: (value) {
+                  setState(() {
+                    _rtlTcpPort = value;
+                  });
+                  _saveSettings();
+                },
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: () {
+                    RtlTcpService()
+                        .connect(host: _rtlTcpHost, port: _rtlTcpPort);
+                  },
+                  icon: const Icon(Icons.refresh),
+                  label: const Text("重新连接 RTL-TCP"),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.secondaryBlack,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                ),
+              )
+            ],
+
+            if (_inputSource == InputSource.audioInput) ...[
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.blue.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.blue.withOpacity(0.3)),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.mic, color: Colors.blue),
+                    SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        '音频解调已启用。请通过音频线 (Line-in) 或麦克风输入信号。',
+                        style: TextStyle(color: Colors.white70, fontSize: 13),
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              style: const TextStyle(color: Colors.white),
-              onChanged: (value) {
-                setState(() {
-                  _deviceName = value;
-                });
-                _saveSettings();
-              },
-            ),
+            ],
           ],
         ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(20.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildInputSourceSettings(),
+          const SizedBox(height: 20),
+          _buildAppSettings(),
+          const SizedBox(height: 20),
+          _buildMergeSettings(),
+          const SizedBox(height: 20),
+          _buildDataManagement(),
+          const SizedBox(height: 20),
+          _buildAboutSection(),
+        ],
       ),
     );
   }
@@ -490,86 +537,80 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const SizedBox(height: 16),
-                  const Text('分组方式', style: AppTheme.bodyLarge),
-                  const SizedBox(height: 8),
-                  DropdownButtonFormField<GroupBy>(
-                    initialValue: _groupBy,
-                    items: const [
-                      DropdownMenuItem(
-                          value: GroupBy.trainOnly,
-                          child: Text('仅车次号', style: AppTheme.bodyMedium)),
-                      DropdownMenuItem(
-                          value: GroupBy.locoOnly,
-                          child: Text('仅机车号', style: AppTheme.bodyMedium)),
-                      DropdownMenuItem(
-                          value: GroupBy.trainOrLoco,
-                          child: Text('车次号或机车号', style: AppTheme.bodyMedium)),
-                      DropdownMenuItem(
-                          value: GroupBy.trainAndLoco,
-                          child: Text('车次号与机车号', style: AppTheme.bodyMedium)),
-                    ],
-                    onChanged: (value) {
-                      if (value != null) {
-                        setState(() {
-                          _groupBy = value;
-                        });
-                        _saveSettings();
-                      }
-                    },
-                    decoration: InputDecoration(
-                      filled: true,
-                      fillColor: AppTheme.secondaryBlack,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12.0),
-                        borderSide: BorderSide.none,
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('分组方式', style: AppTheme.bodyLarge),
+                      DropdownButton<GroupBy>(
+                        value: _groupBy,
+                        items: const [
+                          DropdownMenuItem(
+                              value: GroupBy.trainOnly,
+                              child: Text('仅车次号', style: AppTheme.bodyMedium)),
+                          DropdownMenuItem(
+                              value: GroupBy.locoOnly,
+                              child: Text('仅机车号', style: AppTheme.bodyMedium)),
+                          DropdownMenuItem(
+                              value: GroupBy.trainOrLoco,
+                              child: Text('车次号或机车号', style: AppTheme.bodyMedium)),
+                          DropdownMenuItem(
+                              value: GroupBy.trainAndLoco,
+                              child: Text('车次号与机车号', style: AppTheme.bodyMedium)),
+                        ],
+                        onChanged: (value) {
+                          if (value != null) {
+                            setState(() {
+                              _groupBy = value;
+                            });
+                            _saveSettings();
+                          }
+                        },
+                        dropdownColor: AppTheme.secondaryBlack,
+                        style: AppTheme.bodyMedium,
+                        underline: Container(height: 0),
                       ),
-                    ),
-                    dropdownColor: AppTheme.secondaryBlack,
-                    style: AppTheme.bodyMedium,
+                    ],
                   ),
                   const SizedBox(height: 16),
-                  const Text('时间窗口', style: AppTheme.bodyLarge),
-                  const SizedBox(height: 8),
-                  DropdownButtonFormField<TimeWindow>(
-                    initialValue: _timeWindow,
-                    items: const [
-                      DropdownMenuItem(
-                          value: TimeWindow.oneHour,
-                          child: Text('1小时内', style: AppTheme.bodyMedium)),
-                      DropdownMenuItem(
-                          value: TimeWindow.twoHours,
-                          child: Text('2小时内', style: AppTheme.bodyMedium)),
-                      DropdownMenuItem(
-                          value: TimeWindow.sixHours,
-                          child: Text('6小时内', style: AppTheme.bodyMedium)),
-                      DropdownMenuItem(
-                          value: TimeWindow.twelveHours,
-                          child: Text('12小时内', style: AppTheme.bodyMedium)),
-                      DropdownMenuItem(
-                          value: TimeWindow.oneDay,
-                          child: Text('24小时内', style: AppTheme.bodyMedium)),
-                      DropdownMenuItem(
-                          value: TimeWindow.unlimited,
-                          child: Text('不限时间', style: AppTheme.bodyMedium)),
-                    ],
-                    onChanged: (value) {
-                      if (value != null) {
-                        setState(() {
-                          _timeWindow = value;
-                        });
-                        _saveSettings();
-                      }
-                    },
-                    decoration: InputDecoration(
-                      filled: true,
-                      fillColor: AppTheme.secondaryBlack,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12.0),
-                        borderSide: BorderSide.none,
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('时间窗口', style: AppTheme.bodyLarge),
+                      DropdownButton<TimeWindow>(
+                        value: _timeWindow,
+                        items: const [
+                          DropdownMenuItem(
+                              value: TimeWindow.oneHour,
+                              child: Text('1小时内', style: AppTheme.bodyMedium)),
+                          DropdownMenuItem(
+                              value: TimeWindow.twoHours,
+                              child: Text('2小时内', style: AppTheme.bodyMedium)),
+                          DropdownMenuItem(
+                              value: TimeWindow.sixHours,
+                              child: Text('6小时内', style: AppTheme.bodyMedium)),
+                          DropdownMenuItem(
+                              value: TimeWindow.twelveHours,
+                              child: Text('12小时内', style: AppTheme.bodyMedium)),
+                          DropdownMenuItem(
+                              value: TimeWindow.oneDay,
+                              child: Text('24小时内', style: AppTheme.bodyMedium)),
+                          DropdownMenuItem(
+                              value: TimeWindow.unlimited,
+                              child: Text('不限时间', style: AppTheme.bodyMedium)),
+                        ],
+                        onChanged: (value) {
+                          if (value != null) {
+                            setState(() {
+                              _timeWindow = value;
+                            });
+                            _saveSettings();
+                          }
+                        },
+                        dropdownColor: AppTheme.secondaryBlack,
+                        style: AppTheme.bodyMedium,
+                        underline: Container(height: 0),
                       ),
-                    ),
-                    dropdownColor: AppTheme.secondaryBlack,
-                    style: AppTheme.bodyMedium,
+                    ],
                   ),
                   const SizedBox(height: 16),
                   Row(
@@ -712,15 +753,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  String _formatFileSize(int bytes) {
-    if (bytes < 1024) return '$bytes B';
-    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
-    return '${(bytes / 1024 / 1024).toStringAsFixed(1)} MB';
-  }
-
-  String _formatDateTime(DateTime dateTime) {
-    return '${dateTime.year}-${dateTime.month.toString().padLeft(2, '0')}-${dateTime.day.toString().padLeft(2, '0')} '
-        '${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
+  Future<void> _loadRecordCount() async {
+    final count = await _databaseService.getRecordCount();
+    if (mounted) {
+      setState(() {
+        _recordCount = count;
+      });
+    }
   }
 
   Future<String> _getAppVersion() async {
@@ -910,6 +949,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         'mergeRecordsEnabled': 0,
         'groupBy': 'trainAndLoco',
         'timeWindow': 'unlimited',
+        'inputSource': 'bluetooth',
       });
 
       Navigator.pop(context);

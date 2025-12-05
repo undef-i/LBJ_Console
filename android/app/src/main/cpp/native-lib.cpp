@@ -8,6 +8,8 @@
 #include <chrono>
 #include <unistd.h>
 #include <arpa/inet.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
 #include <fcntl.h>
 #include <android/log.h>
 #include <errno.h>
@@ -82,6 +84,40 @@ Java_org_noxylva_lbjconsole_flutter_RtlTcpChannelHandler_startClientAsync(
     workerThread.detach();
     env->ReleaseStringUTFChars(host_, host);
     env->ReleaseStringUTFChars(port_, portStr);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_org_noxylva_lbjconsole_flutter_AudioInputHandler_nativePushAudio(
+        JNIEnv *env, jobject thiz, jshortArray audioData, jint size) {
+    
+    ensureDSPInitialized();
+
+    jshort *samples = env->GetShortArrayElements(audioData, NULL);
+    
+    std::lock_guard<std::mutex> demodLock(demodDataMutex);
+
+    for (int i = 0; i < size; i++) {
+        double sample = (double)samples[i] / 32768.0; 
+        
+        sample *= 5.0; 
+
+        processBasebandSample(sample);
+    }
+
+    env->ReleaseShortArrayElements(audioData, samples, 0);
+    
+    if (is_message_ready) {
+        std::ostringstream ss;
+        std::lock_guard<std::mutex> msgLock(msgMutex);
+
+        std::string message_content = alpha_msg.empty() ? numeric_msg : alpha_msg;
+        ss << "[MSG]" << address << "|" << function_bits << "|" << message_content;
+        messageBuffer.push_back(ss.str());
+
+        is_message_ready = false;
+        numeric_msg.clear();
+        alpha_msg.clear();
+    }
 }
 
 extern "C" JNIEXPORT jdouble JNICALL
@@ -171,8 +207,8 @@ void clientThread(std::string host, int port)
         goto cleanup;
     }
 
-    lowpassBaud.create(301, SAMPLE_RATE, BAUD_RATE * 5.0f);
-    phaseDiscri.setFMScaling(SAMPLE_RATE / (2.0f * DEVIATION));
+    ensureDSPInitialized();
+    
     sockfd_atomic.store(localSockfd);
     {
         std::lock_guard<std::mutex> lock(msgMutex);

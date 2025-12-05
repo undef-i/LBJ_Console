@@ -34,6 +34,8 @@ extern Lowpass<double> lowpassBaud;
 extern MovingAverageUtil<double, double, 2048> preambleMovingAverage;
 extern double magsqRaw;
 
+void ensureDSPInitialized();
 void processOneSample(int8_t i, int8_t q);
+void processBasebandSample(double sample);
 
 #endif
