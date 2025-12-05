@@ -61,6 +61,7 @@ class RtlTcpChannelHandler : EventChannel.StreamHandler {
     override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
         android.util.Log.d("RTL-TCP", "evt_listen")
         this.eventSink = events
+        lastConnectedState = true
         startPolling() 
     }
 
@@ -77,40 +78,82 @@ class RtlTcpChannelHandler : EventChannel.StreamHandler {
                     android.util.Log.w("RTL-TCP", "evt_null");
                     return;
                 }
-            
-                val connected = isConnected()
-                val strength = getSignalStrength() 
-                val logs = pollMessages()
-                val regex = "\\[MSG\\]\\s*(\\d+)\\|(-?\\d+)\\|(.*)".toRegex() 
+                val connected = try {
+                    isConnected()
+                } catch (e: Exception) {
+                    android.util.Log.e("RTL-TCP", "isConnected() failed", e)
+                    false
+                }
 
-                if (connected != lastConnectedState || connected) {
+                val strength = try {
+                    getSignalStrength()
+                } catch (e: Exception) {
+                    android.util.Log.e("RTL-TCP", "getSignalStrength() failed", e)
+                    0.0
+                }
+
+                val logs = try {
+                    pollMessages()
+                } catch (e: Exception) {
+                    android.util.Log.e("RTL-TCP", "pollMessages() failed", e)
+                    ""
+                }
+
+                val regex = "\\[MSG\\]\\s*(\\d+)\\|(-?\\d+)\\|(.*)".toRegex()
+
+                android.util.Log.d("RTL-TCP", "poll: connected=$connected magsqRaw=$strength logsLen=${logs.length}")
+                if (logs.isNotEmpty()) {
+                    val preview = if (logs.length > 1000) logs.substring(0, 1000) + "..." else logs
+                    android.util.Log.d("RTL-TCP", "pollLogs: $preview")
+                }
+
+                if (connected != lastConnectedState) {
                     val statusMap = mutableMapOf<String, Any?>()
                     statusMap["connected"] = connected
                     statusMap["magsqRaw"] = strength
-                    eventSink?.success(statusMap)
+                    try {
+                        eventSink?.success(statusMap)
+                    } catch (e: Exception) {
+                        android.util.Log.e("RTL-TCP", "eventSink status send failed", e)
+                    }
                     lastConnectedState = connected
                 }
 
                 if (logs.isNotEmpty()) {
                     regex.findAll(logs).forEach { match ->
                         try {
-                            val dataMap = mutableMapOf<String, Any?>()
-                            dataMap["address"] = match.groupValues[1]
-                            dataMap["func"] = match.groupValues[2]
-                            
-                            val gbkBytes = match.groupValues[3].toByteArray(Charsets.ISO_8859_1)
-                            val utf8String = String(gbkBytes, Charset.forName("GBK"))
-                            dataMap["numeric"] = utf8String
-                            
-                            dataMap["magsqRaw"] = strength 
+                            val addr = match.groupValues[1]
+                            val func = match.groupValues[2]
+                            val raw = match.groupValues[3]
+                            android.util.Log.d("RTL-TCP", "msg_match: addr=$addr func=$func raw_len=${raw.length}")
 
-                            eventSink?.success(dataMap)
+                            val gbkBytes = raw.toByteArray(Charsets.ISO_8859_1)
+                            val utf8String = try {
+                                String(gbkBytes, Charset.forName("GBK"))
+                            } catch (e: Exception) {
+                                android.util.Log.e("RTL-TCP", "GBK decode failed", e)
+                                raw
+                            }
+
+                            android.util.Log.d("RTL-TCP", "msg_decoded: addr=$addr func=$func numeric=$utf8String")
+
+                            val dataMap = mutableMapOf<String, Any?>()
+                            dataMap["address"] = addr
+                            dataMap["func"] = func
+                            dataMap["numeric"] = utf8String
+                            dataMap["magsqRaw"] = strength
+
+                            try {
+                                eventSink?.success(dataMap)
+                            } catch (e: Exception) {
+                                android.util.Log.e("RTL-TCP", "eventSink data send failed", e)
+                            }
                         } catch (e: Exception) {
                             android.util.Log.e("RTL-TCP", "decode_fail", e)
                         }
                     }
                 }
-                
+
                 handler.postDelayed(this, 200)
             }
         })

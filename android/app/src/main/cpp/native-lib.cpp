@@ -255,26 +255,32 @@ void clientThread(std::string host, int port)
                 std::lock_guard<std::mutex> demodLock(demodDataMutex);
                 processOneSample(i_ds, q_ds);
 
+                if (is_message_ready)
+                {
+                    std::ostringstream ss;
+                    std::lock_guard<std::mutex> msgLock(msgMutex);
+
+                    std::string message_content;
+                    if (function_bits == 3) {
+                        message_content = alpha_msg;
+                    } else {
+                        message_content = numeric_msg;
+                    }
+                    if (message_content.empty()) {
+                        message_content = alpha_msg.empty() ? numeric_msg : alpha_msg;
+                    }
+
+                    ss << "[MSG]" << address << "|" << function_bits << "|" << message_content;
+                    messageBuffer.push_back(ss.str());
+
+                    is_message_ready = false;
+                    numeric_msg.clear();
+                    alpha_msg.clear();
+                }
+
                 acc_i = acc_q = 0;
                 decim_counter = 0;
             }
-        }
-
-        if (is_message_ready)
-        {
-            std::ostringstream ss;
-
-            std::lock_guard<std::mutex> demodLock(demodDataMutex);
-            std::lock_guard<std::mutex> msgLock(msgMutex);
-
-            std::string message_content = alpha_msg.empty() ? numeric_msg : alpha_msg;
-            ss << "[MSG]" << address << "|" << function_bits << "|" << message_content;
-            messageBuffer.push_back(ss.str());
-
-            is_message_ready = false;
-
-            numeric_msg.clear();
-            alpha_msg.clear();
         }
     }
 

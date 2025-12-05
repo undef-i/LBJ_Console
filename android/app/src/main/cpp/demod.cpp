@@ -1,4 +1,5 @@
 #include "demod.h"
+#include <android/log.h>
 
 bool is_message_ready = false;
 
@@ -188,6 +189,10 @@ void decodeBatch()
                 function_bits = (code_words[i] >> 11) & 0x3;
                 int addressBits = (code_words[i] >> 13) & 0x3ffff;
                 address = (addressBits << 3) | frame;
+                
+                __android_log_print(ANDROID_LOG_DEBUG, "DEMOD", "addr_cw: raw=0x%08X addr=%u func=%d frame=%d bch_err=%d parity_err=%d",
+                    code_words[i], address, function_bits, frame, code_words_bch_error[i] ? 1 : 0, parityError ? 1 : 0);
+                
                 numeric_msg = "";
                 alpha_msg = "";
                 alpha_bit_buffer_bits = 0;
@@ -200,6 +205,9 @@ void decodeBatch()
                 int messageBits = (code_words[i] >> 11) & 0xfffff;
                 if (parityError) parity_errors++;
                 if (code_words_bch_error[i]) bch_errors++;
+                
+                __android_log_print(ANDROID_LOG_DEBUG, "DEMOD", "msg_cw: raw=0x%08X msgbits=0x%05X bch_err=%d parity_err=%d",
+                    code_words[i], messageBits, code_words_bch_error[i] ? 1 : 0, parityError ? 1 : 0);
 
                 for (int j = 16; j >= 0; j -= 4)
                 {
@@ -325,6 +333,7 @@ void processBasebandSample(double sample)
 
                 if (got_SC)
                 {
+                    __android_log_print(ANDROID_LOG_DEBUG, "DEMOD", "sync_found: inverted=%d bits=0x%08X", bit_inverted ? 1 : 0, bits);
                     bits = 0;
                     bit_cnt = 0;
                     code_words[0] = POCSAG_SYNCCODE;
@@ -381,5 +390,90 @@ void processOneSample(int8_t i, int8_t q)
     float deviation;
     double fmDemod = phaseDiscri.phaseDiscriminatorDelta(iq, magsqRaw, deviation);
     
-    processBasebandSample(fmDemod);
+    double filt = lowpassBaud.filter(fmDemod);
+
+    if (!got_SC) {
+        preambleMovingAverage(filt);
+        dc_offset = preambleMovingAverage.asDouble();
+    }
+
+    bool data = (filt - dc_offset) >= 0.0;
+
+    if (data != prev_data) {
+        sync_cnt = SAMPLES_PER_SYMBOL / 2;
+    } else {
+        sync_cnt--;
+        
+        if (sync_cnt <= 0) {
+            if (bit_inverted) {
+                data_bit = data;
+            } else {
+                data_bit = !data;
+            }
+
+            bits = (bits << 1) | data_bit;
+            bit_cnt++;
+
+            if (bit_cnt > 32) {
+                bit_cnt = 32;
+            }
+
+            if (bit_cnt == 32 && !got_SC) {
+                if (bits == POCSAG_SYNCCODE) {
+                    got_SC = true;
+                    bit_inverted = false;
+                } else if (bits == POCSAG_SYNCCODE_INV) {
+                    got_SC = true;
+                    bit_inverted = true;
+                } else if (pop_cnt(bits ^ POCSAG_SYNCCODE) <= 3) {
+                    uint32_t corrected_cw;
+                    if (bchDecode(bits, corrected_cw) && corrected_cw == POCSAG_SYNCCODE) {
+                        got_SC = true;
+                        bit_inverted = false;
+                    }
+                } else if (pop_cnt(bits ^ POCSAG_SYNCCODE_INV) <= 3) {
+                    uint32_t corrected_cw;
+                    if (bchDecode(~bits, corrected_cw) && corrected_cw == POCSAG_SYNCCODE) {
+                        got_SC = true;
+                        bit_inverted = true;
+                    }
+                }
+
+                if (got_SC) {
+                    __android_log_print(ANDROID_LOG_DEBUG, "DEMOD", "sync_found: inverted=%d bits=0x%08X", bit_inverted ? 1 : 0, bits);
+                    bits = 0;
+                    bit_cnt = 0;
+                    code_words[0] = POCSAG_SYNCCODE;
+                    word_cnt = 1;
+                }
+            } else if (bit_cnt == 32 && got_SC) {
+                uint32_t corrected_cw;
+                code_words_bch_error[word_cnt] = !bchDecode(bits, corrected_cw);
+                code_words[word_cnt] = corrected_cw;
+                word_cnt++;
+
+                if (word_cnt == 1 && corrected_cw != POCSAG_SYNCCODE) {
+                    got_SC = false;
+                    bit_inverted = false;
+                }
+
+                if (word_cnt == PAGERDEMOD_BATCH_WORDS) {
+                    decodeBatch();
+                    batch_num++;
+                    word_cnt = 0;
+                }
+
+                bits = 0;
+                bit_cnt = 0;
+
+                if (address > 0 && !numeric_msg.empty()) {
+                    is_message_ready = true;
+                }
+            }
+
+            sync_cnt = SAMPLES_PER_SYMBOL;
+        }
+    }
+
+    prev_data = data;
 }
