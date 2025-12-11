@@ -15,6 +15,8 @@
 #include <android/log.h>
 #include <errno.h>
 #include "demod.h"
+#include "audio_demod.h"
+#include "audio_fft.h"
 
 #define BUF_SIZE 8192
 
@@ -26,6 +28,8 @@ static std::mutex msgMutex;
 static std::vector<std::string> messageBuffer;
 
 static std::mutex demodDataMutex;
+static std::mutex fftMutex;
+static AudioFFT* audioFFT = nullptr;
 
 static JavaVM *g_vm = nullptr;
 static jobject g_obj = nullptr;
@@ -95,20 +99,36 @@ Java_org_noxylva_lbjconsole_flutter_AudioInputHandler_nativePushAudio(
 
     jshort *samples = env->GetShortArrayElements(audioData, NULL);
     
+    {
+        std::lock_guard<std::mutex> fftLock(fftMutex);
+        if (!audioFFT) {
+            audioFFT = new AudioFFT(4096);
+        }
+        audioFFT->processSamples(samples, size);
+    }
+    
     std::lock_guard<std::mutex> demodLock(demodDataMutex);
 
-    for (int i = 0; i < size; i++) {
-        double sample = (double)samples[i] / 32768.0; 
-        processBasebandSample(sample);
-    }
-
-    env->ReleaseShortArrayElements(audioData, samples, 0);
+    processAudioSamples(samples, size);
     
     if (is_message_ready) {
         std::ostringstream ss;
         std::lock_guard<std::mutex> msgLock(msgMutex);
 
-        std::string message_content = alpha_msg.empty() ? numeric_msg : alpha_msg;
+        std::string message_content;
+        if (function_bits == 3) {
+            message_content = alpha_msg;
+        } else {
+            message_content = numeric_msg;
+        }
+        if (message_content.empty()) {
+            message_content = alpha_msg.empty() ? numeric_msg : alpha_msg;
+        }
+
+        __android_log_print(ANDROID_LOG_DEBUG, "AUDIO", 
+            "msg_ready: addr=%u func=%d alpha_len=%zu numeric_len=%zu",
+            address, function_bits, alpha_msg.length(), numeric_msg.length());
+
         ss << "[MSG]" << address << "|" << function_bits << "|" << message_content;
         messageBuffer.push_back(ss.str());
 
@@ -116,6 +136,8 @@ Java_org_noxylva_lbjconsole_flutter_AudioInputHandler_nativePushAudio(
         numeric_msg.clear();
         alpha_msg.clear();
     }
+
+    env->ReleaseShortArrayElements(audioData, samples, 0);
 }
 
 extern "C" JNIEXPORT jdouble JNICALL
@@ -133,6 +155,32 @@ Java_org_noxylva_lbjconsole_flutter_AudioInputHandler_clearMessageBuffer(JNIEnv 
     is_message_ready = false;
     numeric_msg.clear();
     alpha_msg.clear();
+}
+
+extern "C" JNIEXPORT jfloatArray JNICALL
+Java_org_noxylva_lbjconsole_flutter_AudioInputHandler_getAudioSpectrum(JNIEnv *env, jobject)
+{
+    std::lock_guard<std::mutex> fftLock(fftMutex);
+    
+    if (!audioFFT) {
+        return env->NewFloatArray(0);
+    }
+    
+    int spectrumSize = audioFFT->getFFTSize() / 2;
+    std::vector<float> spectrum(spectrumSize);
+    audioFFT->getSpectrum(spectrum.data(), spectrumSize);
+
+    const int outputBins = 500;
+    std::vector<float> downsampled(outputBins);
+    
+    for (int i = 0; i < outputBins; i++) {
+        int srcIdx = (i * spectrumSize) / outputBins;
+        downsampled[i] = spectrum[srcIdx];
+    }
+    
+    jfloatArray result = env->NewFloatArray(outputBins);
+    env->SetFloatArrayRegion(result, 0, outputBins, downsampled.data());
+    return result;
 }
 
 extern "C" JNIEXPORT jbyteArray JNICALL

@@ -53,6 +53,7 @@ class AudioInputHandler(private val context: Context) : MethodChannel.MethodCall
     private external fun nativePushAudio(data: ShortArray, size: Int)
     private external fun pollMessages(): ByteArray
     private external fun clearMessageBuffer()
+    private external fun getAudioSpectrum(): FloatArray
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
@@ -68,6 +69,14 @@ class AudioInputHandler(private val context: Context) : MethodChannel.MethodCall
                 stopRecording()
                 clearMessageBuffer()
                 result.success(null)
+            }
+            "getSpectrum" -> {
+                try {
+                    val spectrum = getAudioSpectrum()
+                    result.success(spectrum.toList())
+                } catch (e: Exception) {
+                    result.error("FFT_ERROR", "Failed to get spectrum", e.message)
+                }
             }
             else -> result.notImplemented()
         }

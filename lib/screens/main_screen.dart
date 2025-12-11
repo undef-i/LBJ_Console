@@ -15,6 +15,7 @@ import 'package:lbjconsole/services/background_service.dart';
 import 'package:lbjconsole/services/rtl_tcp_service.dart';
 import 'package:lbjconsole/services/audio_input_service.dart';
 import 'package:lbjconsole/themes/app_theme.dart';
+import 'package:lbjconsole/widgets/audio_waterfall_widget.dart';
 
 class _ConnectionStatusWidget extends StatefulWidget {
   final BLEService bleService;
@@ -839,16 +840,8 @@ class _PixelPerfectBluetoothDialogState
 
   Widget _buildAudioInputView(BuildContext context) {
     return Column(mainAxisSize: MainAxisSize.min, children: [
-      const Icon(Icons.mic, size: 48, color: Colors.blue),
-      const SizedBox(height: 16),
-      Text('监听中',
-          style: Theme.of(context)
-              .textTheme
-              .titleMedium
-              ?.copyWith(fontWeight: FontWeight.bold)),
       const SizedBox(height: 8),
-      const Text("请使用音频线连接设备",
-          style: TextStyle(color: Colors.grey)),
+      const AudioWaterfallWidget(),
     ]);
   }
 

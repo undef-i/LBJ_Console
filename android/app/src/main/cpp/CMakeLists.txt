@@ -6,6 +6,10 @@ project("railwaypagerdemod")
 add_library(${CMAKE_PROJECT_NAME} SHARED
         demod.cpp
         demod.h
+        audio_demod.cpp
+        audio_demod.h
+        audio_fft.cpp
+        audio_fft.h
         native-lib.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/dsp/firfilter.cpp
         )
