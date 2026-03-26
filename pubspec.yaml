@@ -55,6 +55,7 @@ dependencies:
   scrollview_observer: ^1.20.0
   vector_map_tiles: ^8.0.0
   webview_flutter: ^4.8.0
+  maplibre_gl: ^0.24.1
   gbk_codec: ^0.4.0
 
 dev_dependencies:

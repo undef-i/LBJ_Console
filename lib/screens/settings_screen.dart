@@ -405,7 +405,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       await BackgroundService.stopService();
                     }
                   },
-                  activeThumbColor: Theme.of(context).colorScheme.primary,
+                  activeColor: Theme.of(context).colorScheme.primary,
                 ),
               ],
             ),
@@ -427,7 +427,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     });
                     _saveSettings();
                   },
-                  activeThumbColor: Theme.of(context).colorScheme.primary,
+                  activeColor: Theme.of(context).colorScheme.primary,
                 ),
               ],
             ),
@@ -485,7 +485,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     });
                     _saveSettings();
                   },
-                  activeThumbColor: Theme.of(context).colorScheme.primary,
+                  activeColor: Theme.of(context).colorScheme.primary,
                 ),
               ],
             ),
@@ -533,7 +533,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     });
                     _saveSettings();
                   },
-                  activeThumbColor: Theme.of(context).colorScheme.primary,
+                  activeColor: Theme.of(context).colorScheme.primary,
                 ),
               ],
             ),
@@ -636,7 +636,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           });
                           _saveSettings();
                         },
-                        activeThumbColor: Theme.of(context).colorScheme.primary,
+                        activeColor: Theme.of(context).colorScheme.primary,
                       ),
                     ],
                   ),

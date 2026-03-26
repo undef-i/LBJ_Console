@@ -1,12 +1,11 @@
-import 'dart:convert';
-import 'dart:math' as math;
-import 'package:flutter/material.dart';
-import 'package:webview_flutter/webview_flutter.dart';
-import 'package:geolocator/geolocator.dart';
 import 'dart:async';
-import '../models/train_record.dart';
+import 'dart:convert';
+import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:latlong2/latlong.dart' as latlong;
+import 'package:lbjconsole/models/train_record.dart';
 import 'package:lbjconsole/services/database_service.dart';
-import 'package:latlong2/latlong.dart';
+import 'package:maplibre_gl/maplibre_gl.dart';
 
 class MapWebViewScreen extends StatefulWidget {
   const MapWebViewScreen({super.key});
@@ -17,11 +16,14 @@ class MapWebViewScreen extends StatefulWidget {
 
 class MapWebViewScreenState extends State<MapWebViewScreen>
     with WidgetsBindingObserver {
-  late final WebViewController _controller;
+  MapLibreMapController? _controller;
+  final Map<String, TrainRecord> _symbolRecordMap = {};
+
   Position? _currentPosition;
   List<TrainRecord> _trainRecords = [];
   bool _isRailwayLayerVisible = true;
   bool _isLoading = true;
+  bool _isStyleLoaded = false;
   String _timeFilter = 'unlimited';
   Timer? _refreshTimer;
   Timer? _locationUpdateTimer;
@@ -30,42 +32,25 @@ class MapWebViewScreenState extends State<MapWebViewScreen>
   bool _isLocationPermissionGranted = false;
   double _currentZoom = 14.0;
   double _currentRotation = 0.0;
-  LatLng? _currentLocation;
-  LatLng? _lastTrainLocation;
-  final bool _isDataLoaded = false;
-  final Completer<void> _webViewReadyCompleter = Completer<void>();
+  latlong.LatLng? _currentLocation;
+  latlong.LatLng? _lastTrainLocation;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _initializeWebView();
     _startInitialization();
   }
 
   Future<void> _startInitialization() async {
-    setState(() {
-      _isLoading = true;
-    });
-
+    setState(() => _isLoading = true);
     try {
       await _loadSettings();
       await _loadTrainRecordsFromDatabase();
-
-      await _webViewReadyCompleter.future;
-
-      _initializeMapCamera();
-
       _initializeLocation();
       _startAutoRefresh();
-    } catch (e, s) {
-      print('[Flutter] Init Map WebView Screen Failed: $e\n$s');
     } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -73,236 +58,6 @@ class MapWebViewScreenState extends State<MapWebViewScreen>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _reloadSettingsIfNeeded();
-    }
-  }
-
-  Future<void> _initializeWebView() async {
-    _controller = WebViewController()
-      ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setBackgroundColor(const Color(0xFF121212))
-      ..addJavaScriptChannel(
-        'showTrainDetails',
-        onMessageReceived: (JavaScriptMessage message) {
-          try {
-            final trainData = jsonDecode(message.message);
-            _showTrainDetailsDialog(trainData);
-          } catch (e) {}
-        },
-      )
-      ..addJavaScriptChannel(
-        'onMapStateChanged',
-        onMessageReceived: (JavaScriptMessage message) {
-          try {
-            final mapState = jsonDecode(message.message);
-            _onMapStateChanged(mapState);
-          } catch (e) {}
-        },
-      )
-      ..setNavigationDelegate(
-        NavigationDelegate(
-          onProgress: (int progress) {},
-          onPageStarted: (String url) {
-            setState(() {
-              _isLoading = true;
-            });
-          },
-          onPageFinished: (String url) {
-            setState(() {
-              _isLoading = false;
-            });
-
-            if (!_webViewReadyCompleter.isCompleted) {
-              _webViewReadyCompleter.complete();
-            }
-          },
-          onWebResourceError: (WebResourceError error) {
-            setState(() {
-              _isLoading = false;
-            });
-          },
-        ),
-      )
-      ..loadFlutterAsset('assets/mapbox_map.html')
-          .then((_) {})
-          .catchError((error) {});
-
-    await Future.delayed(const Duration(milliseconds: 500));
-  }
-
-  Future<void> _initializeLocation() async {
-    try {
-      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      if (!serviceEnabled) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('请开启定位服务')),
-          );
-        }
-        return;
-      }
-
-      LocationPermission permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-      }
-
-      if (permission == LocationPermission.whileInUse ||
-          permission == LocationPermission.always) {
-        Position position = await Geolocator.getCurrentPosition(
-          locationSettings: const LocationSettings(
-            accuracy: LocationAccuracy.best,
-            timeLimit: Duration(seconds: 15),
-          ),
-        );
-
-        setState(() {
-          _currentPosition = position;
-          _isLocationPermissionGranted = true;
-        });
-
-        _updateUserLocation();
-
-        _startLocationUpdates();
-      } else if (permission == LocationPermission.deniedForever) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('定位权限被永久拒绝，请在设置中开启')),
-          );
-        }
-      } else {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('定位权限被拒绝，请在设置中开启')),
-          );
-        }
-      }
-    } catch (e) {}
-  }
-
-  void _startLocationUpdates() {
-    _locationUpdateTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
-      if (_isLocationPermissionGranted && mounted) {
-        _updateCurrentLocation();
-      } else {}
-    });
-  }
-
-  Future<void> _updateCurrentLocation() async {
-    try {
-      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      if (!serviceEnabled) {
-        return;
-      }
-
-      Position position = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.best,
-        forceAndroidLocationManager: true,
-      );
-
-      setState(() {
-        _currentPosition = position;
-      });
-
-      _updateUserLocation();
-    } catch (e) {
-      if (e.toString().contains('PERMISSION_DENIED') ||
-          e.toString().contains('permission')) {
-        _checkAndRequestPermissions();
-      }
-    }
-  }
-
-  Future<void> _checkAndRequestPermissions() async {
-    try {
-      LocationPermission permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-      }
-
-      if (permission == LocationPermission.whileInUse ||
-          permission == LocationPermission.always) {
-        setState(() {
-          _isLocationPermissionGranted = true;
-        });
-      } else {
-        setState(() {
-          _isLocationPermissionGranted = false;
-        });
-      }
-    } catch (e) {}
-  }
-
-  Future<void> _loadTrainRecordsFromDatabase() async {
-    try {
-      final isConnected = await DatabaseService.instance.isDatabaseConnected();
-      if (!isConnected) {}
-
-      List<TrainRecord> records;
-
-      if (_timeFilter == 'unlimited') {
-        records = await DatabaseService.instance.getAllRecords();
-      } else {
-        final duration = _getTimeFilterDuration(_timeFilter);
-        if (duration != null && duration != Duration.zero) {
-          records = await DatabaseService.instance
-              .getRecordsWithinReceivedTimeRange(duration);
-        } else {
-          records = await DatabaseService.instance.getAllRecords();
-        }
-      }
-
-      if (records.isNotEmpty) {
-        for (int i = 0; i < math.min(3, records.length); i++) {
-          final record = records[i];
-          final coords = record.getCoordinates();
-        }
-      }
-
-      setState(() {
-        _trainRecords = records;
-        _isLoading = false;
-
-        if (_trainRecords.isNotEmpty) {
-          final validRecords = [
-            ..._getValidRecords(),
-            ..._getValidDmsRecords()
-          ];
-          if (validRecords.isNotEmpty) {
-            final lastRecord = validRecords.first;
-            LatLng? position;
-
-            final dmsPosition = _parseDmsCoordinate(lastRecord.positionInfo);
-            if (dmsPosition != null) {
-              position = dmsPosition;
-            } else {
-              final coords = lastRecord.getCoordinates();
-              if (coords['lat'] != 0.0 && coords['lng'] != 0.0) {
-                position = LatLng(coords['lat']!, coords['lng']!);
-              }
-            }
-
-            if (position != null) {
-              _lastTrainLocation = position;
-            } else {}
-          } else {}
-        } else {}
-      });
-
-      Future.delayed(const Duration(milliseconds: 3000), () {
-        if (mounted) {
-          _updateTrainMarkers();
-        }
-      });
-
-      Future.delayed(const Duration(milliseconds: 5000), () {
-        if (mounted) {
-          _updateTrainMarkers();
-        }
-      });
-    } catch (e) {
-      setState(() {
-        _isLoading = false;
-      });
     }
   }
 
@@ -337,84 +92,14 @@ class MapWebViewScreenState extends State<MapWebViewScreen>
   void _reloadSettingsIfNeeded() async {
     try {
       final settings = await DatabaseService.instance.getAllSettings();
-      if (settings != null) {
-        final newTimeFilter =
-            settings['mapTimeFilter'] as String? ?? 'unlimited';
-        if (newTimeFilter != _timeFilter) {
-          if (mounted) {
-            setState(() {
-              _timeFilter = newTimeFilter;
-            });
-          }
-          _loadTrainRecordsFromDatabase();
+      final newTimeFilter = settings?['mapTimeFilter'] as String? ?? 'unlimited';
+      if (newTimeFilter != _timeFilter) {
+        if (mounted) {
+          setState(() => _timeFilter = newTimeFilter);
         }
+        _loadTrainRecordsFromDatabase();
       }
-    } catch (e) {}
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    _reloadSettingsIfNeeded();
-  }
-
-  void _loadTrainRecords() async {
-    setState(() => _isLoading = true);
-    try {
-      await _loadTrainRecordsFromDatabase();
-    } catch (e) {
-      setState(() => _isLoading = false);
-    }
-  }
-
-  void _initializeMapCamera() {
-    if (_isMapInitialized) return;
-
-    LatLng targetLocation;
-    double targetZoom = _currentZoom;
-    double targetRotation = _currentRotation;
-
-    if (_currentLocation != null) {
-      targetLocation = _currentLocation!;
-    } else if (_lastTrainLocation != null) {
-      targetLocation = _lastTrainLocation!;
-      targetZoom = 14.0;
-      targetRotation = 0.0;
-    } else {
-      targetLocation = const LatLng(39.9042, 116.4074);
-      targetZoom = 10.0;
-    }
-
-    _centerMap(targetLocation, zoom: targetZoom, rotation: targetRotation);
-    _isMapInitialized = true;
-
-    Future.delayed(const Duration(milliseconds: 500), () {
-      if (mounted) {
-        _updateUserLocation();
-        _updateTrainMarkers();
-        _controller.runJavaScript('''
-          if (window.MapInterface) {
-            window.MapInterface.setRailwayVisible($_isRailwayLayerVisible);
-          }
-        ''');
-      }
-    });
-  }
-
-  void _centerMap(LatLng location, {double? zoom, double? rotation}) {
-    final targetZoom = zoom ?? _currentZoom;
-    final targetRotation = rotation ?? _currentRotation;
-
-    _controller.runJavaScript('''
-      (function() {
-        if (window.MapInterface) {
-          try {
-            window.MapInterface.setCenter(${location.latitude}, ${location.longitude}, $targetZoom, $targetRotation);
-          } catch (error) {
-          }
-        }
-      })();
-    ''').then((result) {}).catchError((error) {});
+    } catch (_) {}
   }
 
   Future<void> _loadSettings() async {
@@ -425,19 +110,17 @@ class MapWebViewScreenState extends State<MapWebViewScreen>
           _isRailwayLayerVisible =
               (settings['mapRailwayLayerVisible'] as int?) == 1;
           _currentZoom = (settings['mapZoomLevel'] as num?)?.toDouble() ?? 10.0;
-          _currentRotation =
-              (settings['mapRotation'] as num?)?.toDouble() ?? 0.0;
+          _currentRotation = (settings['mapRotation'] as num?)?.toDouble() ?? 0.0;
           _timeFilter = settings['mapTimeFilter'] as String? ?? 'unlimited';
 
           final lat = (settings['mapCenterLat'] as num?)?.toDouble();
           final lon = (settings['mapCenterLon'] as num?)?.toDouble();
-
           if (lat != null && lon != null && lat != 0.0 && lon != 0.0) {
-            _currentLocation = LatLng(lat, lon);
+            _currentLocation = latlong.LatLng(lat, lon);
           }
         });
       }
-    } catch (e) {}
+    } catch (_) {}
   }
 
   Future<void> _saveSettings() async {
@@ -456,53 +139,112 @@ class MapWebViewScreenState extends State<MapWebViewScreen>
       }
 
       await DatabaseService.instance.updateSettings(settings);
-    } catch (e) {}
+    } catch (_) {}
   }
 
-  LatLng? _parseDmsCoordinate(String? positionInfo) {
-    if (positionInfo == null ||
-        positionInfo.isEmpty ||
-        positionInfo == '<NUL>') {
+  Future<void> _initializeLocation() async {
+    try {
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) return;
+
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+
+      if (permission == LocationPermission.whileInUse ||
+          permission == LocationPermission.always) {
+        final position = await Geolocator.getCurrentPosition(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.best,
+            timeLimit: Duration(seconds: 15),
+          ),
+        );
+        setState(() {
+          _currentPosition = position;
+          _isLocationPermissionGranted = true;
+        });
+        _updateUserLocation();
+        _startLocationUpdates();
+      }
+    } catch (_) {}
+  }
+
+  void _startLocationUpdates() {
+    _locationUpdateTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
+      if (_isLocationPermissionGranted && mounted) {
+        _updateCurrentLocation();
+      }
+    });
+  }
+
+  Future<void> _updateCurrentLocation() async {
+    try {
+      final position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.best,
+        forceAndroidLocationManager: true,
+      );
+      setState(() => _currentPosition = position);
+      _updateUserLocation();
+    } catch (_) {}
+  }
+
+  Future<void> _loadTrainRecordsFromDatabase() async {
+    try {
+      List<TrainRecord> records;
+      if (_timeFilter == 'unlimited') {
+        records = await DatabaseService.instance.getAllRecords();
+      } else {
+        final duration = _getTimeFilterDuration(_timeFilter);
+        records = (duration != null && duration != Duration.zero)
+            ? await DatabaseService.instance.getRecordsWithinReceivedTimeRange(
+                duration,
+              )
+            : await DatabaseService.instance.getAllRecords();
+      }
+
+      setState(() {
+        _trainRecords = records;
+        final valid = [..._getValidRecords(), ..._getValidDmsRecords()];
+        if (valid.isNotEmpty) {
+          final pos = _extractPosition(valid.first);
+          if (pos != null) _lastTrainLocation = pos;
+        }
+      });
+
+      _updateTrainMarkers();
+    } catch (_) {}
+  }
+
+  latlong.LatLng? _parseDmsCoordinate(String? positionInfo) {
+    if (positionInfo == null || positionInfo.isEmpty || positionInfo == '<NUL>') {
       return null;
     }
-
     try {
       final parts = positionInfo.trim().split(' ');
-      if (parts.length >= 2) {
-        final latStr = parts[0];
-        final lngStr = parts[1];
-
-        final lat = _parseDmsString(latStr);
-        final lng = _parseDmsString(lngStr);
-
-        if (lat != null &&
-            lng != null &&
-            (lat.abs() > 0.001 || lng.abs() > 0.001)) {
-          return LatLng(lat, lng);
-        }
-      }
-    } catch (e) {}
-
-    return null;
+      if (parts.length < 2) return null;
+      final lat = _parseDmsString(parts[0]);
+      final lng = _parseDmsString(parts[1]);
+      if (lat == null || lng == null) return null;
+      return latlong.LatLng(lat, lng);
+    } catch (_) {
+      return null;
+    }
   }
 
   double? _parseDmsString(String dmsStr) {
     try {
       final degreeIndex = dmsStr.indexOf('°');
       if (degreeIndex == -1) return null;
-
       final degrees = double.tryParse(dmsStr.substring(0, degreeIndex));
       if (degrees == null) return null;
-
       final minuteIndex = dmsStr.indexOf('′');
       if (minuteIndex == -1) return degrees;
-
       final minutes =
           double.tryParse(dmsStr.substring(degreeIndex + 1, minuteIndex));
       if (minutes == null) return degrees;
-
       return degrees + (minutes / 60.0);
-    } catch (e) {
+    } catch (_) {
       return null;
     }
   }
@@ -520,217 +262,131 @@ class MapWebViewScreenState extends State<MapWebViewScreen>
     }).toList();
   }
 
-  void _updateTrainMarkers() {
-    if (_trainRecords.isEmpty) {
-      return;
+  latlong.LatLng? _extractPosition(TrainRecord record) {
+    final dms = _parseDmsCoordinate(record.positionInfo);
+    if (dms != null) return dms;
+    final coords = record.getCoordinates();
+    final lat = coords['lat'];
+    final lng = coords['lng'];
+    if (lat != null && lng != null && (lat != 0.0 || lng != 0.0)) {
+      return latlong.LatLng(lat, lng);
     }
+    return null;
+  }
 
-    if (!_isMapInitialized) {
-      Future.delayed(const Duration(seconds: 2), () {
-        if (mounted && _trainRecords.isNotEmpty) {
-          _updateTrainMarkers();
-        }
-      });
-      return;
-    }
+  Future<void> _updateTrainMarkers() async {
+    final controller = _controller;
+    if (!_isStyleLoaded || controller == null) return;
+
+    await controller.clearSymbols();
+    _symbolRecordMap.clear();
 
     final validRecords = [..._getValidRecords(), ..._getValidDmsRecords()];
+    if (validRecords.isEmpty) return;
 
-    final trainData = validRecords
-        .map((record) {
-          LatLng? position;
+    for (final record in validRecords) {
+      final pos = _extractPosition(record);
+      if (pos == null) continue;
 
-          final dmsPosition = _parseDmsCoordinate(record.positionInfo);
-          if (dmsPosition != null) {
-            position = dmsPosition;
-          } else {
-            final coords = record.getCoordinates();
-            if (coords['lat'] != 0.0 && coords['lng'] != 0.0) {
-              position = LatLng(coords['lat']!, coords['lng']!);
-            }
-          }
+      final symbol = await controller.addSymbol(
+        SymbolOptions(
+          geometry: LatLng(pos.latitude, pos.longitude),
+          textField: record.fullTrainNumber.isEmpty ? '未知列车' : record.fullTrainNumber,
+          textSize: 11,
+          textColor: '#FFFFFF',
+          textHaloColor: '#000000',
+          textHaloWidth: 1.0,
+          textOffset: const Offset(0, 0.8),
+        ),
+      );
 
-          if (position != null) {
-            return {
-              'lat': position.latitude,
-              'lng': position.longitude,
-              'fullTrainNumber': record.fullTrainNumber,
-              'time': record.time,
-              'speed': record.speed,
-              'position': record.position,
-              'route': record.route,
-              'locoType': record.locoType,
-              'loco': record.loco,
-              'timestamp': record.timestamp,
-            };
-          }
-          return null;
-        })
-        .where((data) => data != null)
-        .toList();
-
-    trainData.sort((a, b) {
-      final aTimestamp = a?['timestamp'];
-      final bTimestamp = b?['timestamp'];
-
-      if (aTimestamp == null || bTimestamp == null) return 0;
-
-      if (aTimestamp is DateTime && bTimestamp is DateTime) {
-        return bTimestamp.compareTo(aTimestamp);
-      }
-
-      if (aTimestamp is int && bTimestamp is int) {
-        return bTimestamp.compareTo(aTimestamp);
-      }
-
-      if (aTimestamp is String && bTimestamp is String) {
-        return bTimestamp.compareTo(aTimestamp);
-      }
-
-      return 0;
-    });
-
-    final jsonTrainData = trainData
-        .map((train) {
-          if (train == null) return null;
-
-          final trainCopy = Map<String, dynamic>.from(train);
-
-          if (trainCopy['timestamp'] is DateTime) {
-            trainCopy['timestamp'] =
-                (trainCopy['timestamp'] as DateTime).millisecondsSinceEpoch;
-          }
-
-          return trainCopy;
-        })
-        .where((train) => train != null)
-        .toList();
-
-    if (trainData.isEmpty) {
-      return;
+      _symbolRecordMap[symbol.id] = record;
     }
-
-    if (trainData.isNotEmpty) {
-      final latestTrain = trainData.first;
-      if (latestTrain != null) {
-        _lastTrainLocation = LatLng((latestTrain['lat'] as num).toDouble(),
-            (latestTrain['lng'] as num).toDouble());
-      }
-    }
-
-    _controller.runJavaScript('''
-      (function() {
-        try {
-          if (window.MapInterface && window.MapInterface.updateTrainMarkers) {
-            window.MapInterface.updateTrainMarkers(${jsonEncode(jsonTrainData)});
-
-            if (!window.trainMarkersUpdated && ${trainData.length} > 0) {
-              window.trainMarkersUpdated = true;
-              setTimeout(function() {
-                if (window.MapInterface && window.MapInterface.fitBounds) {
-                  window.MapInterface.fitBounds();
-                }
-              }, 1000);
-            }
-          } else {
-            console.error('MapInterface 未定义或updateTrainMarkers方法不存在');
-          }
-        } catch (error) {
-          console.error('更新列车标记失败:', error);
-        }
-      })();
-    ''').then((result) {}).catchError((error) {});
   }
 
-  void _updateUserLocation() {
-    if (_currentPosition != null) {
-      _controller.runJavaScript('''
-        (function() {
-          try {
-            if (window.MapInterface && window.MapInterface.setUserLocation) {
-              window.MapInterface.setUserLocation(${_currentPosition!.latitude}, ${_currentPosition!.longitude});
+  Future<void> _updateUserLocation() async {
+    final controller = _controller;
+    if (!_isStyleLoaded || controller == null || _currentPosition == null) return;
 
-              if (!window.userLocationUpdated) {
-                window.userLocationUpdated = true;
-              }
-            } else {
-              console.error('MapInterface 未定义或setUserLocation方法不存在');
-            }
-          } catch (error) {
-            console.error('更新用户位置失败:', error);
-          }
-        })();
-      ''').then((_) {}).catchError((error) {});
-    } else {}
+    await controller.clearCircles();
+    await controller.addCircle(
+      CircleOptions(
+        geometry: LatLng(_currentPosition!.latitude, _currentPosition!.longitude),
+        circleColor: '#2196F3',
+        circleRadius: 6,
+        circleStrokeColor: '#FFFFFF',
+        circleStrokeWidth: 2,
+      ),
+    );
   }
 
-  void _toggleRailwayLayer() {
-    setState(() {
-      _isRailwayLayerVisible = !_isRailwayLayerVisible;
-    });
-
-    _controller.runJavaScript('''
-      (function() {
-        if (window.MapInterface) {
-          try {
-            window.MapInterface.setRailwayVisible($_isRailwayLayerVisible);
-            console.log('铁路图层切换成功: $_isRailwayLayerVisible');
-          } catch (error) {
-            console.error('切换铁路图层失败:', error);
-          }
-        } else {
-          console.error('MapInterface 未定义');
-        }
-      })();
-    ''').then((result) {}).catchError((error) {});
+  Future<void> _toggleRailwayLayer() async {
+    final controller = _controller;
+    setState(() => _isRailwayLayerVisible = !_isRailwayLayerVisible);
+    if (!_isStyleLoaded || controller == null) return;
+    try {
+      await controller.setLayerVisibility('railway', _isRailwayLayerVisible);
+      await _saveSettings();
+    } catch (_) {}
   }
 
-  void _showTrainDetailsDialog(Map<String, dynamic> train) {
+  Future<void> _centerMap(latlong.LatLng location, {double? zoom, double? bearing}) async {
+    final controller = _controller;
+    if (controller == null) return;
+    await controller.animateCamera(
+      CameraUpdate.newCameraPosition(
+        CameraPosition(
+          target: LatLng(location.latitude, location.longitude),
+          zoom: zoom ?? _currentZoom,
+          bearing: bearing ?? _currentRotation,
+        ),
+      ),
+    );
+  }
+
+  void _onSymbolTapped(Symbol symbol) {
+    final record = _symbolRecordMap[symbol.id];
+    if (record == null) return;
+    _showTrainDetailsDialog(record);
+  }
+
+  void _showTrainDetailsDialog(TrainRecord record) {
+    final pos = _extractPosition(record);
     showDialog(
       context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          backgroundColor: const Color(0xFF1E1E1E),
-          title: Text(
-            train['trainNumber'] ?? '未知车次',
-            style: const TextStyle(color: Colors.white),
+      builder: (_) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1E1E),
+        title: Text(record.fullTrainNumber.isEmpty ? '未知车次' : record.fullTrainNumber,
+            style: const TextStyle(color: Colors.white)),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildDetailRow('车次', record.fullTrainNumber),
+              _buildDetailRow('速度', '${record.speed} km/h'),
+              _buildDetailRow('位置', record.position),
+              _buildDetailRow('路线', record.route),
+              _buildDetailRow('机车', '${record.locoType}-${record.loco}'),
+              if (pos != null) _buildDetailRow('坐标', '${pos.latitude.toStringAsFixed(5)}, ${pos.longitude.toStringAsFixed(5)}'),
+            ],
           ),
-          content: SingleChildScrollView(
-            child: ListBody(
-              children: [
-                _buildDetailRow('车次', train['trainNumber'] ?? '未知'),
-                _buildDetailRow('类型', train['trainType'] ?? '未知'),
-                _buildDetailRow('速度', '${train['speed'] ?? 0} km/h'),
-                _buildDetailRow('方向', '${train['direction'] ?? 0}°'),
-                _buildDetailRow(
-                    '经度', train['longitude']?.toStringAsFixed(6) ?? '未知'),
-                _buildDetailRow(
-                    '纬度', train['latitude']?.toStringAsFixed(6) ?? '未知'),
-                _buildDetailRow('时间', _getDisplayTime(train['timestamp'])),
-                _buildDetailRow('日期', _getDisplayDate(train['timestamp'])),
-              ],
-            ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('关闭', style: TextStyle(color: Colors.white)),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('关闭', style: TextStyle(color: Colors.white)),
-            ),
-            TextButton(
-              onPressed: () {
-                Navigator.of(context).pop();
-                _controller.runJavaScript('''
-                  if (window.MapInterface) {
-                    window.MapInterface.setCenter(${train['latitude']}, ${train['longitude']}, 16);
-                  }
-                ''');
-              },
-              child:
-                  const Text('定位', style: TextStyle(color: Color(0xFF007ACC))),
-            ),
-          ],
-        );
-      },
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              if (pos != null) {
+                _centerMap(pos, zoom: 16);
+              }
+            },
+            child: const Text('定位', style: TextStyle(color: Color(0xFF007ACC))),
+          ),
+        ],
+      ),
     );
   }
 
@@ -738,25 +394,15 @@ class MapWebViewScreenState extends State<MapWebViewScreen>
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SizedBox(
             width: 80,
-            child: Text(
-              '$label:',
-              style: const TextStyle(
-                color: Colors.grey,
-                fontSize: 14,
-              ),
-            ),
+            child: Text('$label:', style: const TextStyle(color: Colors.grey)),
           ),
           Expanded(
             child: Text(
-              value,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 14,
-              ),
+              value.isEmpty ? '未知' : value,
+              style: const TextStyle(color: Colors.white),
             ),
           ),
         ],
@@ -764,106 +410,33 @@ class MapWebViewScreenState extends State<MapWebViewScreen>
     );
   }
 
-  String _getDisplayTime(int? timestamp) {
-    if (timestamp == null) return '未知';
-    final dateTime = DateTime.fromMillisecondsSinceEpoch(timestamp);
-    return '${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}:${dateTime.second.toString().padLeft(2, '0')}';
+  void _centerToUserLocation() async {
+    if (_currentPosition != null) {
+      await _centerMap(
+        latlong.LatLng(_currentPosition!.latitude, _currentPosition!.longitude),
+        zoom: 15,
+      );
+    } else {
+      await _updateCurrentLocation();
+    }
   }
 
-  String _getDisplayDate(int? timestamp) {
-    if (timestamp == null) return '未知';
-    final dateTime = DateTime.fromMillisecondsSinceEpoch(timestamp);
-    return '${dateTime.year}-${dateTime.month.toString().padLeft(2, '0')}-${dateTime.day.toString().padLeft(2, '0')}';
+  void _centerToLastTrain() {
+    if (_lastTrainLocation != null) {
+      _centerMap(_lastTrainLocation!, zoom: 15);
+    }
   }
 
-  void _showTimeFilterDialog() {
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return SimpleDialog(
-          title: const Text('时间筛选'),
-          children: [
-            SimpleDialogOption(
-              onPressed: () {
-                setState(() {
-                  _timeFilter = 'unlimited';
-                });
-                Navigator.of(context).pop();
-                _saveSettingsAndReload();
-              },
-              child: const Text('无限制'),
-            ),
-            SimpleDialogOption(
-              onPressed: () {
-                setState(() {
-                  _timeFilter = '1hour';
-                });
-                Navigator.of(context).pop();
-                _saveSettingsAndReload();
-              },
-              child: const Text('最近1小时'),
-            ),
-            SimpleDialogOption(
-              onPressed: () {
-                setState(() {
-                  _timeFilter = '6hours';
-                });
-                Navigator.of(context).pop();
-                _saveSettingsAndReload();
-              },
-              child: const Text('最近6小时'),
-            ),
-            SimpleDialogOption(
-              onPressed: () {
-                setState(() {
-                  _timeFilter = '12hours';
-                });
-                Navigator.of(context).pop();
-                _saveSettingsAndReload();
-              },
-              child: const Text('最近12小时'),
-            ),
-            SimpleDialogOption(
-              onPressed: () {
-                setState(() {
-                  _timeFilter = '24hours';
-                });
-                Navigator.of(context).pop();
-                _saveSettingsAndReload();
-              },
-              child: const Text('最近24小时'),
-            ),
-            SimpleDialogOption(
-              onPressed: () {
-                setState(() {
-                  _timeFilter = '7days';
-                });
-                Navigator.of(context).pop();
-                _saveSettingsAndReload();
-              },
-              child: const Text('最近7天'),
-            ),
-            SimpleDialogOption(
-              onPressed: () {
-                setState(() {
-                  _timeFilter = '30days';
-                });
-                Navigator.of(context).pop();
-                _saveSettingsAndReload();
-              },
-              child: const Text('最近30天'),
-            ),
-          ],
-        );
-      },
-    );
+  void _refreshMap() {
+    _loadTrainRecordsFromDatabase();
+    if (_isLocationPermissionGranted) {
+      _updateCurrentLocation();
+    }
   }
 
   void _saveSettingsAndReload() async {
-    try {
-      await _saveSettings();
-      _loadTrainRecordsFromDatabase();
-    } catch (e) {}
+    await _saveSettings();
+    _loadTrainRecordsFromDatabase();
   }
 
   String _getTimeFilterLabel() {
@@ -885,132 +458,88 @@ class MapWebViewScreenState extends State<MapWebViewScreen>
     }
   }
 
-  void _onMapStateChanged(Map<String, dynamic> mapState) {
-    try {
-      final lat = (mapState['lat'] as num).toDouble();
-      final lng = (mapState['lng'] as num).toDouble();
-      final zoom = (mapState['zoom'] as num).toDouble();
-      final bearing = (mapState['bearing'] as num).toDouble();
+  void _showTimeFilterDialog() {
+    final items = {
+      'unlimited': '无限制',
+      '1hour': '最近1小时',
+      '6hours': '最近6小时',
+      '12hours': '最近12小时',
+      '24hours': '最近24小时',
+      '7days': '最近7天',
+      '30days': '最近30天',
+    };
 
-      setState(() {
-        _currentLocation = LatLng(lat, lng);
-        _currentZoom = zoom;
-        _currentRotation = bearing;
-      });
-
-      Future.microtask(() {
-        if (mounted) {
-          _saveSettings();
-        }
-      });
-    } catch (e) {}
+    showDialog(
+      context: context,
+      builder: (_) => SimpleDialog(
+        title: const Text('时间筛选'),
+        children: items.entries
+            .map(
+              (e) => SimpleDialogOption(
+                onPressed: () {
+                  setState(() => _timeFilter = e.key);
+                  Navigator.of(context).pop();
+                  _saveSettingsAndReload();
+                },
+                child: Text(e.value),
+              ),
+            )
+            .toList(),
+      ),
+    );
   }
 
-  void _centerToUserLocation() async {
-    if (_currentPosition != null) {
-      final userLocation =
-          LatLng(_currentPosition!.latitude, _currentPosition!.longitude);
-      _centerMap(userLocation, zoom: 15.0);
-    } else {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('正在获取当前位置...')),
-        );
+  String _mapStyleJson() {
+    final layers = [
+      {
+        'id': 'osm',
+        'type': 'raster',
+        'source': 'osm',
+        'minzoom': 0,
+        'maxzoom': 19,
+      },
+      {
+        'id': 'railway',
+        'type': 'raster',
+        'source': 'railway',
+        'minzoom': 0,
+        'maxzoom': 19,
       }
+    ];
 
-      try {
-        await _forceUpdateLocation();
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('获取位置失败: $e')),
-          );
+    return jsonEncode({
+      'version': 8,
+      'name': 'LBJ MapLibre',
+      'sources': {
+        'osm': {
+          'type': 'raster',
+          'tiles': [
+            'https://a.tile.openstreetmap.org/{z}/{x}/{y}.png',
+            'https://b.tile.openstreetmap.org/{z}/{x}/{y}.png',
+            'https://c.tile.openstreetmap.org/{z}/{x}/{y}.png'
+          ],
+          'tileSize': 256,
+          'attribution': '© OpenStreetMap contributors'
+        },
+        'railway': {
+          'type': 'raster',
+          'tiles': [
+            'https://a.tiles.openrailwaymap.org/standard/{z}/{x}/{y}.png',
+            'https://b.tiles.openrailwaymap.org/standard/{z}/{x}/{y}.png',
+            'https://c.tiles.openrailwaymap.org/standard/{z}/{x}/{y}.png'
+          ],
+          'tileSize': 256,
+          'attribution': '© OpenRailwayMap'
         }
-      }
-    }
-  }
-
-  void _centerToLastTrain() {
-    if (_trainRecords.isNotEmpty && _lastTrainLocation != null) {
-      _centerMap(_lastTrainLocation!, zoom: 15.0);
-    }
-  }
-
-  Future<void> _forceUpdateLocation() async {
-    try {
-      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      if (!serviceEnabled) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('请开启定位服务')),
-          );
-        }
-        return;
-      }
-
-      LocationPermission permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-      }
-
-      if (permission == LocationPermission.deniedForever) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('定位权限被永久拒绝，请在设置中开启')),
-          );
-        }
-        return;
-      }
-
-      if (permission != LocationPermission.whileInUse &&
-          permission != LocationPermission.always) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('定位权限不足')),
-          );
-        }
-        return;
-      }
-
-      Position position = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.best,
-        forceAndroidLocationManager: true,
-        timeLimit: const Duration(seconds: 20),
-      );
-
-      final newLocation = LatLng(position.latitude, position.longitude);
-      setState(() {
-        _currentPosition = position;
-        _isLocationPermissionGranted = true;
-      });
-
-      _centerMap(newLocation, zoom: 16.0);
-
-      _updateUserLocation();
-    } catch (e) {}
-  }
-
-  void _refreshMap() {
-    _loadTrainRecordsFromDatabase();
-
-    if (_isLocationPermissionGranted) {
-      _forceUpdateLocation();
-    } else {
-      _updateUserLocation();
-    }
-
-    _controller.runJavaScript('''
-      if (window.MapInterface) {
-        window.MapInterface.getTrainMarkersCount();
-      }
-    ''');
+      },
+      'layers': layers,
+    });
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _saveSettings();
-
     _refreshTimer?.cancel();
     _locationUpdateTimer?.cancel();
     super.dispose();
@@ -1018,11 +547,46 @@ class MapWebViewScreenState extends State<MapWebViewScreen>
 
   @override
   Widget build(BuildContext context) {
+    final initialTarget = _currentLocation ??
+        _lastTrainLocation ??
+        const latlong.LatLng(39.9042, 116.4074);
+
     return Scaffold(
       backgroundColor: const Color(0xFF121212),
       body: Stack(
         children: [
-          WebViewWidget(controller: _controller),
+          MapLibreMap(
+            styleString: _mapStyleJson(),
+            initialCameraPosition: CameraPosition(
+              target: LatLng(initialTarget.latitude, initialTarget.longitude),
+              zoom: _currentZoom,
+              bearing: _currentRotation,
+            ),
+            trackCameraPosition: true,
+            onMapCreated: (controller) {
+              _controller = controller;
+              controller.onSymbolTapped.add(_onSymbolTapped);
+            },
+            onStyleLoadedCallback: () async {
+              _isStyleLoaded = true;
+              if (!_isMapInitialized) {
+                _isMapInitialized = true;
+              }
+              await _toggleRailwayVisibilityWithoutFlip();
+              await _updateUserLocation();
+              await _updateTrainMarkers();
+            },
+            onCameraIdle: () async {
+              final camera = _controller?.cameraPosition;
+              if (camera != null) {
+                _currentLocation =
+                    latlong.LatLng(camera.target.latitude, camera.target.longitude);
+                _currentZoom = camera.zoom;
+                _currentRotation = camera.bearing;
+                await _saveSettings();
+              }
+            },
+          ),
           if (_isLoading)
             Container(
               color: const Color(0xFF121212).withValues(alpha: 0.8),
@@ -1039,29 +603,24 @@ class MapWebViewScreenState extends State<MapWebViewScreen>
               mainAxisSize: MainAxisSize.min,
               children: [
                 FloatingActionButton(
-                  heroTag: "time_filter",
+                  heroTag: 'time_filter',
                   mini: true,
                   backgroundColor: const Color(0xFF1E1E1E),
-                  onPressed: () {
-                    _reloadSettingsIfNeeded();
-                    _showTimeFilterDialog();
-                  },
+                  onPressed: _showTimeFilterDialog,
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      const Icon(Icons.filter_list,
-                          color: Colors.white, size: 18),
+                      const Icon(Icons.filter_list, color: Colors.white, size: 18),
                       Text(
                         _getTimeFilterLabel(),
-                        style:
-                            const TextStyle(color: Colors.white, fontSize: 8),
+                        style: const TextStyle(color: Colors.white, fontSize: 8),
                       ),
                     ],
                   ),
                 ),
                 const SizedBox(height: 8),
                 FloatingActionButton(
-                  heroTag: "refresh",
+                  heroTag: 'refresh',
                   mini: true,
                   backgroundColor: const Color(0xFF1E1E1E),
                   onPressed: _refreshMap,
@@ -1069,20 +628,18 @@ class MapWebViewScreenState extends State<MapWebViewScreen>
                 ),
                 const SizedBox(height: 8),
                 FloatingActionButton(
-                  heroTag: "layers",
+                  heroTag: 'layers',
                   mini: true,
                   backgroundColor: const Color(0xFF1E1E1E),
                   onPressed: _toggleRailwayLayer,
                   child: Icon(
-                    _isRailwayLayerVisible
-                        ? Icons.layers
-                        : Icons.layers_outlined,
+                    _isRailwayLayerVisible ? Icons.layers : Icons.layers_outlined,
                     color: Colors.white,
                   ),
                 ),
                 const SizedBox(height: 8),
                 FloatingActionButton(
-                  heroTag: "location",
+                  heroTag: 'location',
                   mini: true,
                   backgroundColor: const Color(0xFF1E1E1E),
                   onPressed: _centerToUserLocation,
@@ -1090,7 +647,7 @@ class MapWebViewScreenState extends State<MapWebViewScreen>
                 ),
                 const SizedBox(height: 8),
                 FloatingActionButton(
-                  heroTag: "last_train",
+                  heroTag: 'last_train',
                   mini: true,
                   backgroundColor: const Color(0xFF1E1E1E),
                   onPressed: _centerToLastTrain,
@@ -1102,5 +659,12 @@ class MapWebViewScreenState extends State<MapWebViewScreen>
         ],
       ),
     );
+  }
+
+  Future<void> _toggleRailwayVisibilityWithoutFlip() async {
+    if (_controller == null || !_isStyleLoaded) return;
+    try {
+      await _controller!.setLayerVisibility('railway', _isRailwayLayerVisible);
+    } catch (_) {}
   }
 }

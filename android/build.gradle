@@ -1,8 +1,10 @@
 allprojects {
     repositories {
-        maven { url 'https://maven.aliyun.com/repository/central' }
+        // Prefer official repositories first for better availability.
         google()
         mavenCentral()
+        // Keep mirror as fallback.
+        maven { url 'https://maven.aliyun.com/repository/central' }
     }
 }
 
