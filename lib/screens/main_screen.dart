@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:async';
-import 'dart:developer' as developer;
 import 'dart:math' as math;
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:lbjconsole/models/train_record.dart';
@@ -16,6 +15,7 @@ import 'package:lbjconsole/services/background_service.dart';
 import 'package:lbjconsole/services/rtl_tcp_service.dart';
 import 'package:lbjconsole/services/audio_input_service.dart';
 import 'package:lbjconsole/themes/app_theme.dart';
+import 'package:lbjconsole/util/app_log.dart';
 import 'package:lbjconsole/widgets/audio_waterfall_widget.dart';
 
 class _ConnectionStatusWidget extends StatefulWidget {
@@ -45,7 +45,6 @@ class _ConnectionStatusWidget extends StatefulWidget {
 class _ConnectionStatusWidgetState extends State<_ConnectionStatusWidget> {
   StreamSubscription? _connectionSubscription;
   String _deviceStatus = "未连接";
-  bool _isConnected = false;
 
   @override
   void initState() {
@@ -54,12 +53,10 @@ class _ConnectionStatusWidgetState extends State<_ConnectionStatusWidget> {
         widget.bleService.connectionStream.listen((connected) {
       if (mounted) {
         setState(() {
-          _isConnected = connected;
           _deviceStatus = connected ? "已连接" : "未连接";
         });
       }
     });
-    _isConnected = widget.bleService.isConnected;
     _deviceStatus = widget.bleService.deviceStatus;
   }
 
@@ -99,13 +96,13 @@ class _ConnectionStatusWidgetState extends State<_ConnectionStatusWidget> {
         displayTime = widget.audioLastReceivedTime;
         break;
       case InputSource.bluetooth:
-        isConnected = _isConnected;
+        isConnected = widget.bleService.isConnected;
         statusColor = isConnected ? Colors.green : Colors.red;
         statusText = _deviceStatus;
         displayTime = widget.lastReceivedTime;
         break;
     }
-    
+
     return Row(
       children: [
         Column(
@@ -271,11 +268,10 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   int _temporaryRecordSerial = 0;
   bool _temporaryRecordsEnabled = false;
   bool _isHistoryEditMode = false;
-  
+
   InputSource _inputSource = InputSource.bluetooth;
-  
+
   bool _rtlTcpConnected = false;
-  bool _isConnected = false;
   final GlobalKey<HistoryScreenState> _historyScreenKey =
       GlobalKey<HistoryScreenState>();
   final GlobalKey<RealtimeScreenState> _realtimeScreenKey =
@@ -299,25 +295,25 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   void _loadInputSettings() async {
     final settings = await _databaseService.getAllSettings();
     final sourceStr = settings?['inputSource'] as String? ?? 'bluetooth';
-    
+
     if (mounted) {
       final newSource = InputSource.values.firstWhere(
         (e) => e.name == sourceStr,
         orElse: () => InputSource.bluetooth,
       );
-      
+
       setState(() {
         _inputSource = newSource;
         _rtlTcpConnected = _rtlTcpService.isConnected;
       });
-      
+
       if (_inputSource == InputSource.rtlTcp && !_rtlTcpConnected) {
         final host = settings?['rtlTcpHost']?.toString() ?? '127.0.0.1';
         final port = settings?['rtlTcpPort']?.toString() ?? '14423';
         _connectToRtlTcp(host, port);
       } else if (_inputSource == InputSource.audioInput) {
         await AudioInputService().startListening();
-        setState(() {}); 
+        setState(() {});
       }
     }
   }
@@ -341,7 +337,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         });
       }
     });
-    
+
     _rtlTcpLastReceivedTimeSubscription =
         _rtlTcpService.lastReceivedTimeStream.listen((time) {
       if (mounted) {
@@ -350,7 +346,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         });
       }
     });
-    
+
     _audioLastReceivedTimeSubscription =
         AudioInputService().lastReceivedTimeStream.listen((time) {
       if (mounted) {
@@ -370,11 +366,11 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
           (e) => e.name == sourceStr,
           orElse: () => InputSource.bluetooth,
         );
-        
+
         setState(() {
           _inputSource = newInputSource;
         });
-        
+
         switch (newInputSource) {
           case InputSource.rtlTcp:
             setState(() {
@@ -392,7 +388,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
             });
             break;
         }
-        
+
         if (_currentIndex == 1) {
           _realtimeScreenKey.currentState?.loadRecords(scrollToTop: false);
         }
@@ -403,21 +399,21 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   void _setupConnectionListener() {
     _connectionSubscription = _bleService.connectionStream.listen((connected) {
       if (mounted) {
-        setState(() {
-          _isConnected = connected;
-        });
+        setState(() {});
       }
     });
-    
-    _rtlTcpConnectionSubscription = _rtlTcpService.connectionStream.listen((connected) {
+
+    _rtlTcpConnectionSubscription =
+        _rtlTcpService.connectionStream.listen((connected) {
       if (mounted) {
         setState(() {
           _rtlTcpConnected = connected;
         });
       }
     });
-    
-    _audioConnectionSubscription = AudioInputService().connectionStream.listen((listening) {
+
+    _audioConnectionSubscription =
+        AudioInputService().connectionStream.listen((listening) {
       if (mounted) {
         setState(() {});
       }
@@ -428,7 +424,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     try {
       await _rtlTcpService.connect(host: host, port: port);
     } catch (e) {
-      developer.log('rtl_tcp: connect_fail: $e');
+      AppLog.error('rtl-tcp', 'connect failed', e);
     }
   }
 
@@ -468,10 +464,10 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
   Future<void> _insertTemporaryRecord() async {
     final now = DateTime.now();
-    final latStep = (_temporaryRandom.nextDouble() - 0.5) *
-        _temporaryMaxStepDegrees;
-    final lngStep = (_temporaryRandom.nextDouble() - 0.5) *
-        _temporaryMaxStepDegrees;
+    final latStep =
+        (_temporaryRandom.nextDouble() - 0.5) * _temporaryMaxStepDegrees;
+    final lngStep =
+        (_temporaryRandom.nextDouble() - 0.5) * _temporaryMaxStepDegrees;
 
     _temporaryLat = ((_temporaryLat ?? 35.0) + latStep)
         .clamp(_temporaryMinLat, _temporaryMaxLat)
@@ -509,8 +505,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   }
 
   double _temporaryStartOffset() {
-    return (_temporaryRandom.nextDouble() - 0.5) *
-        _temporaryStartRadiusDegrees;
+    return (_temporaryRandom.nextDouble() - 0.5) * _temporaryStartRadiusDegrees;
   }
 
   String _temporaryClockText(DateTime time) {
@@ -563,7 +558,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         _processRecord(record);
       }
     });
-    
+
     _audioDataSubscription = AudioInputService().dataStream.listen((record) {
       if (_inputSource == InputSource.audioInput) {
         _processRecord(record);
@@ -582,14 +577,12 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     showDialog(
       context: context,
       barrierDismissible: true,
-      builder: (context) =>
-          _PixelPerfectBluetoothDialog(
-              bleService: _bleService, 
-              inputSource: _inputSource
-          ),
+      builder: (context) => _PixelPerfectBluetoothDialog(
+          bleService: _bleService, inputSource: _inputSource),
     ).then((_) {
       _bleService.setAutoConnectBlocked(false);
-      if (_inputSource == InputSource.bluetooth && !_bleService.isManualDisconnect) {
+      if (_inputSource == InputSource.bluetooth &&
+          !_bleService.isManualDisconnect) {
         _bleService.ensureConnection();
       }
     });
@@ -635,27 +628,27 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       ),
       centerTitle: false,
       actions: [
-          Row(
-            children: [
-              _ConnectionStatusWidget(
-                bleService: _bleService,
-                rtlTcpService: _rtlTcpService,
-                lastReceivedTime: _lastReceivedTime,
-                rtlTcpLastReceivedTime: _rtlTcpLastReceivedTime,
-                audioLastReceivedTime: _audioLastReceivedTime,
-                inputSource: _inputSource,
-                rtlTcpConnected: _rtlTcpConnected,
+        Row(
+          children: [
+            _ConnectionStatusWidget(
+              bleService: _bleService,
+              rtlTcpService: _rtlTcpService,
+              lastReceivedTime: _lastReceivedTime,
+              rtlTcpLastReceivedTime: _rtlTcpLastReceivedTime,
+              audioLastReceivedTime: _audioLastReceivedTime,
+              inputSource: _inputSource,
+              rtlTcpConnected: _rtlTcpConnected,
+            ),
+            IconButton(
+              icon: Icon(
+                statusIcon,
+                color: Colors.white,
               ),
-              IconButton(
-                icon: Icon(
-                  statusIcon,
-                  color: Colors.white,
-                ),
-                onPressed: _showConnectionDialog,
-              ),
-            ],
-          ),
-        ],
+              onPressed: _showConnectionDialog,
+            ),
+          ],
+        ),
+      ],
     );
   }
 
@@ -776,7 +769,8 @@ enum _ScanState { initial, scanning, finished }
 class _PixelPerfectBluetoothDialog extends StatefulWidget {
   final BLEService bleService;
   final InputSource inputSource;
-  const _PixelPerfectBluetoothDialog({required this.bleService, required this.inputSource});
+  const _PixelPerfectBluetoothDialog(
+      {required this.bleService, required this.inputSource});
   @override
   State<_PixelPerfectBluetoothDialog> createState() =>
       _PixelPerfectBluetoothDialogState();
@@ -787,31 +781,32 @@ class _PixelPerfectBluetoothDialogState
   List<BluetoothDevice> _devices = [];
   _ScanState _scanState = _ScanState.initial;
   StreamSubscription? _connectionSubscription;
-  StreamSubscription? _lastReceivedTimeSubscription;
-  DateTime? _lastReceivedTime;
   StreamSubscription? _rtlTcpConnectionSubscription;
   bool _rtlTcpConnected = false;
-  
+
   @override
   void initState() {
     super.initState();
     _connectionSubscription = widget.bleService.connectionStream.listen((_) {
       if (mounted) setState(() {});
     });
-    
-    _rtlTcpConnectionSubscription = widget.bleService.rtlTcpService?.connectionStream.listen((connected) {
+
+    _rtlTcpConnectionSubscription =
+        widget.bleService.rtlTcpService?.connectionStream.listen((connected) {
       if (mounted) {
         setState(() {
           _rtlTcpConnected = connected;
         });
       }
     });
-    
-    if (widget.inputSource == InputSource.rtlTcp && widget.bleService.rtlTcpService != null) {
+
+    if (widget.inputSource == InputSource.rtlTcp &&
+        widget.bleService.rtlTcpService != null) {
       _rtlTcpConnected = widget.bleService.rtlTcpService!.isConnected;
     }
-    
-    if (!widget.bleService.isConnected && widget.inputSource == InputSource.bluetooth) {
+
+    if (!widget.bleService.isConnected &&
+        widget.inputSource == InputSource.bluetooth) {
       _startScan();
     }
   }
@@ -820,7 +815,6 @@ class _PixelPerfectBluetoothDialogState
   void dispose() {
     _connectionSubscription?.cancel();
     _rtlTcpConnectionSubscription?.cancel();
-    _lastReceivedTimeSubscription?.cancel();
     super.dispose();
   }
 
@@ -857,11 +851,11 @@ class _PixelPerfectBluetoothDialogState
       InputSource.rtlTcp => ('RTL-TCP 服务器', _buildRtlTcpView(context)),
       InputSource.audioInput => ('音频输入', _buildAudioInputView(context)),
       InputSource.bluetooth => (
-        '蓝牙设备',
-        widget.bleService.isConnected
-            ? _buildConnectedView(context, widget.bleService.connectedDevice)
-            : _buildDisconnectedView(context)
-      ),
+          '蓝牙设备',
+          widget.bleService.isConnected
+              ? _buildConnectedView(context, widget.bleService.connectedDevice)
+              : _buildDisconnectedView(context)
+        ),
     };
 
     return AlertDialog(
@@ -925,10 +919,12 @@ class _PixelPerfectBluetoothDialogState
 
   Widget _buildRtlTcpView(BuildContext context) {
     final isConnected = _rtlTcpConnected;
-    final currentAddress = widget.bleService.rtlTcpService?.currentAddress ?? '未配置';
-    
+    final currentAddress =
+        widget.bleService.rtlTcpService?.currentAddress ?? '未配置';
+
     return Column(mainAxisSize: MainAxisSize.min, children: [
-      Icon(Icons.wifi, size: 48, color: isConnected ? Colors.green : Colors.red),
+      Icon(Icons.wifi,
+          size: 48, color: isConnected ? Colors.green : Colors.red),
       const SizedBox(height: 16),
       Text(isConnected ? '已连接' : '未连接',
           style: Theme.of(context)
@@ -942,9 +938,9 @@ class _PixelPerfectBluetoothDialogState
   }
 
   Widget _buildAudioInputView(BuildContext context) {
-    return Column(mainAxisSize: MainAxisSize.min, children: [
-      const SizedBox(height: 8),
-      const AudioWaterfallWidget(),
+    return const Column(mainAxisSize: MainAxisSize.min, children: [
+      SizedBox(height: 8),
+      AudioWaterfallWidget(),
     ]);
   }
 

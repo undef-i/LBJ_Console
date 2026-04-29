@@ -17,12 +17,10 @@ class BLEService {
   late final RtlTcpService _rtlTcpService;
   RtlTcpService? get rtlTcpService => _rtlTcpService;
 
-  static const String TAG = "LBJ_BT_FLUTTER";
   static final Guid serviceUuid = Guid("0000ffe0-0000-1000-8000-00805f9b34fb");
   static final Guid charUuid = Guid("0000ffe1-0000-1000-8000-00805f9b34fb");
 
   BluetoothDevice? _connectedDevice;
-  BluetoothCharacteristic? _characteristic;
   StreamSubscription<List<int>>? _valueSubscription;
   StreamSubscription<BluetoothConnectionState>? _connectionStateSubscription;
   StreamSubscription<List<ScanResult>>? _scanResultsSubscription;
@@ -80,6 +78,7 @@ class BLEService {
       if (settings != null) {
         _targetDeviceName = settings['deviceName'] ?? 'LBJReceiver';
       }
+    // ignore: empty_catches
     } catch (e) {}
   }
 
@@ -100,17 +99,17 @@ class BLEService {
     _statusController.add("正在重连...");
 
     try {
-      final connected = await FlutterBluePlus.connectedSystemDevices;
+      final connected = await FlutterBluePlus.systemDevices([serviceUuid]);
       final matchingDevices =
           connected.where((d) => d.remoteId.str == _lastKnownDeviceAddress);
       BluetoothDevice? target =
           matchingDevices.isNotEmpty ? matchingDevices.first : null;
 
-      if (target != null) {
-        await connect(target);
-      } else {
+      if (target == null) {
         startScan();
         _isConnecting = false;
+      } else {
+        await connect(target);
       }
     } catch (e) {
       startScan();
@@ -233,7 +232,6 @@ class BLEService {
         if (service.uuid == serviceUuid) {
           for (var char in service.characteristics) {
             if (char.uuid == charUuid) {
-              _characteristic = char;
               await device.requestMtu(512);
               await char.setNotifyValue(true);
               _valueSubscription = char.lastValueStream.listen(_onDataReceived);
@@ -277,6 +275,7 @@ class BLEService {
       final data = utf8.decode(value);
       _dataBuffer.write(data);
       _processDataBuffer();
+    // ignore: empty_catches
     } catch (e) {}
   }
 
@@ -341,6 +340,7 @@ class BLEService {
         _dataController.add(trainRecord);
         DatabaseService.instance.insertRecord(trainRecord);
       }
+    // ignore: empty_catches
     } catch (e) {}
   }
 
@@ -350,7 +350,6 @@ class BLEService {
     } else {
       _deviceStatus = status;
       _connectedDevice = null;
-      _characteristic = null;
       _lastReceivedTime = null;
       _lastReceivedTimeController.add(null);
     }

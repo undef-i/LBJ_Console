@@ -10,7 +10,7 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   await _initializeNotifications();
-  
+
   await BackgroundService.initialize();
 
   await Future.wait([
@@ -24,14 +24,14 @@ void main() async {
 
 Future<void> _initializeNotifications() async {
   final flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
-  
+
   const AndroidInitializationSettings initializationSettingsAndroid =
       AndroidInitializationSettings('@mipmap/ic_launcher');
-      
+
   const InitializationSettings initializationSettings = InitializationSettings(
     android: initializationSettingsAndroid,
   );
-  
+
   await flutterLocalNotificationsPlugin.initialize(initializationSettings);
 }
 

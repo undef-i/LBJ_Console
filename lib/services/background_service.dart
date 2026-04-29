@@ -13,7 +13,6 @@ const int _notificationId = 114514;
 
 @pragma('vm:entry-point')
 class BackgroundService {
-  static final FlutterBackgroundService _service = FlutterBackgroundService();
   static bool _isInitialized = false;
 
   static Future<void> initialize() async {
@@ -127,6 +126,7 @@ class BackgroundService {
               ),
             ),
           );
+        // ignore: empty_catches
         } catch (e) {}
       }
     }
@@ -166,6 +166,7 @@ class BackgroundService {
                 ),
               ),
             );
+          // ignore: empty_catches
           } catch (e) {}
         }
       }

@@ -47,6 +47,7 @@ class MapStateService {
         },
         conflictAlgorithm: ConflictAlgorithm.replace,
       );
+    // ignore: empty_catches
     } catch (e) {}
   }
 
@@ -72,6 +73,7 @@ class MapStateService {
         _memoryCache[key] = state;
         return state;
       }
+    // ignore: empty_catches
     } catch (e) {}
 
     return null;
@@ -87,6 +89,7 @@ class MapStateService {
         where: 'key = ?',
         whereArgs: [key],
       );
+    // ignore: empty_catches
     } catch (e) {}
   }
 
@@ -96,6 +99,7 @@ class MapStateService {
     try {
       final db = await DatabaseService.instance.database;
       await db.delete(_tableName);
+    // ignore: empty_catches
     } catch (e) {}
   }
 

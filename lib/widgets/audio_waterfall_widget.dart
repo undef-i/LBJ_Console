@@ -29,10 +29,10 @@ class _WaterfallCache {
     for (int i = 0; i < 256; i++) {
       final intensity = i / 255.0;
       final color = _intensityToColor(intensity);
-      colorLUT[i] = (color.alpha << 24) |
-          (color.red << 16) |
-          (color.green << 8) |
-          color.blue;
+      colorLUT[i] = ((color.a * 255.0).round() << 24) |
+          ((color.r * 255.0).round() << 16) |
+          ((color.g * 255.0).round() << 8) |
+          (color.b * 255.0).round();
     }
   }
 
@@ -113,6 +113,7 @@ class _AudioWaterfallWidgetState extends State<AudioWaterfallWidget> {
             _rebuildImage();
           }
         }
+      // ignore: empty_catches
       } catch (e) {}
     });
   }
@@ -151,9 +152,9 @@ class _AudioWaterfallWidgetState extends State<AudioWaterfallWidget> {
           decoration: BoxDecoration(
             color: Colors.black,
             border: Border(
-              left: BorderSide(color: Colors.cyan.withOpacity(0.3), width: 2),
-              right: BorderSide(color: Colors.cyan.withOpacity(0.3), width: 2),
-              top: BorderSide(color: Colors.cyan.withOpacity(0.3), width: 2),
+              left: BorderSide(color: Colors.cyan.withValues(alpha: 0.3), width: 2),
+              right: BorderSide(color: Colors.cyan.withValues(alpha: 0.3), width: 2),
+              top: BorderSide(color: Colors.cyan.withValues(alpha: 0.3), width: 2),
             ),
           ),
           child: _currentSpectrum.isEmpty
@@ -168,9 +169,9 @@ class _AudioWaterfallWidgetState extends State<AudioWaterfallWidget> {
           decoration: BoxDecoration(
             color: Colors.black,
             border: Border(
-              left: BorderSide(color: Colors.cyan.withOpacity(0.3), width: 2),
-              right: BorderSide(color: Colors.cyan.withOpacity(0.3), width: 2),
-              bottom: BorderSide(color: Colors.cyan.withOpacity(0.3), width: 2),
+              left: BorderSide(color: Colors.cyan.withValues(alpha: 0.3), width: 2),
+              right: BorderSide(color: Colors.cyan.withValues(alpha: 0.3), width: 2),
+              bottom: BorderSide(color: Colors.cyan.withValues(alpha: 0.3), width: 2),
             ),
           ),
           child: _waterfallImage == null

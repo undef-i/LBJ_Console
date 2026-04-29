@@ -37,11 +37,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late TextEditingController _rtlTcpPortController;
 
   bool _settingsLoaded = false;
-  
+
   String _deviceName = '';
   bool _backgroundServiceEnabled = false;
   bool _notificationsEnabled = true;
-  int _recordCount = 0;
   bool _mergeRecordsEnabled = false;
   bool _hideTimeOnlyRecords = false;
   bool _hideUngroupableRecords = false;
@@ -63,7 +62,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _rtlTcpHostController = TextEditingController();
     _rtlTcpPortController = TextEditingController();
     _loadSettings();
-    _loadRecordCount();
   }
 
   Future<void> _loadSettings() async {
@@ -92,7 +90,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           (e) => e.name == sourceStr,
           orElse: () => InputSource.bluetooth,
         );
-        
+
         _settingsLoaded = true;
       });
     }
@@ -100,7 +98,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _saveSettings() async {
     if (!_settingsLoaded) return;
-    
+
     await _databaseService.updateSettings({
       'deviceName': _deviceName,
       'backgroundServiceEnabled': _backgroundServiceEnabled ? 1 : 0,
@@ -167,8 +165,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ],
             ),
             const SizedBox(height: 16),
-
-
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -200,7 +196,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
               ],
             ),
-
             if (_inputSource == InputSource.bluetooth) ...[
               const SizedBox(height: 16),
               TextField(
@@ -233,7 +228,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 },
               ),
             ],
-
             if (_inputSource == InputSource.rtlTcp) ...[
               const SizedBox(height: 16),
               TextField(
@@ -317,15 +311,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
               )
             ],
-
             if (_inputSource == InputSource.audioInput) ...[
               const SizedBox(height: 16),
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.blue.withOpacity(0.1),
+                  color: Colors.blue.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.blue.withOpacity(0.3)),
+                  border: Border.all(color: Colors.blue.withValues(alpha: 0.3)),
                 ),
                 child: const Row(
                   children: [
@@ -529,10 +522,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               child: Text('仅机车号', style: AppTheme.bodyMedium)),
                           DropdownMenuItem(
                               value: GroupBy.trainOrLoco,
-                              child: Text('车次号或机车号', style: AppTheme.bodyMedium)),
+                              child:
+                                  Text('车次号或机车号', style: AppTheme.bodyMedium)),
                           DropdownMenuItem(
                               value: GroupBy.trainAndLoco,
-                              child: Text('车次号与机车号', style: AppTheme.bodyMedium)),
+                              child:
+                                  Text('车次号与机车号', style: AppTheme.bodyMedium)),
                         ],
                         onChanged: (value) {
                           if (value != null) {
@@ -682,12 +677,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
         padding: const EdgeInsets.all(12.0),
         decoration: BoxDecoration(
           color: isDestructive
-              ? Colors.red.withOpacity(0.1)
+              ? Colors.red.withValues(alpha: 0.1)
               : AppTheme.secondaryBlack,
           borderRadius: BorderRadius.circular(12.0),
           border: Border.all(
             color: isDestructive
-                ? Colors.red.withOpacity(0.3)
+                ? Colors.red.withValues(alpha: 0.3)
                 : Colors.transparent,
             width: 1,
           ),
@@ -728,15 +723,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
       ),
     );
-  }
-
-  Future<void> _loadRecordCount() async {
-    final count = await _databaseService.getRecordCount();
-    if (mounted) {
-      setState(() {
-        _recordCount = count;
-      });
-    }
   }
 
   Future<String> _getAppVersion() async {
@@ -839,6 +825,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
       try {
         final exportedPath = await _databaseService.exportDataAsJson();
+        if (!mounted) return;
         Navigator.pop(context);
 
         if (exportedPath != null) {
@@ -857,6 +844,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           );
         }
       } catch (e) {
+        if (!mounted) return;
         Navigator.pop(context);
         scaffoldMessenger.showSnackBar(
           SnackBar(
@@ -904,6 +892,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (resultFile == null) return;
     final selectedFile = resultFile.files.single.path;
     if (selectedFile == null) return;
+    if (!mounted) return;
 
     showDialog(
       context: context,
@@ -921,6 +910,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     try {
       final success = await _databaseService.importDataFromJson(selectedFile);
+      if (!mounted) return;
       Navigator.pop(context);
 
       if (success) {
@@ -931,7 +921,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
         );
 
         await _loadSettings();
-        await _loadRecordCount();
         setState(() {});
       } else {
         scaffoldMessenger.showSnackBar(
@@ -941,6 +930,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         );
       }
     } catch (e) {
+      if (!mounted) return;
       Navigator.pop(context);
       scaffoldMessenger.showSnackBar(
         SnackBar(
@@ -973,6 +963,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
 
     if (result != true) return;
+    if (!mounted) return;
 
     showDialog(
       context: context,
@@ -1000,6 +991,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         'inputSource': 'bluetooth',
       });
 
+      if (!mounted) return;
       Navigator.pop(context);
 
       scaffoldMessenger.showSnackBar(
@@ -1009,9 +1001,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       );
 
       await _loadSettings();
-      await _loadRecordCount();
       setState(() {});
     } catch (e) {
+      if (!mounted) return;
       Navigator.pop(context);
       scaffoldMessenger.showSnackBar(
         SnackBar(

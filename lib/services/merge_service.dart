@@ -119,8 +119,7 @@ class MergeService {
       }
     });
 
-    _reuseDiscardedRecords(
-        discardedRecords, mergedRecordIds, settings.groupBy);
+    _reuseDiscardedRecords(discardedRecords, mergedRecordIds, settings.groupBy);
 
     final singleRecords = filteredRecords
         .where((r) => !mergedRecordIds.contains(r.uniqueId))

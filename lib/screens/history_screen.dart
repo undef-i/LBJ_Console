@@ -413,6 +413,7 @@ class HistoryScreenState extends State<HistoryScreen> {
 
         _queueRenderViewportAnchorRestore(renderAnchor);
       }
+    // ignore: empty_catches
     } catch (e) {}
   }
 
@@ -731,9 +732,8 @@ class HistoryScreenState extends State<HistoryScreen> {
           .then((optimalZoom) {
         if (mounted) {
           setState(() {
-            _mapOptimalZoom[mapId] = optimalZoom.isFinite
-                ? optimalZoom
-                : _singlePointMapZoom;
+            _mapOptimalZoom[mapId] =
+                optimalZoom.isFinite ? optimalZoom : _singlePointMapZoom;
             _mapCalculating[mapId] = false;
           });
         }
@@ -870,8 +870,6 @@ class HistoryScreenState extends State<HistoryScreen> {
     final hasLocoInfo =
         formattedLocoInfo.isNotEmpty && formattedLocoInfo != "<NUL>";
     final shouldShowTrainRow = hasTrainNumber || hasDirection || hasLocoInfo;
-    final hasPosition = _parsePosition(record.positionInfo) != null;
-
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
         Flexible(
@@ -1037,6 +1035,7 @@ class HistoryScreenState extends State<HistoryScreen> {
           return LatLng(lat!, lng!);
         }
       }
+    // ignore: empty_catches
     } catch (e) {}
     return null;
   }

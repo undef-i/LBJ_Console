@@ -3,10 +3,10 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'dart:developer' as developer;
 import 'package:gbk_codec/gbk_codec.dart';
 import 'package:lbjconsole/models/train_record.dart';
 import 'package:lbjconsole/services/database_service.dart';
+import 'package:lbjconsole/util/app_log.dart';
 
 const String _lbjInfoAddr = "1234000";
 const String _lbjInfo2Addr = "1234002";
@@ -109,6 +109,7 @@ class _LbJState {
             ];
             lbjClass = String.fromCharCodes(classBytes
                 .where((b) => b > 0x1F && b < 0x7F && b != 0x22 && b != 0x2C));
+          // ignore: empty_catches
           } catch (e) {}
         }
         if (buffer.length >= 12) loco = buffer.substring(4, 12);
@@ -119,6 +120,7 @@ class _LbJState {
           try {
             routeBytes[0] = _hexToChar(_info2Hex[14], _info2Hex[15]);
             routeBytes[1] = _hexToChar(_info2Hex[16], _info2Hex[17]);
+          // ignore: empty_catches
           } catch (e) {}
         }
 
@@ -126,6 +128,7 @@ class _LbJState {
           try {
             routeBytes[2] = _hexToChar(_info2Hex[18], _info2Hex[19]);
             routeBytes[3] = _hexToChar(_info2Hex[20], _info2Hex[21]);
+          // ignore: empty_catches
           } catch (e) {}
         }
 
@@ -135,6 +138,7 @@ class _LbJState {
             routeBytes[5] = _hexToChar(_info2Hex[24], _info2Hex[25]);
             routeBytes[6] = _hexToChar(_info2Hex[26], _info2Hex[27]);
             routeBytes[7] = _hexToChar(_info2Hex[28], _info2Hex[29]);
+          // ignore: empty_catches
           } catch (e) {}
         }
         route = _gbkToUtf8(routeBytes);
@@ -165,8 +169,7 @@ class _LbJState {
       gpsPosition = "$posLatDeg°$posLatMin′";
     }
     if (posLonDeg.isNotEmpty && posLonMin.isNotEmpty) {
-      gpsPosition +=
-          "${gpsPosition.isEmpty ? "" : " "}$posLonDeg°$posLonMin′";
+      gpsPosition += "${gpsPosition.isEmpty ? "" : " "}$posLonDeg°$posLonMin′";
     }
 
     String kmPosition = positionKm.replaceAll(' <NUL>', '');
@@ -196,8 +199,10 @@ class AudioInputService {
   factory AudioInputService() => _instance;
   AudioInputService._internal();
 
-  static const _methodChannel = MethodChannel('org.noxylva.lbjconsole/audio_input');
-  static const _eventChannel = EventChannel('org.noxylva.lbjconsole/audio_input_event');
+  static const _methodChannel =
+      MethodChannel('org.noxylva.lbjconsole/audio_input');
+  static const _eventChannel =
+      EventChannel('org.noxylva.lbjconsole/audio_input_event');
 
   final StreamController<String> _statusController =
       StreamController<String>.broadcast();
@@ -211,7 +216,8 @@ class AudioInputService {
   Stream<String> get statusStream => _statusController.stream;
   Stream<TrainRecord> get dataStream => _dataController.stream;
   Stream<bool> get connectionStream => _connectionController.stream;
-  Stream<DateTime?> get lastReceivedTimeStream => _lastReceivedTimeController.stream;
+  Stream<DateTime?> get lastReceivedTimeStream =>
+      _lastReceivedTimeController.stream;
 
   bool _isListening = false;
   DateTime? _lastReceivedTime;
@@ -270,10 +276,7 @@ class AudioInputService {
             _lastRawMessage = currentRawMessage;
 
             if (kDebugMode) {
-              developer.log(
-                'Audio-RAW: $currentRawMessage',
-                name: 'AudioInput',
-              );
+              AppLog.info('audio', 'raw $currentRawMessage');
             }
 
             if (!_isListening) {
@@ -292,9 +295,8 @@ class AudioInputService {
               DatabaseService.instance.insertRecord(trainRecord);
             }
           }
-        } catch (e, s) {
-          developer.log('Audio StateMachine Error: $e',
-              name: 'AudioInput', error: e, stackTrace: s);
+        } catch (e) {
+          AppLog.error('audio', 'state machine failed', e);
         }
       },
       onError: (dynamic error) {
@@ -311,7 +313,7 @@ class AudioInputService {
     if (!status.isGranted) {
       status = await Permission.microphone.request();
       if (!status.isGranted) {
-        developer.log('Microphone permission denied', name: 'AudioInput');
+        AppLog.warn('audio', 'microphone permission denied');
         return false;
       }
     }
@@ -322,17 +324,17 @@ class AudioInputService {
       _isListening = true;
       _statusController.add("监听中");
       _connectionController.add(true);
-      developer.log('Audio input started', name: 'AudioInput');
+      AppLog.info('audio', 'started');
       return true;
     } on PlatformException catch (e) {
-      developer.log('Failed to start audio input: ${e.message}', name: 'AudioInput');
+      AppLog.error('audio', 'start failed', e.message);
       return false;
     }
   }
 
   Future<void> stopListening() async {
     if (!_isListening) return;
-    
+
     try {
       await _methodChannel.invokeMethod('stop');
       _isListening = false;
@@ -341,9 +343,9 @@ class AudioInputService {
       _statusController.add("已停止");
       _connectionController.add(false);
       _lastReceivedTimeController.add(null);
-      developer.log('Audio input stopped', name: 'AudioInput');
+      AppLog.info('audio', 'stopped');
     } catch (e) {
-      developer.log('Error stopping audio input: $e', name: 'AudioInput');
+      AppLog.error('audio', 'stop failed', e);
     }
   }
 

@@ -44,6 +44,7 @@ class LocationService {
       }
 
       _isLocationPermissionGranted = true;
+    // ignore: empty_catches
     } catch (e) {}
   }
 
@@ -52,12 +53,14 @@ class LocationService {
 
     try {
       Position position = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
-        forceAndroidLocationManager: true,
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+        ),
       );
 
       _currentLocation = LatLng(position.latitude, position.longitude);
       _locationStreamController.add(_currentLocation);
+    // ignore: empty_catches
     } catch (e) {}
   }
 

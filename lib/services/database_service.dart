@@ -4,15 +4,11 @@ import 'package:path/path.dart';
 import 'package:path_provider/path_provider.dart';
 import 'dart:io';
 import 'dart:convert';
-import 'dart:developer' as developer;
 
 import 'package:lbjconsole/models/train_record.dart';
+import 'package:lbjconsole/util/app_log.dart';
 
-enum InputSource {
-  bluetooth,
-  rtlTcp,
-  audioInput
-}
+enum InputSource { bluetooth, rtlTcp, audioInput }
 
 class DatabaseService {
   static final DatabaseService instance = DatabaseService._internal();
@@ -71,7 +67,7 @@ class DatabaseService {
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
-    developer.log('Database upgrading from $oldVersion to $newVersion', name: 'Database');
+    AppLog.info('database', 'upgrade $oldVersion -> $newVersion');
 
     if (oldVersion < 2) {
       await db.execute(
@@ -85,6 +81,7 @@ class DatabaseService {
       try {
         await db.execute(
             'ALTER TABLE $appSettingsTable ADD COLUMN mapTimeFilter TEXT NOT NULL DEFAULT "unlimited"');
+      // ignore: empty_catches
       } catch (e) {}
     }
     if (oldVersion < 5) {
@@ -110,22 +107,22 @@ class DatabaseService {
     if (oldVersion < 9) {
       await db.execute(
           'ALTER TABLE $appSettingsTable ADD COLUMN inputSource TEXT NOT NULL DEFAULT "bluetooth"');
-      
+
       try {
-        final List<Map<String, dynamic>> results = await db.query(appSettingsTable, columns: ['rtlTcpEnabled'], where: 'id = 1');
+        final List<Map<String, dynamic>> results = await db.query(
+            appSettingsTable,
+            columns: ['rtlTcpEnabled'],
+            where: 'id = 1');
         if (results.isNotEmpty) {
           final int rtlTcpEnabled = results.first['rtlTcpEnabled'] as int? ?? 0;
           if (rtlTcpEnabled == 1) {
-            await db.update(
-              appSettingsTable, 
-              {'inputSource': 'rtlTcp'},
-              where: 'id = 1'
-            );
-            developer.log('Migrated V8 settings: inputSource set to rtlTcp', name: 'Database');
+            await db.update(appSettingsTable, {'inputSource': 'rtlTcp'},
+                where: 'id = 1');
+            AppLog.info('database', 'migrated input source to rtl-tcp');
           }
         }
       } catch (e) {
-        developer.log('Migration V8->V9 data update failed: $e', name: 'Database');
+        AppLog.warn('database', 'migration v9 data update failed: $e');
       }
     }
     if (oldVersion < 10) {

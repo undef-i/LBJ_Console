@@ -242,7 +242,7 @@ class RealtimeScreenState extends State<RealtimeScreen> {
                           padding: const EdgeInsets.symmetric(
                               horizontal: 6, vertical: 2),
                           decoration: BoxDecoration(
-                            color: Colors.black.withOpacity(0.8),
+                            color: Colors.black.withValues(alpha: 0.8),
                             borderRadius: BorderRadius.circular(3),
                           ),
                           child: Text(
@@ -268,8 +268,11 @@ class RealtimeScreenState extends State<RealtimeScreen> {
 
           final routeEntries =
               _validPositionsForRecords(mergedRecord.records).toList();
-          final routePoints =
-              routeEntries.map((entry) => entry.value).toList().reversed.toList();
+          final routePoints = routeEntries
+              .map((entry) => entry.value)
+              .toList()
+              .reversed
+              .toList();
 
           if (routePoints.isNotEmpty) {
             final markerRecord = routeEntries.first.key;
@@ -288,7 +291,7 @@ class RealtimeScreenState extends State<RealtimeScreen> {
                           padding: const EdgeInsets.symmetric(
                               horizontal: 6, vertical: 2),
                           decoration: BoxDecoration(
-                            color: Colors.black.withOpacity(0.8),
+                            color: Colors.black.withValues(alpha: 0.8),
                             borderRadius: BorderRadius.circular(3),
                           ),
                           child: Text(
@@ -487,70 +490,6 @@ class RealtimeScreenState extends State<RealtimeScreen> {
       return "${record.locoType}-${record.loco.length > 5 ? record.loco.substring(record.loco.length - 5) : record.loco}";
     }
     return "列车";
-  }
-
-  void _showRecordDetails(TrainRecord record) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1E1E1E),
-        title: Text(
-          _getTrainDisplayName(record),
-          style: const TextStyle(color: Colors.white),
-        ),
-        content: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _buildDetailRow("时间", record.time),
-              _buildDetailRow("位置", record.position),
-              _buildDetailRow("路线", record.route),
-              _buildDetailRow("速度", record.speed),
-              _buildDetailRow("坐标", () {
-                final position = _parsePositionFromRecord(record);
-                return position != null
-                    ? "${position.latitude.toStringAsFixed(6)}, ${position.longitude.toStringAsFixed(6)}"
-                    : "无数据";
-              }()),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('关闭'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildDetailRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4.0),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 60,
-            child: Text(
-              "$label: ",
-              style: const TextStyle(
-                color: Colors.grey,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-          Expanded(
-            child: Text(
-              value.isEmpty || value == "<NUL>" ? "无数据" : value,
-              style: const TextStyle(color: Colors.white),
-            ),
-          ),
-        ],
-      ),
-    );
   }
 
   @override
@@ -822,6 +761,7 @@ class RealtimeScreenState extends State<RealtimeScreen> {
 
         _queueRenderViewportAnchorRestore(renderAnchor);
       }
+    // ignore: empty_catches
     } catch (e) {}
   }
 
@@ -979,84 +919,6 @@ class RealtimeScreenState extends State<RealtimeScreen> {
                     _buildLocoInfo(mergedRecord.latestRecord),
                   ]))),
     );
-  }
-
-  String _formatLocoInfo(TrainRecord record) {
-    final locoType = record.locoType.trim();
-    final loco = record.loco.trim();
-
-    if (locoType.isNotEmpty && loco.isNotEmpty) {
-      final shortLoco =
-          loco.length > 5 ? loco.substring(loco.length - 5) : loco;
-      return "$locoType-$shortLoco";
-    } else if (locoType.isNotEmpty) {
-      return locoType;
-    } else if (loco.isNotEmpty) {
-      return loco;
-    }
-    return "";
-  }
-
-  String _getDifferingInfo(
-      TrainRecord record, TrainRecord latest, GroupBy groupBy) {
-    final train = record.train.trim();
-    final loco = record.loco.trim();
-    final latestTrain = latest.train.trim();
-    final latestLoco = latest.loco.trim();
-
-    switch (groupBy) {
-      case GroupBy.trainOnly:
-        if (loco != latestLoco && loco.isNotEmpty) {
-          return _formatLocoInfo(record);
-        }
-        return "";
-      case GroupBy.locoOnly:
-        return train != latestTrain && train.isNotEmpty ? train : "";
-      case GroupBy.trainOrLoco:
-        final trainDiff = train.isNotEmpty && train != latestTrain ? train : "";
-        final locoDiff = loco.isNotEmpty && loco != latestLoco
-            ? _formatLocoInfo(record)
-            : "";
-
-        if (trainDiff.isNotEmpty && locoDiff.isNotEmpty) {
-          return "$trainDiff $locoDiff";
-        } else if (trainDiff.isNotEmpty) {
-          return trainDiff;
-        } else if (locoDiff.isNotEmpty) {
-          return locoDiff;
-        }
-        return "";
-      case GroupBy.trainAndLoco:
-        if (train.isNotEmpty && train != latestTrain) {
-          final locoInfo = _formatLocoInfo(record);
-          if (locoInfo.isNotEmpty) {
-            return "$train $locoInfo";
-          }
-          return train;
-        }
-        if (loco.isNotEmpty && loco != latestLoco) {
-          return _formatLocoInfo(record);
-        }
-        return "";
-    }
-  }
-
-  String _getLocationInfo(TrainRecord record) {
-    List<String> parts = [];
-    if (record.route.isNotEmpty && record.route != "<NUL>") {
-      parts.add(record.route);
-    }
-    if (record.direction != 0) {
-      parts.add(record.direction == 1 ? "下" : "上");
-    }
-    if (record.position.isNotEmpty && record.position != "<NUL>") {
-      final position = record.position;
-      final cleanPosition = position.endsWith('.')
-          ? position.substring(0, position.length - 1)
-          : position;
-      parts.add("${cleanPosition}K");
-    }
-    return parts.join(' ');
   }
 
   Widget _buildRecordCard(TrainRecord record,
@@ -1243,16 +1105,6 @@ class RealtimeScreenState extends State<RealtimeScreen> {
 
     final latestRecord = mergedRecord.latestRecord;
 
-    TrainRecord? previousRecord;
-    if (mergedRecord.records.length > 1) {
-      final sortedRecords = List<TrainRecord>.from(mergedRecord.records)
-        ..sort((a, b) => b.receivedTimestamp.compareTo(a.receivedTimestamp));
-
-      if (sortedRecords.length > 1) {
-        previousRecord = sortedRecords[1];
-      }
-    }
-
     String getValidRoute(TrainRecord record) {
       final routeStr = record.route.trim();
       if (routeStr.isNotEmpty &&
@@ -1357,7 +1209,7 @@ class RealtimeScreenState extends State<RealtimeScreen> {
                       child: Container(
                         padding: const EdgeInsets.all(4),
                         decoration: BoxDecoration(
-                          color: Colors.orange.withOpacity(0.2),
+                          color: Colors.orange.withValues(alpha: 0.2),
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(color: Colors.orange, width: 1),
                         ),

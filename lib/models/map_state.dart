@@ -60,6 +60,9 @@ class MapState {
 
   @override
   int get hashCode {
-    return zoom.hashCode ^ centerLat.hashCode ^ centerLng.hashCode ^ bearing.hashCode;
+    return zoom.hashCode ^
+        centerLat.hashCode ^
+        centerLng.hashCode ^
+        bearing.hashCode;
   }
 }

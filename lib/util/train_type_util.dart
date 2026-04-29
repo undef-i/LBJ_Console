@@ -24,6 +24,7 @@ class TrainTypeUtil {
             final type = remainingPart.substring(2, remainingPart.length - 1);
             try {
               _patterns.add(_TrainTypePattern(RegExp(regex), type));
+            // ignore: empty_catches
             } catch (e) {}
           }
         }

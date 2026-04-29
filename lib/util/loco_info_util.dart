@@ -32,6 +32,7 @@ class LocoInfoUtil {
               alias: alias,
               manufacturer: manufacturer,
             ));
+          // ignore: empty_catches
           } catch (e) {}
         }
       }

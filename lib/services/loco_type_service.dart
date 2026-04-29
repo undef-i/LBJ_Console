@@ -1,4 +1,3 @@
-
 class LocoTypeService {
   static final LocoTypeService _instance = LocoTypeService._internal();
   factory LocoTypeService() => _instance;

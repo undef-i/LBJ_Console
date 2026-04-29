@@ -27,7 +27,6 @@ class _MapScreenState extends State<MapScreen> {
   double _currentRotation = 0.0;
 
   bool _isMapInitialized = false;
-  final bool _isFollowingLocation = false;
   bool _isLocationPermissionGranted = false;
   Timer? _locationTimer;
   Timer? _settingsSaveTimer;
@@ -71,8 +70,6 @@ class _MapScreenState extends State<MapScreen> {
 
   Future<void> _checkDatabaseSettings() async {
     try {
-      final dbInfo = await DatabaseService.instance.getDatabaseInfo();
-
       final settings = await DatabaseService.instance.getAllSettings();
 
       if (settings != null) {
@@ -92,6 +89,7 @@ class _MapScreenState extends State<MapScreen> {
           }
         }
       }
+    // ignore: empty_catches
     } catch (e) {}
   }
 
@@ -125,6 +123,7 @@ class _MapScreenState extends State<MapScreen> {
 
   Future<void> _requestLocationPermission() async {
     bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!mounted) return;
     if (!serviceEnabled) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('请开启定位服务')),
@@ -137,6 +136,7 @@ class _MapScreenState extends State<MapScreen> {
       permission = await Geolocator.requestPermission();
     }
 
+    if (!mounted) return;
     if (permission == LocationPermission.deniedForever) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('定位权限被拒绝，请在设置中开启')),
@@ -154,8 +154,9 @@ class _MapScreenState extends State<MapScreen> {
   Future<void> _getCurrentLocation() async {
     try {
       Position position = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
-        forceAndroidLocationManager: true,
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+        ),
       );
 
       final newLocation = LatLng(position.latitude, position.longitude);
@@ -166,6 +167,7 @@ class _MapScreenState extends State<MapScreen> {
       if (!_isMapInitialized) {
         _initializeMapPosition();
       }
+    // ignore: empty_catches
     } catch (e) {}
   }
 
@@ -182,8 +184,9 @@ class _MapScreenState extends State<MapScreen> {
   Future<void> _forceUpdateLocation() async {
     try {
       Position position = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.best,
-        forceAndroidLocationManager: true,
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.best,
+        ),
       );
 
       final newLocation = LatLng(position.latitude, position.longitude);
@@ -193,6 +196,7 @@ class _MapScreenState extends State<MapScreen> {
       });
 
       _mapController.move(newLocation, 15.0);
+    // ignore: empty_catches
     } catch (e) {}
   }
 
@@ -220,6 +224,7 @@ class _MapScreenState extends State<MapScreen> {
           _initializeMapPosition();
         }
       }
+    // ignore: empty_catches
     } catch (e) {}
   }
 
@@ -245,6 +250,7 @@ class _MapScreenState extends State<MapScreen> {
       settings['mapSettingsTimestamp'] = DateTime.now().millisecondsSinceEpoch;
 
       await DatabaseService.instance.updateSettings(settings);
+    // ignore: empty_catches
     } catch (e) {}
   }
 
@@ -350,6 +356,7 @@ class _MapScreenState extends State<MapScreen> {
           return LatLng(lat, lng);
         }
       }
+    // ignore: empty_catches
     } catch (e) {}
 
     return null;
@@ -409,9 +416,7 @@ class _MapScreenState extends State<MapScreen> {
             width: 80,
             height: 16,
             child: GestureDetector(
-              onTap: () => position != null
-                  ? _showTrainDetailsDialog(record, position)
-                  : null,
+              onTap: () => _showTrainDetailsDialog(record, position),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -441,31 +446,6 @@ class _MapScreenState extends State<MapScreen> {
     }
 
     return markers;
-  }
-
-  void _centerToMyLocation() {
-    if (_userLocation != null) {
-      _centerMap(_userLocation!, zoom: 15.0, rotation: _currentRotation);
-    }
-  }
-
-  void _centerToLastTrain() {
-    if (_trainRecords.isNotEmpty) {
-      final lastRecord = _trainRecords.first;
-      final coords = lastRecord.getCoordinates();
-      final dmsCoords = _parseDmsCoordinate(lastRecord.positionInfo);
-
-      LatLng? targetPosition;
-      if (dmsCoords != null) {
-        targetPosition = dmsCoords;
-      } else if (coords['lat'] != 0.0 && coords['lng'] != 0.0) {
-        targetPosition = LatLng(coords['lat']!, coords['lng']!);
-      }
-
-      if (targetPosition != null) {
-        _centerMap(targetPosition, zoom: 15.0, rotation: _currentRotation);
-      }
-    }
   }
 
   void _showTimeFilterDialog() {
@@ -712,30 +692,6 @@ class _MapScreenState extends State<MapScreen> {
           ),
         );
       },
-    );
-  }
-
-  Widget _buildDetailRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4.0),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 80,
-            child: Text(
-              label,
-              style: const TextStyle(color: Colors.grey, fontSize: 14),
-            ),
-          ),
-          Expanded(
-            child: Text(
-              value.isEmpty ? "未知" : value,
-              style: const TextStyle(color: Colors.white, fontSize: 14),
-            ),
-          ),
-        ],
-      ),
     );
   }
 
