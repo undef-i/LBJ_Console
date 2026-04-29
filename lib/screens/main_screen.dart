@@ -2,10 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:async';
 import 'dart:developer' as developer;
+import 'dart:math' as math;
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:lbjconsole/models/train_record.dart';
 import 'package:lbjconsole/screens/history_screen.dart';
 import 'package:lbjconsole/screens/map_screen.dart';
-import 'package:lbjconsole/screens/map_webview_screen.dart';
 import 'package:lbjconsole/screens/realtime_screen.dart';
 import 'package:lbjconsole/screens/settings_screen.dart';
 import 'package:lbjconsole/services/ble_service.dart';
@@ -222,13 +223,34 @@ class MainScreen extends StatefulWidget {
 }
 
 class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
+  // TEMP: 临时测试数据。发布前把开关改成 false 或删除本段相关代码。
+  static const double _temporaryMinLat = 18.0;
+  static const double _temporaryMaxLat = 53.0;
+  static const double _temporaryMinLng = 73.0;
+  static const double _temporaryMaxLng = 135.0;
+  static const double _temporaryStartRadiusDegrees = 0.1;
+  static const double _temporaryMaxStepDegrees = 0.02;
+  static const String _temporaryTrainNumber = '7001';
+  static const List<List<double>> _temporaryChinaAnchors = [
+    [39.9042, 116.4074],
+    [31.2304, 121.4737],
+    [23.1291, 113.2644],
+    [30.5728, 104.0668],
+    [34.3416, 108.9398],
+    [45.8038, 126.5349],
+    [43.8256, 87.6168],
+    [25.0389, 102.7183],
+    [36.0611, 103.8343],
+    [28.2282, 112.9388],
+  ];
+
   int _currentIndex = 0;
-  String _mapType = 'webview';
 
   late final BLEService _bleService;
   late final RtlTcpService _rtlTcpService;
   final NotificationService _notificationService = NotificationService();
   final DatabaseService _databaseService = DatabaseService.instance;
+  final math.Random _temporaryRandom = math.Random();
 
   StreamSubscription? _connectionSubscription;
   StreamSubscription? _rtlTcpConnectionSubscription;
@@ -240,9 +262,14 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   StreamSubscription? _rtlTcpLastReceivedTimeSubscription;
   StreamSubscription? _audioLastReceivedTimeSubscription;
   StreamSubscription? _settingsSubscription;
+  Timer? _temporaryRecordTimer;
   DateTime? _lastReceivedTime;
   DateTime? _rtlTcpLastReceivedTime;
   DateTime? _audioLastReceivedTime;
+  double? _temporaryLat;
+  double? _temporaryLng;
+  int _temporaryRecordSerial = 0;
+  bool _temporaryRecordsEnabled = false;
   bool _isHistoryEditMode = false;
   
   InputSource _inputSource = InputSource.bluetooth;
@@ -267,16 +294,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     _setupConnectionListener();
     _setupLastReceivedTimeListener();
     _setupSettingsListener();
-    _loadMapType();
-  }
-
-  Future<void> _loadMapType() async {
-    final settings = await DatabaseService.instance.getAllSettings();
-    if (mounted) {
-      setState(() {
-        _mapType = settings?['mapType']?.toString() ?? 'webview';
-      });
-    }
   }
 
   void _loadInputSettings() async {
@@ -415,8 +432,102 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     }
   }
 
+  void _startTemporaryRecords() {
+    if (!_temporaryRecordsEnabled) return;
+
+    final startIndex = _temporaryRandom.nextInt(_temporaryChinaAnchors.length);
+    final start = _temporaryChinaAnchors[startIndex];
+    _temporaryLat ??= (start[0] + _temporaryStartOffset())
+        .clamp(_temporaryMinLat, _temporaryMaxLat)
+        .toDouble();
+    _temporaryLng ??= (start[1] + _temporaryStartOffset())
+        .clamp(_temporaryMinLng, _temporaryMaxLng)
+        .toDouble();
+
+    _temporaryRecordTimer?.cancel();
+    _temporaryRecordTimer = Timer.periodic(
+      const Duration(seconds: 5),
+      (_) => _insertTemporaryRecord(),
+    );
+  }
+
+  void _setTemporaryRecordsEnabled(bool enabled) {
+    if (_temporaryRecordsEnabled == enabled) return;
+
+    setState(() {
+      _temporaryRecordsEnabled = enabled;
+    });
+
+    if (enabled) {
+      _startTemporaryRecords();
+    } else {
+      _temporaryRecordTimer?.cancel();
+      _temporaryRecordTimer = null;
+    }
+  }
+
+  Future<void> _insertTemporaryRecord() async {
+    final now = DateTime.now();
+    final latStep = (_temporaryRandom.nextDouble() - 0.5) *
+        _temporaryMaxStepDegrees;
+    final lngStep = (_temporaryRandom.nextDouble() - 0.5) *
+        _temporaryMaxStepDegrees;
+
+    _temporaryLat = ((_temporaryLat ?? 35.0) + latStep)
+        .clamp(_temporaryMinLat, _temporaryMaxLat)
+        .toDouble();
+    _temporaryLng = ((_temporaryLng ?? 105.0) + lngStep)
+        .clamp(_temporaryMinLng, _temporaryMaxLng)
+        .toDouble();
+    _temporaryRecordSerial += 1;
+
+    final serialText = _temporaryRecordSerial.toString().padLeft(4, '0');
+    final record = TrainRecord(
+      uniqueId: 'temporary_${now.millisecondsSinceEpoch}_$serialText',
+      timestamp: now,
+      receivedTimestamp: now,
+      train: _temporaryTrainNumber,
+      direction: _temporaryRecordSerial.isEven ? 0 : 1,
+      speed: '${60 + _temporaryRandom.nextInt(80)}',
+      position: '${(_temporaryRecordSerial % 300) + 1}.0',
+      time: _temporaryClockText(now),
+      loco: 'TEMP$serialText',
+      locoType: 'HXD',
+      lbjClass: 'G',
+      route: '临时测试',
+      positionInfo: _temporaryDmsPosition(_temporaryLat!, _temporaryLng!),
+      rssi: -65 + _temporaryRandom.nextDouble() * 12,
+    );
+
+    await _databaseService.insertRecord(record);
+    if (!mounted) return;
+    _processRecord(record);
+  }
+
+  String _temporaryDmsPosition(double lat, double lng) {
+    return '${_temporaryDmsCoordinate(lat)} ${_temporaryDmsCoordinate(lng)}';
+  }
+
+  double _temporaryStartOffset() {
+    return (_temporaryRandom.nextDouble() - 0.5) *
+        _temporaryStartRadiusDegrees;
+  }
+
+  String _temporaryClockText(DateTime time) {
+    final hour = time.hour.toString().padLeft(2, '0');
+    final minute = time.minute.toString().padLeft(2, '0');
+    return '$hour:$minute';
+  }
+
+  String _temporaryDmsCoordinate(double value) {
+    final degrees = value.truncate();
+    final minutes = (value - degrees) * 60.0;
+    return '$degrees°${minutes.toStringAsFixed(4)}′';
+  }
+
   @override
   void dispose() {
+    _temporaryRecordTimer?.cancel();
     _connectionSubscription?.cancel();
     _rtlTcpConnectionSubscription?.cancel();
     _audioConnectionSubscription?.cancel();
@@ -435,7 +546,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _bleService.onAppResume();
-      _loadMapType();
     }
   }
 
@@ -461,7 +571,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     });
   }
 
-  void _processRecord(record) {
+  void _processRecord(TrainRecord record) {
     _notificationService.showTrainNotification(record);
     _historyScreenKey.currentState?.addNewRecord(record);
     _realtimeScreenKey.currentState?.addNewRecord(record);
@@ -622,11 +732,10 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       RealtimeScreen(
         key: _realtimeScreenKey,
       ),
-      _mapType == 'map' ? const MapScreen() : const MapWebViewScreen(),
+      const MapScreen(),
       SettingsScreen(
-        onSettingsChanged: () {
-          _loadMapType();
-        },
+        temporaryRecordsEnabled: _temporaryRecordsEnabled,
+        onTemporaryRecordsChanged: _setTemporaryRecordsEnabled,
       ),
     ];
 
@@ -644,12 +753,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         onDestinationSelected: (index) {
           if (index == 0) {
             _historyScreenKey.currentState?.reloadRecords();
-          }
-          if (index == 1) {
-            _realtimeScreenKey.currentState?.loadRecords(scrollToTop: false);
-          }
-          if (_currentIndex == 3 && index == 2) {
-            _loadMapType();
           }
           setState(() {
             if (_isHistoryEditMode) _isHistoryEditMode = false;

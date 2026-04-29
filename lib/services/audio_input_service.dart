@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'dart:developer' as developer;
@@ -268,7 +269,12 @@ class AudioInputService {
             }
             _lastRawMessage = currentRawMessage;
 
-            developer.log('Audio-RAW: $currentRawMessage', name: 'AudioInput');
+            if (kDebugMode) {
+              developer.log(
+                'Audio-RAW: $currentRawMessage',
+                name: 'AudioInput',
+              );
+            }
 
             if (!_isListening) {
               _updateListeningState(true, "监听中");

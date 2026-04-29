@@ -29,6 +29,7 @@ class _MapScreenState extends State<MapScreen> {
   final bool _isFollowingLocation = false;
   bool _isLocationPermissionGranted = false;
   Timer? _locationTimer;
+  Timer? _settingsSaveTimer;
 
   String _selectedTimeFilter = 'unlimited';
   final Map<String, Duration> _timeFilterOptions = {
@@ -113,6 +114,7 @@ class _MapScreenState extends State<MapScreen> {
 
   @override
   void dispose() {
+    _settingsSaveTimer?.cancel();
     _saveSettings();
     _locationTimer?.cancel();
     super.dispose();
@@ -243,6 +245,15 @@ class _MapScreenState extends State<MapScreen> {
 
       await DatabaseService.instance.updateSettings(settings);
     } catch (e) {}
+  }
+
+  void _scheduleSettingsSave() {
+    _settingsSaveTimer?.cancel();
+    _settingsSaveTimer = Timer(const Duration(milliseconds: 600), () {
+      if (mounted) {
+        _saveSettings();
+      }
+    });
   }
 
   Future<void> _loadTrainRecords() async {
@@ -526,6 +537,8 @@ class _MapScreenState extends State<MapScreen> {
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
+      isDismissible: true,
+      enableDrag: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
@@ -732,7 +745,7 @@ class _MapScreenState extends State<MapScreen> {
           height: 24,
           child: Container(
             decoration: BoxDecoration(
-              color: Colors.blue,
+              color: Colors.black,
               borderRadius: BorderRadius.circular(12),
               border: Border.all(color: Colors.white, width: 1),
             ),
@@ -790,7 +803,7 @@ class _MapScreenState extends State<MapScreen> {
                     _currentRotation = camera.rotation;
                   });
 
-                  _saveSettings();
+                  _scheduleSettingsSave();
                 },
               ),
               children: [
@@ -835,6 +848,7 @@ class _MapScreenState extends State<MapScreen> {
                     setState(() {
                       _railwayLayerVisible = !_railwayLayerVisible;
                     });
+                    _settingsSaveTimer?.cancel();
                     _saveSettings();
                   },
                   child: Icon(

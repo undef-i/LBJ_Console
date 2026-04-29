@@ -59,6 +59,14 @@ class MergeService {
     }
   }
 
+  static bool _hasValidTrain(String train) {
+    return train.isNotEmpty && train != "<NUL>" && !train.contains("-----");
+  }
+
+  static bool _hasValidLoco(String loco) {
+    return loco.isNotEmpty && loco != "<NUL>";
+  }
+
   static List<Object> getMixedList(
       List<TrainRecord> allRecords, MergeSettings settings) {
     if (!settings.enabled) {
@@ -138,21 +146,20 @@ class MergeService {
       return group;
     }
 
-    group.sort((a, b) => a.receivedTimestamp.compareTo(b.receivedTimestamp));
+    final sortedGroup = List<TrainRecord>.from(group)
+      ..sort((a, b) => a.receivedTimestamp.compareTo(b.receivedTimestamp));
+    var start = 0;
 
-    while (group.length > 1) {
-      final timeSpan = group.last.receivedTimestamp
-          .difference(group.first.receivedTimestamp);
-
+    while (sortedGroup.length - start > 1) {
+      final timeSpan = sortedGroup.last.receivedTimestamp
+          .difference(sortedGroup[start].receivedTimestamp);
       if (timeSpan <= timeWindow.duration!) {
         break;
       }
-
-      group.removeAt(0);
+      start++;
     }
 
-    group.sort((a, b) => b.receivedTimestamp.compareTo(a.receivedTimestamp));
-    return group;
+    return sortedGroup.sublist(start).reversed.toList();
   }
 
   static List<TrainRecord> _reuseDiscardedRecords(
@@ -178,35 +185,45 @@ class MergeService {
     final List<MergedTrainRecord> mergedRecords = [];
     final List<TrainRecord> singleRecords = [];
     final Set<String> usedRecordIds = {};
+    final trainIndex = <String, List<TrainRecord>>{};
+    final locoIndex = <String, List<TrainRecord>>{};
+
+    for (final record in records) {
+      final train = record.train.trim();
+      final loco = record.loco.trim();
+      if (_hasValidTrain(train)) {
+        trainIndex.putIfAbsent(train, () => []).add(record);
+      }
+      if (_hasValidLoco(loco)) {
+        locoIndex.putIfAbsent(loco, () => []).add(record);
+      }
+    }
 
     for (int i = 0; i < records.length; i++) {
       final record = records[i];
       if (usedRecordIds.contains(record.uniqueId)) continue;
 
-      final group = <TrainRecord>[record];
+      final recordTrain = record.train.trim();
+      final recordLoco = record.loco.trim();
+      final candidates = <TrainRecord>{};
+      if (_hasValidTrain(recordTrain)) {
+        candidates.addAll(trainIndex[recordTrain] ?? const <TrainRecord>[]);
+      }
+      if (_hasValidLoco(recordLoco)) {
+        candidates.addAll(locoIndex[recordLoco] ?? const <TrainRecord>[]);
+      }
 
-      for (int j = i + 1; j < records.length; j++) {
-        final otherRecord = records[j];
+      final group = <TrainRecord>[record];
+      for (final otherRecord in candidates) {
+        if (otherRecord.uniqueId == record.uniqueId) continue;
         if (usedRecordIds.contains(otherRecord.uniqueId)) continue;
 
-        final recordTrain = record.train.trim();
         final otherTrain = otherRecord.train.trim();
-        final recordLoco = record.loco.trim();
         final otherLoco = otherRecord.loco.trim();
 
-        final trainMatch = recordTrain.isNotEmpty &&
-            recordTrain != "<NUL>" &&
-            !recordTrain.contains("-----") &&
-            otherTrain.isNotEmpty &&
-            otherTrain != "<NUL>" &&
-            !otherTrain.contains("-----") &&
-            recordTrain == otherTrain;
-
-        final locoMatch = recordLoco.isNotEmpty &&
-            recordLoco != "<NUL>" &&
-            otherLoco.isNotEmpty &&
-            otherLoco != "<NUL>" &&
-            recordLoco == otherLoco;
+        final trainMatch =
+            _hasValidTrain(recordTrain) && recordTrain == otherTrain;
+        final locoMatch = _hasValidLoco(recordLoco) && recordLoco == otherLoco;
 
         final bothTrainEmpty = (recordTrain.isEmpty ||
                 recordTrain == "<NUL>" ||
@@ -220,6 +237,7 @@ class MergeService {
         }
       }
 
+      group.sort((a, b) => b.receivedTimestamp.compareTo(a.receivedTimestamp));
       final processedGroup = _applyTimeWindow(group, timeWindow);
 
       if (processedGroup.length >= 2) {
@@ -232,18 +250,11 @@ class MergeService {
         final loco = firstRecord.loco.trim();
         String uniqueGroupKey;
 
-        if (train.isNotEmpty &&
-            train != "<NUL>" &&
-            !train.contains("-----") &&
-            loco.isNotEmpty &&
-            loco != "<NUL>") {
+        if (_hasValidTrain(train) && _hasValidLoco(loco)) {
           uniqueGroupKey = "train_or_loco:${train}_$loco";
-        } else if (train.isNotEmpty &&
-            train != "<NUL>" &&
-            !train.contains("-----") &&
-            loco.isEmpty) {
+        } else if (_hasValidTrain(train) && loco.isEmpty) {
           uniqueGroupKey = "train_or_loco:train:$train";
-        } else if (loco.isNotEmpty && loco != "<NUL>") {
+        } else if (_hasValidLoco(loco)) {
           uniqueGroupKey = "train_or_loco:loco:$loco";
         } else {
           uniqueGroupKey = "train_or_loco:group_${mergedRecords.length}";
@@ -282,5 +293,4 @@ class MergeService {
 
     return result;
   }
-
 }

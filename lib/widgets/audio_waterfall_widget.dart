@@ -89,7 +89,7 @@ class _AudioWaterfallWidgetState extends State<AudioWaterfallWidget> {
 
   void _startUpdating() {
     _updateTimer =
-        Timer.periodic(const Duration(milliseconds: 20), (timer) async {
+        Timer.periodic(const Duration(milliseconds: 50), (timer) async {
       try {
         final result = await platform.invokeMethod('getSpectrum');
         if (result != null && result is List && mounted) {

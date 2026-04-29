@@ -18,6 +18,7 @@ class RtlTcpChannelHandler : EventChannel.StreamHandler {
     private val handler = Handler(Looper.getMainLooper())
     private var eventSink: EventChannel.EventSink? = null
     private var lastConnectedState: Boolean = false 
+    private val messageRegex = "\\[MSG\\]\\s*(\\d+)\\|(-?\\d+)\\|([^\\n]*)".toRegex()
 
     companion object {
         private const val METHOD_CHANNEL_NAME = "org.noxylva.lbjconsole/rtl_tcp_method"
@@ -75,7 +76,6 @@ class RtlTcpChannelHandler : EventChannel.StreamHandler {
         handler.post(object : Runnable {
             override fun run() {
                 if (eventSink == null) {
-                    android.util.Log.w("RTL-TCP", "evt_null");
                     return;
                 }
                 val connected = try {
@@ -99,13 +99,6 @@ class RtlTcpChannelHandler : EventChannel.StreamHandler {
                     ByteArray(0)
                 }
 
-                val regex = "\\[MSG\\]\\s*(\\d+)\\|(-?\\d+)\\|([^\\n]*)".toRegex()
-
-                if (logsBytes.isNotEmpty()) {
-                    val preview = if (logsBytes.size > 200) "${logsBytes.size} bytes" else logsBytes.contentToString()
-                    android.util.Log.d("RTL-TCP", "pollBytes: $preview")
-                }
-                
                 val logs = if (logsBytes.isNotEmpty()) String(logsBytes, Charsets.ISO_8859_1) else ""
 
                 if (connected != lastConnectedState) {
@@ -121,7 +114,7 @@ class RtlTcpChannelHandler : EventChannel.StreamHandler {
                 }
 
                 if (logs.isNotEmpty()) {
-                    regex.findAll(logs).forEach { match ->
+                    messageRegex.findAll(logs).forEach { match ->
                         try {
                             val addr = match.groupValues[1]
                             val func = match.groupValues[2]

@@ -16,8 +16,15 @@ import 'package:share_plus/share_plus.dart';
 
 class SettingsScreen extends StatefulWidget {
   final VoidCallback? onSettingsChanged;
+  final bool temporaryRecordsEnabled;
+  final ValueChanged<bool>? onTemporaryRecordsChanged;
 
-  const SettingsScreen({super.key, this.onSettingsChanged});
+  const SettingsScreen({
+    super.key,
+    this.onSettingsChanged,
+    this.temporaryRecordsEnabled = false,
+    this.onTemporaryRecordsChanged,
+  });
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -40,12 +47,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _hideUngroupableRecords = false;
   GroupBy _groupBy = GroupBy.trainAndLoco;
   TimeWindow _timeWindow = TimeWindow.unlimited;
-  String _mapType = 'map';
 
   InputSource _inputSource = InputSource.bluetooth;
 
   String _rtlTcpHost = '127.0.0.1';
   String _rtlTcpPort = '14423';
+  int _aboutIconTapCount = 0;
+  Timer? _aboutIconTapTimer;
 
   @override
   void initState() {
@@ -73,7 +81,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _hideUngroupableRecords = settings.hideUngroupableRecords;
         _groupBy = settings.groupBy;
         _timeWindow = settings.timeWindow;
-        _mapType = settingsMap['mapType']?.toString() ?? 'webview';
 
         _rtlTcpHost = settingsMap['rtlTcpHost']?.toString() ?? '127.0.0.1';
         _rtlTcpPort = settingsMap['rtlTcpPort']?.toString() ?? '14423';
@@ -103,7 +110,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       'hideUngroupableRecords': _hideUngroupableRecords ? 1 : 0,
       'groupBy': _groupBy.name,
       'timeWindow': _timeWindow.name,
-      'mapType': _mapType,
       'inputSource': _inputSource.name,
       'rtlTcpHost': _rtlTcpHost,
       'rtlTcpPort': _rtlTcpPort,
@@ -134,6 +140,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   void dispose() {
+    _aboutIconTapTimer?.cancel();
     _deviceNameController.dispose();
     _rtlTcpHostController.dispose();
     _rtlTcpPortController.dispose();
@@ -428,42 +435,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     _saveSettings();
                   },
                   activeThumbColor: Theme.of(context).colorScheme.primary,
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('地图组件类型', style: AppTheme.bodyLarge),
-                  ],
-                ),
-                DropdownButton<String>(
-                  value: _mapType,
-                  items: const [
-                    DropdownMenuItem(
-                      value: 'webview',
-                      child: Text('矢量铁路地图', style: AppTheme.bodyMedium),
-                    ),
-                    DropdownMenuItem(
-                      value: 'map',
-                      child: Text('栅格铁路地图', style: AppTheme.bodyMedium),
-                    ),
-                  ],
-                  onChanged: (value) {
-                    if (value != null) {
-                      setState(() {
-                        _mapType = value;
-                      });
-                      _saveSettings();
-                    }
-                  },
-                  dropdownColor: AppTheme.secondaryBlack,
-                  style: AppTheme.bodyMedium,
-                  underline: Container(height: 0),
                 ),
               ],
             ),
@@ -777,6 +748,77 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  void _handleAboutIconTap() {
+    _aboutIconTapTimer?.cancel();
+    _aboutIconTapTimer = Timer(const Duration(seconds: 2), () {
+      _aboutIconTapCount = 0;
+    });
+
+    _aboutIconTapCount += 1;
+    if (_aboutIconTapCount < 5) return;
+
+    _aboutIconTapCount = 0;
+    _aboutIconTapTimer?.cancel();
+    _showTemporaryRecordsPanel();
+  }
+
+  void _showTemporaryRecordsPanel() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      enableDrag: true,
+      isDismissible: true,
+      builder: (context) {
+        bool enabled = widget.temporaryRecordsEnabled;
+
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            return SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.all(20.0),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.science,
+                            color: Theme.of(context).colorScheme.primary),
+                        const SizedBox(width: 12),
+                        const Text('临时测试', style: AppTheme.titleMedium),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    SwitchListTile(
+                      value: enabled,
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('生成临时列车记录'),
+                      subtitle: const Text('每 5 秒新增一条真实记录，包含随机移动坐标'),
+                      onChanged: (value) {
+                        setSheetState(() {
+                          enabled = value;
+                        });
+                        widget.onTemporaryRecordsChanged?.call(value);
+                      },
+                    ),
+                    const SizedBox(height: 8),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: const Text('关闭'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   Future<void> _shareData() async {
     final scaffoldMessenger = ScaffoldMessenger.of(context);
 
@@ -993,7 +1035,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
           children: [
             Row(
               children: [
-                Icon(Icons.info, color: Theme.of(context).colorScheme.primary),
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: _handleAboutIconTap,
+                  child: Padding(
+                    padding: const EdgeInsets.all(4.0),
+                    child: Icon(Icons.info,
+                        color: Theme.of(context).colorScheme.primary),
+                  ),
+                ),
                 const SizedBox(width: 12),
                 const Text('关于', style: AppTheme.titleMedium),
               ],

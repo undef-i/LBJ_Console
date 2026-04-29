@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
-import 'package:geolocator/geolocator.dart';
 import '../models/merged_record.dart';
 import '../services/database_service.dart';
 import '../models/train_record.dart';
@@ -22,19 +22,17 @@ class RealtimeScreenState extends State<RealtimeScreen> {
   bool _isLoading = true;
   final ScrollController _scrollController = ScrollController();
   bool _isAtTop = true;
+  final GlobalKey _listViewportKey = GlobalKey();
+  final Map<String, GlobalKey> _itemKeys = {};
+  _RenderViewportAnchor? _pendingRenderViewportAnchor;
   MergeSettings _mergeSettings = MergeSettings();
   StreamSubscription? _recordDeleteSubscription;
   StreamSubscription? _settingsSubscription;
 
   final MapController _mapController = MapController();
-  List<LatLng> _selectedGroupRoute = [];
-  List<Marker> _mapMarkers = [];
   bool _showMap = true;
   final Set<String> _selectedGroupKeys = {};
-  LatLng? _userLocation;
-  bool _isLocationPermissionGranted = false;
-  Timer? _locationTimer;
-  StreamSubscription<Position>? _positionStreamSubscription;
+  final Map<String, LatLng?> _positionCache = {};
 
   List<Object> getDisplayItems() => _displayItems;
 
@@ -42,77 +40,120 @@ class RealtimeScreenState extends State<RealtimeScreen> {
     await loadRecords(scrollToTop: false);
   }
 
-  void _updateAllRecordMarkers() {
-    setState(() {
-      final allRecordsWithPosition = <TrainRecord>[];
-      for (final item in _displayItems) {
-        if (item is MergedTrainRecord) {
-          allRecordsWithPosition.addAll(item.records);
-        } else if (item is TrainRecord) {
-          allRecordsWithPosition.add(item);
-        }
+  bool get _isViewingLatest {
+    if (!_scrollController.hasClients) return true;
+    return _scrollController.position.pixels <= 2.0;
+  }
+
+  String _displayItemKey(Object item) {
+    if (item is MergedTrainRecord) {
+      return 'group:${item.groupKey}';
+    }
+    return 'record:${(item as TrainRecord).uniqueId}';
+  }
+
+  Set<String> _displayItemRecordIds(Object item) {
+    if (item is MergedTrainRecord) {
+      return item.records.map((record) => record.uniqueId).toSet();
+    }
+    return {(item as TrainRecord).uniqueId};
+  }
+
+  GlobalKey _keyForDisplayItem(Object item) {
+    final key = _displayItemKey(item);
+    return _itemKeys.putIfAbsent(key, GlobalKey.new);
+  }
+
+  _RenderViewportAnchor? _currentRenderViewportAnchor() {
+    final viewportContext = _listViewportKey.currentContext;
+    if (viewportContext == null || !_scrollController.hasClients) {
+      return null;
+    }
+
+    final viewportBox = viewportContext.findRenderObject() as RenderBox?;
+    if (viewportBox == null || !viewportBox.hasSize) {
+      return null;
+    }
+    final viewportTop = viewportBox.localToGlobal(Offset.zero).dy;
+
+    _RenderViewportAnchor? firstVisible;
+    for (final item in _displayItems) {
+      final itemKey = _displayItemKey(item);
+      final context = _itemKeys[itemKey]?.currentContext;
+      if (context == null) continue;
+
+      final box = context.findRenderObject() as RenderBox?;
+      if (box == null || !box.hasSize) continue;
+
+      final dy = box.localToGlobal(Offset.zero).dy - viewportTop;
+      final bottom = dy + box.size.height;
+      if (bottom <= 0 || dy >= viewportBox.size.height) continue;
+
+      final anchor = _RenderViewportAnchor(
+        itemKey: itemKey,
+        recordIds: _displayItemRecordIds(item),
+        dy: dy,
+      );
+
+      if (dy <= 0 && bottom > 0) {
+        return anchor;
       }
+      firstVisible ??= anchor;
+    }
 
-      _mapMarkers = allRecordsWithPosition
-          .map((record) {
-            final position = _parsePositionFromRecord(record);
-            if (position != null) {
-              final isInSelectedGroup = _selectedGroupKeys.isNotEmpty &&
-                  (_displayItems.any((item) {
-                        if (item is MergedTrainRecord &&
-                            _selectedGroupKeys.contains(item.groupKey)) {
-                          return item.records
-                              .any((r) => r.uniqueId == record.uniqueId);
-                        }
-                        return false;
-                      }) ||
-                      _selectedGroupKeys.contains("single:${record.uniqueId}"));
+    return firstVisible;
+  }
 
-              return Marker(
-                point: position,
-                width: 10,
-                height: 10,
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: isInSelectedGroup ? Colors.black : Colors.grey,
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                        color: isInSelectedGroup
-                            ? Colors.white
-                            : Colors.grey[300]!,
-                        width: 1.5),
-                  ),
-                ),
-              );
-            }
-            return null;
-          })
-          .where((marker) => marker != null)
-          .cast<Marker>()
-          .toList();
-
-      if (_userLocation != null) {
-        _mapMarkers.add(
-          Marker(
-            point: _userLocation!,
-            width: 24,
-            height: 24,
-            child: Container(
-              decoration: BoxDecoration(
-                color: Colors.blue,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.white, width: 1),
-              ),
-              child: const Icon(
-                Icons.my_location,
-                color: Colors.white,
-                size: 12,
-              ),
-            ),
-          ),
-        );
+  String? _fallbackItemKeyForAnchor(_RenderViewportAnchor anchor) {
+    for (final item in _displayItems) {
+      final recordIds = _displayItemRecordIds(item);
+      if (recordIds.intersection(anchor.recordIds).isNotEmpty) {
+        return _displayItemKey(item);
       }
-    });
+    }
+    return null;
+  }
+
+  void _queueRenderViewportAnchorRestore(_RenderViewportAnchor? anchor) {
+    if (anchor == null) return;
+    _pendingRenderViewportAnchor = anchor;
+  }
+
+  bool _applyPendingRenderViewportAnchorCorrection() {
+    final anchor = _pendingRenderViewportAnchor;
+    _pendingRenderViewportAnchor = null;
+    if (anchor == null || !mounted || !_scrollController.hasClients) {
+      return false;
+    }
+
+    final viewportContext = _listViewportKey.currentContext;
+    final viewportBox = viewportContext?.findRenderObject() as RenderBox?;
+    if (viewportBox == null || !viewportBox.hasSize) return false;
+    final viewportTop = viewportBox.localToGlobal(Offset.zero).dy;
+
+    final itemKey = _itemKeys[anchor.itemKey]?.currentContext == null
+        ? _fallbackItemKeyForAnchor(anchor)
+        : anchor.itemKey;
+    if (itemKey == null) return false;
+
+    final itemContext = _itemKeys[itemKey]?.currentContext;
+    final itemBox = itemContext?.findRenderObject() as RenderBox?;
+    if (itemBox == null || !itemBox.hasSize) return false;
+
+    final newDy = itemBox.localToGlobal(Offset.zero).dy - viewportTop;
+    final delta = newDy - anchor.dy;
+    if (delta.abs() <= 0.5) return false;
+
+    final position = _scrollController.position;
+    final targetPixels = (position.pixels + delta).clamp(
+      position.minScrollExtent,
+      position.maxScrollExtent,
+    );
+    final correction = targetPixels - position.pixels;
+    if (correction.abs() <= 0.5) return false;
+
+    position.correctBy(correction);
+    return true;
   }
 
   List<PolylineLayer> _buildSelectedGroupPolylines() {
@@ -126,7 +167,7 @@ class RealtimeScreenState extends State<RealtimeScreen> {
               .whereType<TrainRecord>()
               .firstWhere((record) => record.uniqueId == uniqueId);
 
-          final position = _parsePositionFromRecord(singleRecord);
+          final position = _getCachedPosition(singleRecord);
           if (position != null) {
             polylineLayers.add(
               PolylineLayer(
@@ -146,7 +187,7 @@ class RealtimeScreenState extends State<RealtimeScreen> {
               .firstWhere((item) => item.groupKey == groupKey);
 
           final routePoints = mergedRecord.records
-              .map((record) => _parsePositionFromRecord(record))
+              .map((record) => _getCachedPosition(record))
               .where((latLng) => latLng != null)
               .cast<LatLng>()
               .toList()
@@ -186,7 +227,7 @@ class RealtimeScreenState extends State<RealtimeScreen> {
               .whereType<TrainRecord>()
               .firstWhere((record) => record.uniqueId == uniqueId);
 
-          final position = _parsePositionFromRecord(singleRecord);
+          final position = _getCachedPosition(singleRecord);
           if (position != null) {
             markerLayers.add(
               MarkerLayer(
@@ -228,7 +269,7 @@ class RealtimeScreenState extends State<RealtimeScreen> {
               .firstWhere((item) => item.groupKey == groupKey);
 
           final routePoints = mergedRecord.records
-              .map((record) => _parsePositionFromRecord(record))
+              .map((record) => _getCachedPosition(record))
               .where((latLng) => latLng != null)
               .cast<LatLng>()
               .toList()
@@ -301,7 +342,7 @@ class RealtimeScreenState extends State<RealtimeScreen> {
               .whereType<TrainRecord>()
               .firstWhere((record) => record.uniqueId == uniqueId);
 
-          final position = _parsePositionFromRecord(singleRecord);
+          final position = _getCachedPosition(singleRecord);
           if (position != null) {
             allSelectedPoints.add(position);
           }
@@ -311,7 +352,7 @@ class RealtimeScreenState extends State<RealtimeScreen> {
               .firstWhere((item) => item.groupKey == groupKey);
 
           final routePoints = mergedRecord.records
-              .map((record) => _parsePositionFromRecord(record))
+              .map((record) => _getCachedPosition(record))
               .where((latLng) => latLng != null)
               .cast<LatLng>()
               .toList();
@@ -348,11 +389,7 @@ class RealtimeScreenState extends State<RealtimeScreen> {
       } else {
         _selectedGroupKeys.add(mergedRecord.groupKey);
       }
-
-      _selectedGroupRoute = [];
     });
-
-    _updateAllRecordMarkers();
 
     _adjustMapViewToSelectedGroups();
   }
@@ -366,18 +403,23 @@ class RealtimeScreenState extends State<RealtimeScreen> {
       } else {
         _selectedGroupKeys.add(groupKey);
       }
-
-      _selectedGroupRoute = [];
     });
-
-    _updateAllRecordMarkers();
 
     _adjustMapViewToSelectedGroups();
   }
 
+  LatLng? _getCachedPosition(TrainRecord record) {
+    final id = record.uniqueId;
+    if (_positionCache.containsKey(id)) {
+      return _positionCache[id];
+    }
+    final parsed = _parsePositionFromRecord(record);
+    _positionCache[id] = parsed;
+    return parsed;
+  }
+
   LatLng? _parsePositionFromRecord(TrainRecord record) {
-    if (record.positionInfo.isEmpty ||
-        record.positionInfo == '<NUL>') {
+    if (record.positionInfo.isEmpty || record.positionInfo == '<NUL>') {
       return null;
     }
 
@@ -504,12 +546,12 @@ class RealtimeScreenState extends State<RealtimeScreen> {
     super.initState();
     _scrollController.addListener(() {
       if (_scrollController.position.atEdge) {
-        if (_scrollController.position.pixels ==
-            _scrollController.position.maxScrollExtent) {
+        if (_scrollController.position.pixels == 0) {
           if (!_isAtTop) {
             setState(() => _isAtTop = true);
           }
-        } else if (_scrollController.position.pixels == 0) {
+        } else if (_scrollController.position.pixels ==
+            _scrollController.position.maxScrollExtent) {
           if (_isAtTop) {
             setState(() => _isAtTop = false);
           }
@@ -523,30 +565,12 @@ class RealtimeScreenState extends State<RealtimeScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         loadRecords(scrollToTop: false).then((_) {
-          if (_displayItems.isNotEmpty) {
-            _scheduleInitialScroll();
-          }
+          if (mounted) setState(() => _isAtTop = true);
         });
       }
     });
     _setupRecordDeleteListener();
     _setupSettingsListener();
-    _startLocationUpdates();
-  }
-
-  void _scheduleInitialScroll() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && _scrollController.hasClients && _displayItems.isNotEmpty) {
-        try {
-          final maxScrollExtent = _scrollController.position.maxScrollExtent;
-          _scrollController.jumpTo(maxScrollExtent);
-
-          if (!_isAtTop) {
-            setState(() => _isAtTop = true);
-          }
-        } catch (e) {}
-      }
-    });
   }
 
   @override
@@ -554,8 +578,6 @@ class RealtimeScreenState extends State<RealtimeScreen> {
     _scrollController.dispose();
     _recordDeleteSubscription?.cancel();
     _settingsSubscription?.cancel();
-    _locationTimer?.cancel();
-    _positionStreamSubscription?.cancel();
     super.dispose();
   }
 
@@ -577,71 +599,10 @@ class RealtimeScreenState extends State<RealtimeScreen> {
     });
   }
 
-  Future<void> _requestLocationPermission() async {
-    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    if (!serviceEnabled) {
-      return;
-    }
-
-    LocationPermission permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-    }
-
-    if (permission == LocationPermission.deniedForever) {
-      return;
-    }
-
-    setState(() {
-      _isLocationPermissionGranted = true;
-    });
-
-    _getCurrentLocation();
-    _startRealtimeLocationUpdates();
-  }
-
-  Future<void> _getCurrentLocation() async {
-    try {
-      Position position = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
-        forceAndroidLocationManager: true,
-      );
-
-      final newLocation = LatLng(position.latitude, position.longitude);
-      setState(() {
-        _userLocation = newLocation;
-      });
-
-      _updateAllRecordMarkers();
-    } catch (e) {}
-  }
-
-  void _startLocationUpdates() {
-    _requestLocationPermission();
-  }
-
-  void _startRealtimeLocationUpdates() {
-    _positionStreamSubscription?.cancel();
-
-    _positionStreamSubscription = Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.high,
-        distanceFilter: 1,
-        timeLimit: Duration(seconds: 30),
-      ),
-    ).listen(
-      (Position position) {
-        final newLocation = LatLng(position.latitude, position.longitude);
-        setState(() {
-          _userLocation = newLocation;
-        });
-        _updateAllRecordMarkers();
-      },
-      onError: (error) {},
-    );
-  }
-
   Future<void> loadRecords({bool scrollToTop = true}) async {
+    final renderAnchor =
+        scrollToTop || _isViewingLatest ? null : _currentRenderViewportAnchor();
+
     try {
       if (mounted) {
         setState(() => _isLoading = true);
@@ -654,7 +615,7 @@ class RealtimeScreenState extends State<RealtimeScreen> {
       List<TrainRecord> filteredRecords = allRecords;
 
       filteredRecords = allRecords.where((record) {
-        final position = _parsePositionFromRecord(record);
+        final position = _getCachedPosition(record);
         return position != null;
       }).toList();
 
@@ -766,17 +727,8 @@ class RealtimeScreenState extends State<RealtimeScreen> {
             }
           });
 
-          _updateAllRecordMarkers();
-
-          if (scrollToTop &&
-              _isAtTop &&
-              _scrollController.hasClients &&
-              _displayItems.isNotEmpty) {
-            try {
-              final maxScrollExtent =
-                  _scrollController.position.maxScrollExtent;
-              _scrollController.jumpTo(maxScrollExtent);
-            } catch (e) {}
+          if (!scrollToTop) {
+            _queueRenderViewportAnchorRestore(renderAnchor);
           }
         } else {
           if (_isLoading) {
@@ -798,11 +750,6 @@ class RealtimeScreenState extends State<RealtimeScreen> {
         return;
       }
 
-      final settingsMap = await DatabaseService.instance.getAllSettings() ?? {};
-      _mergeSettings = MergeSettings.fromMap(settingsMap);
-
-      if ((settingsMap['hideTimeOnlyRecords'] ?? 0) == 1) {}
-
       final isNewRecord = !_displayItems.any((item) {
         if (item is TrainRecord) {
           return item.uniqueId == newRecord.uniqueId;
@@ -814,6 +761,8 @@ class RealtimeScreenState extends State<RealtimeScreen> {
       if (!isNewRecord) return;
 
       if (mounted) {
+        final renderAnchor =
+            _isViewingLatest ? null : _currentRenderViewportAnchor();
         List<TrainRecord> allRecords = [];
         Set<String> selectedRecordIds = {};
 
@@ -855,22 +804,11 @@ class RealtimeScreenState extends State<RealtimeScreen> {
           }
         });
 
-        _updateAllRecordMarkers();
-
         if (_selectedGroupKeys.isNotEmpty && mounted) {
           _adjustMapViewToSelectedGroups();
         }
 
-        if (_isAtTop && _scrollController.hasClients) {
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted && _scrollController.hasClients) {
-              final newMaxScrollExtent =
-                  _scrollController.position.maxScrollExtent;
-
-              _scrollController.jumpTo(newMaxScrollExtent);
-            }
-          });
-        } else {}
+        _queueRenderViewportAnchorRestore(renderAnchor);
       }
     } catch (e) {}
   }
@@ -924,7 +862,6 @@ class RealtimeScreenState extends State<RealtimeScreen> {
                   urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                   userAgentPackageName: 'org.noxylva.lbjconsole',
                 ),
-                MarkerLayer(markers: _mapMarkers),
                 if (_selectedGroupKeys.isNotEmpty)
                   ..._buildSelectedGroupPolylines(),
                 if (_selectedGroupKeys.isNotEmpty)
@@ -952,20 +889,38 @@ class RealtimeScreenState extends State<RealtimeScreen> {
         const SizedBox(height: 8),
         Expanded(
           flex: _showMap ? 1 : 2,
-          child: ListView.builder(
-            controller: _scrollController,
-            padding: const EdgeInsets.all(16.0),
-            itemCount: _displayItems.length,
-            reverse: true,
-            itemBuilder: (context, index) {
-              final item = _displayItems[_displayItems.length - 1 - index];
-              if (item is MergedTrainRecord) {
-                return _buildMergedRecordCard(item);
-              } else if (item is TrainRecord) {
-                return _buildRecordCard(item, key: ValueKey(item.uniqueId));
-              }
-              return const SizedBox.shrink();
-            },
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              _ViewportAnchorRestorer(
+                onAfterLayout: _applyPendingRenderViewportAnchorCorrection,
+                child: ListView.builder(
+                  key: _listViewportKey,
+                  controller: _scrollController,
+                  padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                  cacheExtent: 800,
+                  itemCount: _displayItems.length,
+                  itemBuilder: (context, index) {
+                    final item = _displayItems[index];
+                    if (item is MergedTrainRecord) {
+                      return RepaintBoundary(
+                        key: _keyForDisplayItem(item),
+                        child: _buildMergedRecordCard(item),
+                      );
+                    } else if (item is TrainRecord) {
+                      return RepaintBoundary(
+                        key: _keyForDisplayItem(item),
+                        child: _buildRecordCard(
+                          item,
+                          key: ValueKey(item.uniqueId),
+                        ),
+                      );
+                    }
+                    return const SizedBox.shrink();
+                  },
+                ),
+              ),
+            ],
           ),
         ),
       ],
@@ -1333,8 +1288,6 @@ class RealtimeScreenState extends State<RealtimeScreen> {
                             style: const TextStyle(
                               fontSize: 16,
                               color: Colors.white,
-                              decoration: TextDecoration.lineThrough,
-                              decorationColor: Colors.grey,
                             ),
                             overflow: TextOverflow.ellipsis)),
                     const SizedBox(width: 4),
@@ -1412,5 +1365,56 @@ class RealtimeScreenState extends State<RealtimeScreen> {
                 style: const TextStyle(fontSize: 16, color: Colors.white),
                 textAlign: TextAlign.right)
         ]));
+  }
+}
+
+class _RenderViewportAnchor {
+  final String itemKey;
+  final Set<String> recordIds;
+  final double dy;
+
+  const _RenderViewportAnchor({
+    required this.itemKey,
+    required this.recordIds,
+    required this.dy,
+  });
+}
+
+class _ViewportAnchorRestorer extends SingleChildRenderObjectWidget {
+  final bool Function() onAfterLayout;
+
+  const _ViewportAnchorRestorer({
+    required this.onAfterLayout,
+    required super.child,
+  });
+
+  @override
+  RenderObject createRenderObject(BuildContext context) {
+    return _ViewportAnchorRestorerRenderObject(onAfterLayout);
+  }
+
+  @override
+  void updateRenderObject(
+    BuildContext context,
+    covariant _ViewportAnchorRestorerRenderObject renderObject,
+  ) {
+    renderObject.onAfterLayout = onAfterLayout;
+  }
+}
+
+class _ViewportAnchorRestorerRenderObject extends RenderProxyBox {
+  bool Function() onAfterLayout;
+
+  _ViewportAnchorRestorerRenderObject(this.onAfterLayout);
+
+  @override
+  void performLayout() {
+    child?.layout(constraints, parentUsesSize: true);
+    size = child?.size ?? constraints.smallest;
+
+    if (onAfterLayout()) {
+      child?.layout(constraints, parentUsesSize: true);
+      size = child?.size ?? constraints.smallest;
+    }
   }
 }

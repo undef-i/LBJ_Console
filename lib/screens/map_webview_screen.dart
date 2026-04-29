@@ -25,6 +25,7 @@ class MapWebViewScreenState extends State<MapWebViewScreen>
   String _timeFilter = 'unlimited';
   Timer? _refreshTimer;
   Timer? _locationUpdateTimer;
+  Timer? _settingsSaveTimer;
 
   bool _isMapInitialized = false;
   bool _isLocationPermissionGranted = false;
@@ -459,6 +460,15 @@ class MapWebViewScreenState extends State<MapWebViewScreen>
     } catch (e) {}
   }
 
+  void _scheduleSettingsSave() {
+    _settingsSaveTimer?.cancel();
+    _settingsSaveTimer = Timer(const Duration(milliseconds: 600), () {
+      if (mounted) {
+        _saveSettings();
+      }
+    });
+  }
+
   LatLng? _parseDmsCoordinate(String? positionInfo) {
     if (positionInfo == null ||
         positionInfo.isEmpty ||
@@ -668,6 +678,8 @@ class MapWebViewScreenState extends State<MapWebViewScreen>
     setState(() {
       _isRailwayLayerVisible = !_isRailwayLayerVisible;
     });
+    _settingsSaveTimer?.cancel();
+    _saveSettings();
 
     _controller.runJavaScript('''
       (function() {
@@ -861,6 +873,7 @@ class MapWebViewScreenState extends State<MapWebViewScreen>
 
   void _saveSettingsAndReload() async {
     try {
+      _settingsSaveTimer?.cancel();
       await _saveSettings();
       _loadTrainRecordsFromDatabase();
     } catch (e) {}
@@ -898,11 +911,7 @@ class MapWebViewScreenState extends State<MapWebViewScreen>
         _currentRotation = bearing;
       });
 
-      Future.microtask(() {
-        if (mounted) {
-          _saveSettings();
-        }
-      });
+      _scheduleSettingsSave();
     } catch (e) {}
   }
 
@@ -1009,6 +1018,7 @@ class MapWebViewScreenState extends State<MapWebViewScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _settingsSaveTimer?.cancel();
     _saveSettings();
 
     _refreshTimer?.cancel();

@@ -20,7 +20,7 @@ class DatabaseService {
   DatabaseService._internal();
 
   static const String _databaseName = 'train_database';
-  static const _databaseVersion = 9;
+  static const _databaseVersion = 10;
 
   static const String trainRecordsTable = 'train_records';
   static const String appSettingsTable = 'app_settings';
@@ -61,6 +61,7 @@ class DatabaseService {
         version: _databaseVersion,
         onCreate: _onCreate,
         onUpgrade: _onUpgrade,
+        onOpen: _ensureIndexes,
       );
 
       return db;
@@ -88,7 +89,7 @@ class DatabaseService {
     }
     if (oldVersion < 5) {
       await db.execute(
-          'ALTER TABLE $appSettingsTable ADD COLUMN mapType TEXT NOT NULL DEFAULT "webview"');
+          'ALTER TABLE $appSettingsTable ADD COLUMN mapType TEXT NOT NULL DEFAULT "map"');
     }
     if (oldVersion < 6) {
       await db.execute(
@@ -127,6 +128,16 @@ class DatabaseService {
         developer.log('Migration V8->V9 data update failed: $e', name: 'Database');
       }
     }
+    if (oldVersion < 10) {
+      await _ensureIndexes(db);
+    }
+  }
+
+  Future<void> _ensureIndexes(Database db) async {
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_train_records_timestamp ON $trainRecordsTable(timestamp DESC)');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_train_records_received_timestamp ON $trainRecordsTable(receivedTimestamp DESC)');
   }
 
   Future<void> _onCreate(Database db, int version) async {
@@ -165,7 +176,7 @@ class DatabaseService {
         mapZoomLevel REAL NOT NULL DEFAULT 10.0,
         mapRailwayLayerVisible INTEGER NOT NULL DEFAULT 1,
         mapRotation REAL NOT NULL DEFAULT 0.0,
-        mapType TEXT NOT NULL DEFAULT 'webview',
+        mapType TEXT NOT NULL DEFAULT 'map',
         specifiedDeviceAddress TEXT,
         searchOrderList TEXT NOT NULL DEFAULT '',
         autoConnectEnabled INTEGER NOT NULL DEFAULT 1,
@@ -185,6 +196,8 @@ class DatabaseService {
       )
     ''');
 
+    await _ensureIndexes(db);
+
     await db.insert(appSettingsTable, {
       'id': 1,
       'deviceName': 'LBJReceiver',
@@ -198,7 +211,7 @@ class DatabaseService {
       'mapZoomLevel': 10.0,
       'mapRailwayLayerVisible': 1,
       'mapRotation': 0.0,
-      'mapType': 'webview',
+      'mapType': 'map',
       'searchOrderList': '',
       'autoConnectEnabled': 1,
       'backgroundServiceEnabled': 0,
@@ -411,14 +424,26 @@ class DatabaseService {
   }
 
   Future<void> deleteRecords(List<String> uniqueIds) async {
-    final db = await database;
-    for (String id in uniqueIds) {
-      await db.delete(
-        'train_records',
-        where: 'uniqueId = ?',
-        whereArgs: [id],
-      );
+    if (uniqueIds.isEmpty) {
+      return;
     }
+
+    final db = await database;
+    await db.transaction((txn) async {
+      const chunkSize = 999;
+      for (var start = 0; start < uniqueIds.length; start += chunkSize) {
+        final end = (start + chunkSize > uniqueIds.length)
+            ? uniqueIds.length
+            : start + chunkSize;
+        final chunk = uniqueIds.sublist(start, end);
+        final placeholders = List.filled(chunk.length, '?').join(',');
+        await txn.delete(
+          trainRecordsTable,
+          where: 'uniqueId IN ($placeholders)',
+          whereArgs: chunk,
+        );
+      }
+    });
     _notifyRecordDeleted(uniqueIds);
   }
 

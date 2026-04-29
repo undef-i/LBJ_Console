@@ -54,7 +54,6 @@ dependencies:
   flutter_background_service: ^5.1.0
   scrollview_observer: ^1.20.0
   vector_map_tiles: ^8.0.0
-  webview_flutter: ^4.8.0
   gbk_codec: ^0.4.0
 
 dev_dependencies:
@@ -86,7 +85,6 @@ flutter:
     - assets/loco_info.csv
     - assets/train_number_info.csv
     - assets/loco_type_info.csv
-    - assets/mapbox_map.html
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

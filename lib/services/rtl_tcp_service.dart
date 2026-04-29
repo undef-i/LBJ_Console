@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:developer' as developer;
 import 'dart:math';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:gbk_codec/gbk_codec.dart';
 import 'package:lbjconsole/models/train_record.dart';
@@ -64,13 +65,8 @@ class _LbJState {
   String _gbkToUtf8(List<int> gbkBytes) {
     try {
       final validBytes = gbkBytes.where((b) => b != 0).toList();
-      print('gbkBytes: ${validBytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join(',')}');
-      
-      final result = gbk_bytes.decode(validBytes);
-      print('gbk decoded: $result');
-      return result;
+      return gbk_bytes.decode(validBytes);
     } catch (e) {
-      print('gbk decode error: $e');
       return "";
     }
   }
@@ -104,8 +100,6 @@ class _LbJState {
         String buffer = numeric;
         if (buffer.length < 50) return;
         _info2Hex = _recodeBCD(buffer);
-        print('info2 raw: $buffer');
-        print('info2 hex: $_info2Hex');
 
         if (_info2Hex.length >= 4) {
           try {
@@ -237,8 +231,8 @@ class RtlTcpService {
   static const Duration _reconnectInterval = Duration(seconds: 2);
   bool _isEnabled = false;
 
-  static const bool _logRaw = true;
-  static const bool _logParsed = true;
+  static const bool _logRaw = false;
+  static const bool _logParsed = false;
   String _lastRawMessage = "";
 
   bool get isConnected => _isConnected;
@@ -320,7 +314,7 @@ class RtlTcpService {
             }
             _lastRawMessage = currentRawMessage;
 
-            if (_logRaw) {
+            if (kDebugMode && _logRaw) {
               developer.log('RTL-TCP-RAW: $currentRawMessage',
                   name: 'RTL-TCP-Data');
             }
@@ -337,7 +331,7 @@ class RtlTcpService {
               final jsonData = _state.toTrainRecordJson(magsqRaw);
               final trainRecord = TrainRecord.fromJson(jsonData);
 
-              if (_logParsed) {
+              if (kDebugMode && _logParsed) {
                 developer.log('RTL-TCP-PARSED: ${jsonEncode(jsonData)}',
                     name: 'RTL-TCP-Data');
               }

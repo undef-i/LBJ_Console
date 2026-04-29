@@ -31,6 +31,8 @@ class AudioInputHandler(private val context: Context) : MethodChannel.MethodCall
 
     private val handler = Handler(Looper.getMainLooper())
     private var eventSink: EventChannel.EventSink? = null
+    private var lastRecordingState: Boolean? = null
+    private val messageRegex = "\\[MSG\\]\\s*(\\d+)\\|(-?\\d+)\\|(.*)".toRegex()
 
     companion object {
         private const val METHOD_CHANNEL = "org.noxylva.lbjconsole/audio_input"
@@ -85,6 +87,7 @@ class AudioInputHandler(private val context: Context) : MethodChannel.MethodCall
     override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
         Log.d(TAG, "EventChannel onListen")
         this.eventSink = events
+        lastRecordingState = null
         startPolling()
     }
 
@@ -104,14 +107,16 @@ class AudioInputHandler(private val context: Context) : MethodChannel.MethodCall
                 val recording = isRecording.get()
                 val logsBytes = pollMessages()
                 val logs = if (logsBytes.isNotEmpty()) String(logsBytes, Charsets.ISO_8859_1) else ""
-                val regex = "\\[MSG\\]\\s*(\\d+)\\|(-?\\d+)\\|(.*)".toRegex()
 
-                val statusMap = mutableMapOf<String, Any?>()
-                statusMap["listening"] = recording
-                eventSink?.success(statusMap)
+                if (lastRecordingState != recording) {
+                    val statusMap = mutableMapOf<String, Any?>()
+                    statusMap["listening"] = recording
+                    eventSink?.success(statusMap)
+                    lastRecordingState = recording
+                }
 
                 if (logs.isNotEmpty()) {
-                    regex.findAll(logs).forEach { match ->
+                    messageRegex.findAll(logs).forEach { match ->
                         try {
                             val dataMap = mutableMapOf<String, Any?>()
                             dataMap["address"] = match.groupValues[1]

@@ -2,10 +2,10 @@ import 'dart:math' as math;
 import 'dart:isolate';
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:scrollview_observer/scrollview_observer.dart';
 import '../models/merged_record.dart';
 import '../services/database_service.dart';
 import '../models/train_record.dart';
@@ -28,20 +28,20 @@ class HistoryScreen extends StatefulWidget {
 }
 
 class HistoryScreenState extends State<HistoryScreen> {
+  static const double _smallMapMinZoom = 2.0;
+  static const double _smallMapMaxZoom = 18.0;
+  static const double _singlePointMapZoom = 17.0;
+
   final List<Object> _displayItems = [];
   bool _isLoading = true;
   bool _isEditMode = false;
-  int? _anchorIndex;
-  double? _anchorOffset;
-  double? _oldCardHeight;
-  double? _oldScrollOffset;
   final Set<String> _selectedRecords = {};
   final Map<String, bool> _expandedStates = {};
-  final ScrollController _scrollController = ScrollController();
-  final ListObserverController _observerController =
-      ListObserverController(controller: null)..cacheJumpIndexOffset = false;
-  late final ChatScrollObserver _chatObserver;
+  late final ScrollController _scrollController;
   bool _isAtTop = true;
+  final GlobalKey _listViewportKey = GlobalKey();
+  final Map<String, GlobalKey> _itemKeys = {};
+  _RenderViewportAnchor? _pendingRenderViewportAnchor;
   MergeSettings _mergeSettings = MergeSettings();
 
   final Map<String, double> _mapOptimalZoom = {};
@@ -70,20 +70,164 @@ class HistoryScreenState extends State<HistoryScreen> {
     await loadRecords(scrollToTop: false);
   }
 
+  bool get _isViewingLatest {
+    if (!_scrollController.hasClients) return true;
+    return _scrollController.position.pixels <= 2.0;
+  }
+
+  String _displayItemKey(Object item) {
+    if (item is MergedTrainRecord) {
+      return 'group:${item.groupKey}';
+    }
+    return 'record:${(item as TrainRecord).uniqueId}';
+  }
+
+  Set<String> _displayItemRecordIds(Object item) {
+    if (item is MergedTrainRecord) {
+      return item.records.map((record) => record.uniqueId).toSet();
+    }
+    return {(item as TrainRecord).uniqueId};
+  }
+
+  List<Set<String>> _expandedRecordIdGroups() {
+    final groups = <Set<String>>[];
+    for (final item in _displayItems) {
+      final key = _displayItemKey(item);
+      if (_expandedStates[key] == true) {
+        groups.add(_displayItemRecordIds(item));
+      }
+    }
+    return groups;
+  }
+
+  void _restoreExpandedStates(List<Set<String>> expandedRecordIdGroups) {
+    final nextStates = <String, bool>{};
+    for (final item in _displayItems) {
+      final recordIds = _displayItemRecordIds(item);
+      final shouldExpand = expandedRecordIdGroups.any(
+        (expandedIds) => expandedIds.intersection(recordIds).isNotEmpty,
+      );
+      if (shouldExpand) {
+        nextStates[_displayItemKey(item)] = true;
+      }
+    }
+
+    _expandedStates
+      ..clear()
+      ..addAll(nextStates);
+  }
+
+  GlobalKey _keyForDisplayItem(Object item) {
+    final key = _displayItemKey(item);
+    return _itemKeys.putIfAbsent(key, GlobalKey.new);
+  }
+
+  _RenderViewportAnchor? _currentRenderViewportAnchor() {
+    final viewportContext = _listViewportKey.currentContext;
+    if (viewportContext == null || !_scrollController.hasClients) {
+      return null;
+    }
+
+    final viewportBox = viewportContext.findRenderObject() as RenderBox?;
+    if (viewportBox == null || !viewportBox.hasSize) {
+      return null;
+    }
+    final viewportTop = viewportBox.localToGlobal(Offset.zero).dy;
+
+    _RenderViewportAnchor? firstVisible;
+    for (final item in _displayItems) {
+      final itemKey = _displayItemKey(item);
+      final context = _itemKeys[itemKey]?.currentContext;
+      if (context == null) continue;
+
+      final box = context.findRenderObject() as RenderBox?;
+      if (box == null || !box.hasSize) continue;
+
+      final dy = box.localToGlobal(Offset.zero).dy - viewportTop;
+      final bottom = dy + box.size.height;
+      if (bottom <= 0 || dy >= viewportBox.size.height) continue;
+
+      final anchor = _RenderViewportAnchor(
+        itemKey: itemKey,
+        recordIds: _displayItemRecordIds(item),
+        dy: dy,
+      );
+
+      if (dy <= 0 && bottom > 0) {
+        return anchor;
+      }
+      firstVisible ??= anchor;
+    }
+
+    return firstVisible;
+  }
+
+  String? _fallbackItemKeyForAnchor(_RenderViewportAnchor anchor) {
+    for (final item in _displayItems) {
+      final recordIds = _displayItemRecordIds(item);
+      if (recordIds.intersection(anchor.recordIds).isNotEmpty) {
+        return _displayItemKey(item);
+      }
+    }
+    return null;
+  }
+
+  void _queueRenderViewportAnchorRestore(_RenderViewportAnchor? anchor) {
+    if (anchor == null) return;
+    _pendingRenderViewportAnchor = anchor;
+  }
+
+  bool _applyPendingRenderViewportAnchorCorrection() {
+    final anchor = _pendingRenderViewportAnchor;
+    _pendingRenderViewportAnchor = null;
+    if (anchor == null || !mounted || !_scrollController.hasClients) {
+      return false;
+    }
+
+    final viewportContext = _listViewportKey.currentContext;
+    final viewportBox = viewportContext?.findRenderObject() as RenderBox?;
+    if (viewportBox == null || !viewportBox.hasSize) return false;
+    final viewportTop = viewportBox.localToGlobal(Offset.zero).dy;
+
+    final itemKey = _itemKeys[anchor.itemKey]?.currentContext == null
+        ? _fallbackItemKeyForAnchor(anchor)
+        : anchor.itemKey;
+    if (itemKey == null) return false;
+
+    final itemContext = _itemKeys[itemKey]?.currentContext;
+    final itemBox = itemContext?.findRenderObject() as RenderBox?;
+    if (itemBox == null || !itemBox.hasSize) return false;
+
+    final newDy = itemBox.localToGlobal(Offset.zero).dy - viewportTop;
+    final delta = newDy - anchor.dy;
+    if (delta.abs() <= 0.5) return false;
+
+    final position = _scrollController.position;
+    final targetPixels = (position.pixels + delta).clamp(
+      position.minScrollExtent,
+      position.maxScrollExtent,
+    );
+    final correction = targetPixels - position.pixels;
+    if (correction.abs() <= 0.5) return false;
+
+    position.correctBy(correction);
+    return true;
+  }
+
   @override
   void initState() {
     super.initState();
-    _chatObserver = ChatScrollObserver(_observerController)
-      ..toRebuildScrollViewCallback = () {
-        if (mounted) {
-          setState(() {});
-        }
-      };
+    _scrollController = ScrollController(keepScrollOffset: false);
     _scrollController.addListener(() {
       if (_scrollController.position.atEdge) {
         if (_scrollController.position.pixels == 0) {
           if (!_isAtTop) {
             setState(() => _isAtTop = true);
+          }
+        } else if (_scrollController.position.pixels ==
+            _scrollController.position.maxScrollExtent) {
+          if (_isAtTop) {
+            setState(() => _isAtTop = false);
           }
         }
       } else {
@@ -94,7 +238,7 @@ class HistoryScreenState extends State<HistoryScreen> {
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
-        loadRecords();
+        loadRecords(scrollToTop: true);
         _startLocationUpdates();
       }
     });
@@ -103,12 +247,14 @@ class HistoryScreenState extends State<HistoryScreen> {
   @override
   void dispose() {
     _scrollController.dispose();
-    _observerController.controller?.dispose();
     _locationTimer?.cancel();
     super.dispose();
   }
 
   Future<void> loadRecords({bool scrollToTop = true}) async {
+    final renderAnchor =
+        scrollToTop || _isViewingLatest ? null : _currentRenderViewportAnchor();
+
     try {
       final allRecords = await DatabaseService.instance.getAllRecords();
       final settingsMap = await DatabaseService.instance.getAllSettings() ?? {};
@@ -179,14 +325,27 @@ class HistoryScreenState extends State<HistoryScreen> {
         final hasDataChanged = _hasDataChanged(items);
 
         if (hasDataChanged) {
+          final expandedRecordIdGroups = _expandedRecordIdGroups();
+          final shouldRevealAfterJump = _isLoading && scrollToTop;
           setState(() {
-            _displayItems.clear();
-            _displayItems.addAll(items);
-            _isLoading = false;
+            _displayItems
+              ..clear()
+              ..addAll(items);
+            _restoreExpandedStates(expandedRecordIdGroups);
+            if (!shouldRevealAfterJump) {
+              _isLoading = false;
+            }
           });
 
-          if (scrollToTop && _isAtTop && _scrollController.hasClients) {
-            _scrollController.jumpTo(0.0);
+          if (scrollToTop) {
+            if (shouldRevealAfterJump) {
+              setState(() {
+                _isLoading = false;
+                _isAtTop = true;
+              });
+            }
+          } else {
+            _queueRenderViewportAnchorRestore(renderAnchor);
           }
         } else {
           if (_isLoading) {
@@ -203,11 +362,6 @@ class HistoryScreenState extends State<HistoryScreen> {
 
   Future<void> addNewRecord(TrainRecord newRecord) async {
     try {
-      final settingsMap = await DatabaseService.instance.getAllSettings() ?? {};
-      _mergeSettings = MergeSettings.fromMap(settingsMap);
-
-      if ((settingsMap['hideTimeOnlyRecords'] ?? 0) == 1) {}
-
       final isNewRecord = !_displayItems.any((item) {
         if (item is TrainRecord) {
           return item.uniqueId == newRecord.uniqueId;
@@ -219,127 +373,55 @@ class HistoryScreenState extends State<HistoryScreen> {
       if (!isNewRecord) return;
 
       if (mounted) {
-        if (_isAtTop) {
-          setState(() {
-            List<TrainRecord> allRecords = [];
-            Set<String> selectedRecordIds = {};
+        final renderAnchor =
+            _isViewingLatest ? null : _currentRenderViewportAnchor();
+        List<TrainRecord> allRecords = [];
+        Set<String> selectedRecordIds = {};
 
-            for (final item in _displayItems) {
-              if (item is MergedTrainRecord) {
-                allRecords.addAll(item.records);
-                if (_selectedRecords.contains(item.records.first.uniqueId)) {
-                  selectedRecordIds.addAll(item.records.map((r) => r.uniqueId));
-                }
-              } else if (item is TrainRecord) {
-                allRecords.add(item);
-                if (_selectedRecords.contains(item.uniqueId)) {
-                  selectedRecordIds.add(item.uniqueId);
-                }
-              }
+        for (final item in _displayItems) {
+          if (item is MergedTrainRecord) {
+            allRecords.addAll(item.records);
+            if (item.records
+                .any((r) => _selectedRecords.contains(r.uniqueId))) {
+              selectedRecordIds.addAll(item.records.map((r) => r.uniqueId));
             }
-
-            allRecords.insert(0, newRecord);
-
-            final mergedItems =
-                MergeService.getMixedList(allRecords, _mergeSettings);
-
-            _displayItems.clear();
-            _displayItems.addAll(mergedItems);
-
-            _selectedRecords.clear();
-            for (final item in _displayItems) {
-              if (item is MergedTrainRecord) {
-                if (item.records
-                    .any((r) => selectedRecordIds.contains(r.uniqueId))) {
-                  _selectedRecords.addAll(item.records.map((r) => r.uniqueId));
-                }
-              } else if (item is TrainRecord) {
-                if (selectedRecordIds.contains(item.uniqueId)) {
-                  _selectedRecords.add(item.uniqueId);
-                }
-              }
+          } else if (item is TrainRecord) {
+            allRecords.add(item);
+            if (_selectedRecords.contains(item.uniqueId)) {
+              selectedRecordIds.add(item.uniqueId);
             }
-          });
-          if (_scrollController.hasClients) {
-            _scrollController.jumpTo(0.0);
           }
-          return;
         }
 
-        final anchorModel = _observerController.observeFirstItem();
-        if (anchorModel == null) {
-          return;
-        }
-
-        _anchorIndex = anchorModel.index;
-        if (_anchorIndex! > 0) {
-          _anchorOffset = anchorModel.layoutOffset;
-        } else {
-          _oldCardHeight = anchorModel.size.height;
-          _oldScrollOffset = _scrollController.offset;
-        }
-
-        bool isMerge = false;
-        Object? mergeResult;
-        final firstItem = _displayItems.first;
-        List<TrainRecord> tempRecords = [newRecord];
-        if (firstItem is MergedTrainRecord) {
-          tempRecords.addAll(firstItem.records);
-        } else if (firstItem is TrainRecord) {
-          tempRecords.add(firstItem);
-        }
-        final mergeCheckResult =
-            MergeService.getMixedList(tempRecords, _mergeSettings);
-        if (mergeCheckResult.length == 1 &&
-            mergeCheckResult.first is MergedTrainRecord) {
-          isMerge = true;
-          mergeResult = mergeCheckResult.first;
-        }
+        allRecords.insert(0, newRecord);
+        final mergedItems =
+            MergeService.getMixedList(allRecords, _mergeSettings);
+        final expandedRecordIdGroups = _expandedRecordIdGroups();
 
         setState(() {
-          if (isMerge) {
-            _displayItems[0] = mergeResult!;
-          } else {
-            _displayItems.insert(0, newRecord);
+          _displayItems
+            ..clear()
+            ..addAll(mergedItems);
+          _restoreExpandedStates(expandedRecordIdGroups);
+
+          _selectedRecords.clear();
+          for (final item in _displayItems) {
+            if (item is MergedTrainRecord) {
+              if (item.records
+                  .any((r) => selectedRecordIds.contains(r.uniqueId))) {
+                _selectedRecords.addAll(item.records.map((r) => r.uniqueId));
+              }
+            } else if (item is TrainRecord &&
+                selectedRecordIds.contains(item.uniqueId)) {
+              _selectedRecords.add(item.uniqueId);
+            }
           }
         });
 
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (!mounted || _anchorIndex == null) return;
-
-          if (_anchorIndex! > 0) {
-            final newAnchorIndex = isMerge ? _anchorIndex! : _anchorIndex! + 1;
-            final newAnchorModel =
-                _observerController.observeItem(index: newAnchorIndex);
-            if (newAnchorModel != null && _anchorOffset != null) {
-              final newOffset = newAnchorModel.layoutOffset;
-              final delta = newOffset - _anchorOffset!;
-              if (delta.abs() > 0.1) {
-                _scrollController.jumpTo(_scrollController.offset + delta);
-              }
-            }
-          } else {
-            final newAnchorModel = _observerController.observeItem(index: 0);
-            if (newAnchorModel != null &&
-                _oldCardHeight != null &&
-                _oldScrollOffset != null) {
-              final newHeight = newAnchorModel.size.height;
-              final heightDelta = newHeight - _oldCardHeight!;
-              if (heightDelta.abs() > 0.1) {
-                _scrollController.jumpTo(_oldScrollOffset! + heightDelta);
-              }
-            }
-          }
-
-          _anchorIndex = null;
-          _anchorOffset = null;
-          _oldCardHeight = null;
-          _oldScrollOffset = null;
-        });
+        _queueRenderViewportAnchorRestore(renderAnchor);
       }
     } catch (e) {}
   }
-
 
   bool _hasDataChanged(List<Object> newItems) {
     if (_displayItems.length != newItems.length) return true;
@@ -365,6 +447,7 @@ class HistoryScreenState extends State<HistoryScreen> {
     if (_isLoading && _displayItems.isEmpty) {
       return const Center(child: CircularProgressIndicator());
     }
+
     if (_displayItems.isEmpty) {
       return const Center(
           child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
@@ -373,20 +456,42 @@ class HistoryScreenState extends State<HistoryScreen> {
         Text('暂无记录', style: TextStyle(color: Colors.white, fontSize: 18))
       ]));
     }
-    return ListViewObserver(
-      controller: _observerController,
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        IgnorePointer(
+          ignoring: _isLoading,
+          child: Opacity(
+            opacity: _isLoading ? 0 : 1,
+            child: _buildHistoryListView(),
+          ),
+        ),
+        if (_isLoading) const Center(child: CircularProgressIndicator()),
+      ],
+    );
+  }
+
+  Widget _buildHistoryListView() {
+    return _ViewportAnchorRestorer(
+      onAfterLayout: _applyPendingRenderViewportAnchorCorrection,
       child: ListView.builder(
+        key: _listViewportKey,
         controller: _scrollController,
-        physics: ChatObserverClampingScrollPhysics(observer: _chatObserver),
-        shrinkWrap: _chatObserver.isShrinkWrap,
         padding: const EdgeInsets.all(16.0),
+        cacheExtent: 800,
         itemCount: _displayItems.length,
         itemBuilder: (context, index) {
           final item = _displayItems[index];
           if (item is MergedTrainRecord) {
-            return _buildMergedRecordCard(item);
+            return RepaintBoundary(
+              key: _keyForDisplayItem(item),
+              child: _buildMergedRecordCard(item),
+            );
           } else if (item is TrainRecord) {
-            return _buildRecordCard(item, key: ValueKey(item.uniqueId));
+            return RepaintBoundary(
+              key: _keyForDisplayItem(item),
+              child: _buildRecordCard(item, key: ValueKey(item.uniqueId)),
+            );
           }
           return const SizedBox.shrink();
         },
@@ -397,7 +502,8 @@ class HistoryScreenState extends State<HistoryScreen> {
   Widget _buildMergedRecordCard(MergedTrainRecord mergedRecord) {
     final bool isSelected =
         mergedRecord.records.any((r) => _selectedRecords.contains(r.uniqueId));
-    final isExpanded = _expandedStates[mergedRecord.groupKey] ?? false;
+    final itemKey = _displayItemKey(mergedRecord);
+    final isExpanded = _expandedStates[itemKey] ?? false;
     return Card(
         key: ValueKey(mergedRecord.groupKey),
         color: isSelected && _isEditMode
@@ -409,7 +515,7 @@ class HistoryScreenState extends State<HistoryScreen> {
             borderRadius: BorderRadius.circular(8.0),
             side: BorderSide(
                 color: isSelected && _isEditMode
-                    ? Colors.blue
+                    ? Colors.white
                     : Colors.transparent,
                 width: 2.0)),
         child: InkWell(
@@ -427,19 +533,9 @@ class HistoryScreenState extends State<HistoryScreen> {
                   widget.onSelectionChanged();
                 });
               } else {
-                if (isExpanded) {
-                  final mapId =
-                      mergedRecord.records.map((r) => r.uniqueId).join('_');
-                  setState(() {
-                    _expandedStates[mergedRecord.groupKey] = false;
-                    _mapOptimalZoom.remove(mapId);
-                    _mapCalculating.remove(mapId);
-                  });
-                } else {
-                  setState(() {
-                    _expandedStates[mergedRecord.groupKey] = true;
-                  });
-                }
+                setState(() {
+                  _expandedStates[itemKey] = !isExpanded;
+                });
               }
             },
             onLongPress: () {
@@ -462,7 +558,7 @@ class HistoryScreenState extends State<HistoryScreen> {
                           isMerged: true),
                       _buildPositionAndSpeed(mergedRecord.latestRecord),
                       _buildLocoInfo(mergedRecord.latestRecord),
-                      if (isExpanded) _buildMergedExpandedContent(mergedRecord)
+                      if (isExpanded) _buildMergedExpandedContent(mergedRecord),
                     ]))));
   }
 
@@ -471,9 +567,14 @@ class HistoryScreenState extends State<HistoryScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _buildExpandedMapForAll(mergedRecord.records, mergedRecord.groupKey),
-        const Divider(color: Colors.white24, height: 24),
-        ...mergedRecord.records.map((record) => _buildSubRecordItem(
-            record, mergedRecord.latestRecord, _mergeSettings.groupBy)),
+        const SizedBox(height: 12),
+        ...mergedRecord.records.map(
+          (record) => _buildSubRecordItem(
+            record,
+            mergedRecord.latestRecord,
+            _mergeSettings.groupBy,
+          ),
+        ),
       ],
     );
   }
@@ -497,8 +598,7 @@ class HistoryScreenState extends State<HistoryScreen> {
               if (differingInfo.isNotEmpty)
                 Text(
                   differingInfo,
-                  style:
-                      const TextStyle(color: Color(0xFF81D4FA), fontSize: 12),
+                  style: const TextStyle(color: Colors.white70, fontSize: 12),
                 ),
             ],
           ),
@@ -638,7 +738,7 @@ class HistoryScreenState extends State<HistoryScreen> {
             height: 228,
             child: Center(
               child: CircularProgressIndicator(
-                color: Colors.blue,
+                color: Colors.white,
                 strokeWidth: 2,
               ),
             ),
@@ -722,6 +822,8 @@ class HistoryScreenState extends State<HistoryScreen> {
   Widget _buildRecordCard(TrainRecord record,
       {bool isSubCard = false, Key? key}) {
     final isSelected = _selectedRecords.contains(record.uniqueId);
+    final itemKey = _displayItemKey(record);
+    final isExpanded = _expandedStates[itemKey] ?? false;
 
     return Card(
         key: key,
@@ -734,7 +836,7 @@ class HistoryScreenState extends State<HistoryScreen> {
             borderRadius: BorderRadius.circular(8.0),
             side: BorderSide(
                 color: isSelected && _isEditMode
-                    ? Colors.blue
+                    ? Colors.white
                     : Colors.transparent,
                 width: 2.0)),
         child: InkWell(
@@ -751,8 +853,7 @@ class HistoryScreenState extends State<HistoryScreen> {
                 });
               } else {
                 setState(() {
-                  _expandedStates[record.uniqueId] =
-                      !(_expandedStates[record.uniqueId] ?? false);
+                  _expandedStates[itemKey] = !isExpanded;
                 });
               }
             },
@@ -773,8 +874,7 @@ class HistoryScreenState extends State<HistoryScreen> {
                       _buildRecordHeader(record),
                       _buildPositionAndSpeed(record),
                       _buildLocoInfo(record),
-                      if (_expandedStates[record.uniqueId] ?? false)
-                        _buildExpandedContent(record),
+                      if (isExpanded) _buildExpandedContent(record),
                     ]))));
   }
 
@@ -961,7 +1061,7 @@ class HistoryScreenState extends State<HistoryScreen> {
             height: 228,
             child: Center(
               child: CircularProgressIndicator(
-                color: Colors.blue,
+                color: Colors.white,
                 strokeWidth: 2,
               ),
             ),
@@ -1069,7 +1169,7 @@ class HistoryScreenState extends State<HistoryScreen> {
 
   Future<double> _calculateOptimalZoomAsync(List<LatLng> positions,
       {required double containerWidth, required double containerHeight}) async {
-    if (positions.length == 1) return 17.0;
+    if (positions.length == 1) return _singlePointMapZoom;
 
     final boundaryBox = await _calculateBoundaryBoxParallel(positions);
 
@@ -1103,7 +1203,58 @@ class HistoryScreenState extends State<HistoryScreen> {
 
     final optimalZoom = math.min(widthZoom, heightZoom);
 
-    return math.max(5.0, math.min(18.0, optimalZoom));
+    return optimalZoom.clamp(_smallMapMinZoom, _smallMapMaxZoom).toDouble();
+  }
+}
+
+class _RenderViewportAnchor {
+  final String itemKey;
+  final Set<String> recordIds;
+  final double dy;
+
+  const _RenderViewportAnchor({
+    required this.itemKey,
+    required this.recordIds,
+    required this.dy,
+  });
+}
+
+class _ViewportAnchorRestorer extends SingleChildRenderObjectWidget {
+  final bool Function() onAfterLayout;
+
+  const _ViewportAnchorRestorer({
+    required this.onAfterLayout,
+    required super.child,
+  });
+
+  @override
+  RenderObject createRenderObject(BuildContext context) {
+    return _ViewportAnchorRestorerRenderObject(onAfterLayout);
+  }
+
+  @override
+  void updateRenderObject(
+    BuildContext context,
+    covariant _ViewportAnchorRestorerRenderObject renderObject,
+  ) {
+    renderObject.onAfterLayout = onAfterLayout;
+  }
+}
+
+class _ViewportAnchorRestorerRenderObject extends RenderProxyBox {
+  bool Function() onAfterLayout;
+
+  _ViewportAnchorRestorerRenderObject(this.onAfterLayout);
+
+  @override
+  void performLayout() {
+    child?.layout(constraints, parentUsesSize: true);
+    size = child?.size ?? constraints.smallest;
+
+    if (onAfterLayout()) {
+      child?.layout(constraints, parentUsesSize: true);
+      size = child?.size ?? constraints.smallest;
+    }
   }
 }
 
@@ -1168,7 +1319,12 @@ class _DelayedMapWithMarkerState extends State<_DelayedMapWithMarker> {
     if (savedState != null && mounted) {
       _mapController.move(
         LatLng(savedState.centerLat, savedState.centerLng),
-        savedState.zoom,
+        savedState.zoom
+            .clamp(
+              HistoryScreenState._smallMapMinZoom,
+              HistoryScreenState._smallMapMaxZoom,
+            )
+            .toDouble(),
       );
       if (savedState.bearing != 0.0) {
         _mapController.rotate(savedState.bearing);
@@ -1205,49 +1361,13 @@ class _DelayedMapWithMarkerState extends State<_DelayedMapWithMarker> {
 
   @override
   Widget build(BuildContext context) {
-    final markers = <Marker>[
-      Marker(
-        point: widget.position,
-        width: 24,
-        height: 24,
-        child: Container(
-          decoration: BoxDecoration(
-            color: Colors.red,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.white, width: 1.5),
-          ),
-          child: const Icon(Icons.train, color: Colors.white, size: 12),
-        ),
-      ),
-    ];
-
-    if (widget.currentUserLocation != null) {
-      markers.add(
-        Marker(
-          point: widget.currentUserLocation!,
-          width: 24,
-          height: 24,
-          child: Container(
-            decoration: BoxDecoration(
-              color: Colors.blue,
-              shape: BoxShape.circle,
-              border: Border.all(color: Colors.white, width: 1.5),
-            ),
-            child: const Icon(
-              Icons.my_location,
-              color: Colors.white,
-              size: 12,
-            ),
-          ),
-        ),
-      );
-    }
-
     if (_isInitializing) {
       return FlutterMap(
         options: MapOptions(
           initialCenter: widget.position,
           initialZoom: widget.zoom,
+          minZoom: HistoryScreenState._smallMapMinZoom,
+          maxZoom: HistoryScreenState._smallMapMaxZoom,
           onPositionChanged: (position, hasGesture) => _onCameraMove(),
         ),
         mapController: _mapController,
@@ -1255,13 +1375,15 @@ class _DelayedMapWithMarkerState extends State<_DelayedMapWithMarker> {
           TileLayer(
               urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
               userAgentPackageName: 'org.noxylva.lbjconsole'),
-          MarkerLayer(markers: markers),
+          MarkerLayer(markers: [_buildTrainMarker(widget.position)]),
         ],
       );
     }
 
     return FlutterMap(
       options: MapOptions(
+        minZoom: HistoryScreenState._smallMapMinZoom,
+        maxZoom: HistoryScreenState._smallMapMaxZoom,
         onPositionChanged: (position, hasGesture) => _onCameraMove(),
       ),
       mapController: _mapController,
@@ -1269,8 +1391,24 @@ class _DelayedMapWithMarkerState extends State<_DelayedMapWithMarker> {
         TileLayer(
             urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
             userAgentPackageName: 'org.noxylva.lbjconsole'),
-        MarkerLayer(markers: markers),
+        MarkerLayer(markers: [_buildTrainMarker(widget.position)]),
       ],
+    );
+  }
+
+  Marker _buildTrainMarker(LatLng position) {
+    return Marker(
+      point: position,
+      width: 24,
+      height: 24,
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.black,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.white, width: 1.5),
+        ),
+        child: const Icon(Icons.train, color: Colors.white, size: 12),
+      ),
     );
   }
 }
@@ -1313,7 +1451,12 @@ class _DelayedMultiMarkerMapState extends State<_DelayedMultiMarkerMap> {
     if (savedState != null && mounted) {
       _mapController.move(
         LatLng(savedState.centerLat, savedState.centerLng),
-        savedState.zoom,
+        savedState.zoom
+            .clamp(
+              HistoryScreenState._smallMapMinZoom,
+              HistoryScreenState._smallMapMaxZoom,
+            )
+            .toDouble(),
       );
       if (savedState.bearing != 0.0) {
         _mapController.rotate(savedState.bearing);
@@ -1352,46 +1495,11 @@ class _DelayedMultiMarkerMapState extends State<_DelayedMultiMarkerMap> {
 
   @override
   Widget build(BuildContext context) {
-    final markers = <Marker>[
-      ...widget.positions.map((pos) => Marker(
-          point: pos,
-          width: 24,
-          height: 24,
-          child: Container(
-              decoration: BoxDecoration(
-                  color: Colors.red.withAlpha((255 * 0.8).round()),
-                  shape: BoxShape.circle,
-                  border: Border.all(color: Colors.white, width: 1.5)),
-              child: const Icon(Icons.train, color: Colors.white, size: 12)))),
-    ];
-
-    if (widget.currentUserLocation != null) {
-      markers.add(
-        Marker(
-          point: widget.currentUserLocation!,
-          width: 24,
-          height: 24,
-          child: Container(
-            decoration: BoxDecoration(
-              color: Colors.blue,
-              shape: BoxShape.circle,
-              border: Border.all(color: Colors.white, width: 1.5),
-            ),
-            child: const Icon(
-              Icons.my_location,
-              color: Colors.white,
-              size: 12,
-            ),
-          ),
-        ),
-      );
-    }
-
     return FlutterMap(
       options: MapOptions(
         onPositionChanged: (position, hasGesture) => _onCameraMove(),
-        minZoom: 8,
-        maxZoom: 18,
+        minZoom: HistoryScreenState._smallMapMinZoom,
+        maxZoom: HistoryScreenState._smallMapMaxZoom,
       ),
       mapController: _mapController,
       children: [
@@ -1399,7 +1507,15 @@ class _DelayedMultiMarkerMapState extends State<_DelayedMultiMarkerMap> {
           urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
           userAgentPackageName: 'org.noxylva.lbjconsole',
         ),
-        MarkerLayer(markers: markers),
+        PolylineLayer(
+          polylines: [
+            Polyline(
+              points: widget.positions,
+              strokeWidth: 4,
+              color: Colors.black,
+            ),
+          ],
+        ),
       ],
     );
   }
