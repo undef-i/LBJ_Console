@@ -186,10 +186,8 @@ class RealtimeScreenState extends State<RealtimeScreen> {
               .whereType<MergedTrainRecord>()
               .firstWhere((item) => item.groupKey == groupKey);
 
-          final routePoints = mergedRecord.records
-              .map((record) => _getCachedPosition(record))
-              .where((latLng) => latLng != null)
-              .cast<LatLng>()
+          final routePoints = _validPositionsForRecords(mergedRecord.records)
+              .map((entry) => entry.value)
               .toList()
               .reversed
               .toList();
@@ -268,15 +266,13 @@ class RealtimeScreenState extends State<RealtimeScreen> {
               .whereType<MergedTrainRecord>()
               .firstWhere((item) => item.groupKey == groupKey);
 
-          final routePoints = mergedRecord.records
-              .map((record) => _getCachedPosition(record))
-              .where((latLng) => latLng != null)
-              .cast<LatLng>()
-              .toList()
-              .reversed
-              .toList();
+          final routeEntries =
+              _validPositionsForRecords(mergedRecord.records).toList();
+          final routePoints =
+              routeEntries.map((entry) => entry.value).toList().reversed.toList();
 
           if (routePoints.isNotEmpty) {
+            final markerRecord = routeEntries.first.key;
             markerLayers.add(
               MarkerLayer(
                 markers: [
@@ -296,7 +292,7 @@ class RealtimeScreenState extends State<RealtimeScreen> {
                             borderRadius: BorderRadius.circular(3),
                           ),
                           child: Text(
-                            _getTrainDisplayName(mergedRecord.latestRecord),
+                            _getTrainDisplayName(markerRecord),
                             style: const TextStyle(
                               color: Colors.white,
                               fontSize: 8,
@@ -351,10 +347,8 @@ class RealtimeScreenState extends State<RealtimeScreen> {
               .whereType<MergedTrainRecord>()
               .firstWhere((item) => item.groupKey == groupKey);
 
-          final routePoints = mergedRecord.records
-              .map((record) => _getCachedPosition(record))
-              .where((latLng) => latLng != null)
-              .cast<LatLng>()
+          final routePoints = _validPositionsForRecords(mergedRecord.records)
+              .map((entry) => entry.value)
               .toList();
 
           allSelectedPoints.addAll(routePoints);
@@ -408,6 +402,16 @@ class RealtimeScreenState extends State<RealtimeScreen> {
     _adjustMapViewToSelectedGroups();
   }
 
+  Iterable<MapEntry<TrainRecord, LatLng>> _validPositionsForRecords(
+      Iterable<TrainRecord> records) sync* {
+    for (final record in records) {
+      final position = _getCachedPosition(record);
+      if (position != null) {
+        yield MapEntry(record, position);
+      }
+    }
+  }
+
   LatLng? _getCachedPosition(TrainRecord record) {
     final id = record.uniqueId;
     if (_positionCache.containsKey(id)) {
@@ -428,16 +432,24 @@ class RealtimeScreenState extends State<RealtimeScreen> {
       if (parts.length >= 2) {
         final lat = _parseDmsCoordinate(parts[0]);
         final lng = _parseDmsCoordinate(parts[1]);
-        if (lat != null &&
-            lng != null &&
-            (lat.abs() > 0.001 || lng.abs() > 0.001)) {
-          return LatLng(lat, lng);
+        if (_isValidMapCoordinate(lat, lng)) {
+          return LatLng(lat!, lng!);
         }
       }
     } catch (e) {
       return null;
     }
     return null;
+  }
+
+  bool _isValidMapCoordinate(double? lat, double? lng) {
+    if (lat == null || lng == null || !lat.isFinite || !lng.isFinite) {
+      return false;
+    }
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+      return false;
+    }
+    return lat.abs() > 0.001 || lng.abs() > 0.001;
   }
 
   double? _parseDmsCoordinate(String dmsStr) {
@@ -827,9 +839,24 @@ class RealtimeScreenState extends State<RealtimeScreen> {
       } else if (oldItem is MergedTrainRecord && newItem is MergedTrainRecord) {
         if (oldItem.groupKey != newItem.groupKey) return true;
         if (oldItem.records.length != newItem.records.length) return true;
+        final oldIds = oldItem.records.map((record) => record.uniqueId);
+        final newIds = newItem.records.map((record) => record.uniqueId);
+        if (!_sameOrderedIds(oldIds, newIds)) return true;
       }
     }
     return false;
+  }
+
+  bool _sameOrderedIds(Iterable<String> a, Iterable<String> b) {
+    final aIterator = a.iterator;
+    final bIterator = b.iterator;
+    while (true) {
+      final aHasNext = aIterator.moveNext();
+      final bHasNext = bIterator.moveNext();
+      if (aHasNext != bHasNext) return false;
+      if (!aHasNext) return true;
+      if (aIterator.current != bIterator.current) return false;
+    }
   }
 
   @override
@@ -897,7 +924,7 @@ class RealtimeScreenState extends State<RealtimeScreen> {
                 child: ListView.builder(
                   key: _listViewportKey,
                   controller: _scrollController,
-                  padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                  padding: const EdgeInsets.fromLTRB(16.0, 16.0, 16.0, 0),
                   cacheExtent: 800,
                   itemCount: _displayItems.length,
                   itemBuilder: (context, index) {
@@ -939,7 +966,7 @@ class RealtimeScreenState extends State<RealtimeScreen> {
           shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(8.0),
               side: BorderSide(
-                  color: isSelected ? Colors.blue : Colors.transparent,
+                  color: isSelected ? Colors.white : Colors.transparent,
                   width: 2.0)),
           child: Padding(
               padding: const EdgeInsets.all(16.0),
@@ -1046,7 +1073,7 @@ class RealtimeScreenState extends State<RealtimeScreen> {
           shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(8.0),
               side: BorderSide(
-                  color: isSelected ? Colors.blue : Colors.transparent,
+                  color: isSelected ? Colors.white : Colors.transparent,
                   width: 2.0)),
           child: Padding(
               padding: const EdgeInsets.all(16.0),

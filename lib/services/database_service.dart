@@ -453,15 +453,13 @@ class DatabaseService {
 
   StreamSubscription<void> onRecordDeleted(Function(List<String>) listener) {
     _recordDeleteListeners.add(listener);
-    return Stream.value(null).listen((_) {})
-      ..onData((_) {})
-      ..onDone(() {
-        _recordDeleteListeners.remove(listener);
-      });
+    return _ListenerSubscription(() {
+      _recordDeleteListeners.remove(listener);
+    });
   }
 
   void _notifyRecordDeleted(List<String> deletedIds) {
-    for (final listener in _recordDeleteListeners) {
+    for (final listener in List.of(_recordDeleteListeners)) {
       listener(deletedIds);
     }
   }
@@ -469,13 +467,13 @@ class DatabaseService {
   StreamSubscription<void> onSettingsChanged(
       Function(Map<String, dynamic>) listener) {
     _settingsListeners.add(listener);
-    return _SettingsListenerSubscription(() {
+    return _ListenerSubscription(() {
       _settingsListeners.remove(listener);
     });
   }
 
   void _notifySettingsChanged(Map<String, dynamic> settings) {
-    for (final listener in _settingsListeners) {
+    for (final listener in List.of(_settingsListeners)) {
       listener(settings);
     }
   }
@@ -558,11 +556,11 @@ class DatabaseService {
   }
 }
 
-class _SettingsListenerSubscription implements StreamSubscription<void> {
+class _ListenerSubscription implements StreamSubscription<void> {
   final void Function() _onCancel;
   bool _isCanceled = false;
 
-  _SettingsListenerSubscription(this._onCancel);
+  _ListenerSubscription(this._onCancel);
 
   @override
   Future<void> cancel() async {

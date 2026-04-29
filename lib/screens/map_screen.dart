@@ -17,6 +17,7 @@ class MapScreen extends StatefulWidget {
 class _MapScreenState extends State<MapScreen> {
   final MapController _mapController = MapController();
   final List<TrainRecord> _trainRecords = [];
+  final List<Marker> _trainMarkers = [];
   bool _isLoading = true;
   bool _railwayLayerVisible = true;
   LatLng? _currentLocation;
@@ -260,9 +261,13 @@ class _MapScreenState extends State<MapScreen> {
     setState(() => _isLoading = true);
     try {
       final records = await _getFilteredRecords();
+      final trainMarkers = _buildTrainMarkers(records);
       setState(() {
         _trainRecords.clear();
         _trainRecords.addAll(records);
+        _trainMarkers
+          ..clear()
+          ..addAll(trainMarkers);
         _isLoading = false;
 
         if (_trainRecords.isNotEmpty) {
@@ -371,35 +376,28 @@ class _MapScreenState extends State<MapScreen> {
     }
   }
 
-  List<TrainRecord> _getValidRecords() {
-    return _trainRecords.where((record) {
-      final coords = record.getCoordinates();
-      return coords['lat'] != 0.0 && coords['lng'] != 0.0;
-    }).toList();
+  LatLng? _positionForRecord(TrainRecord record) {
+    final dmsPosition = _parseDmsCoordinate(record.positionInfo);
+    if (dmsPosition != null) {
+      return dmsPosition;
+    }
+
+    final coords = record.getCoordinates();
+    if (coords['lat'] != 0.0 && coords['lng'] != 0.0) {
+      return LatLng(coords['lat']!, coords['lng']!);
+    }
+
+    return null;
   }
 
-  List<TrainRecord> _getValidDmsRecords() {
-    return _trainRecords.where((record) {
-      return _parseDmsCoordinate(record.positionInfo) != null;
-    }).toList();
-  }
-
-  List<Marker> _buildTrainMarkers() {
+  List<Marker> _buildTrainMarkers(List<TrainRecord> records) {
     final markers = <Marker>[];
-    final validRecords = [..._getValidRecords(), ..._getValidDmsRecords()];
+    final seenRecordIds = <String>{};
 
-    for (final record in validRecords) {
-      LatLng? position;
+    for (final record in records) {
+      if (!seenRecordIds.add(record.uniqueId)) continue;
 
-      final dmsPosition = _parseDmsCoordinate(record.positionInfo);
-      if (dmsPosition != null) {
-        position = dmsPosition;
-      } else {
-        final coords = record.getCoordinates();
-        if (coords['lat'] != 0.0 && coords['lng'] != 0.0) {
-          position = LatLng(coords['lat']!, coords['lng']!);
-        }
-      }
+      final position = _positionForRecord(record);
 
       if (position != null) {
         final trainDisplay =
@@ -474,38 +472,96 @@ class _MapScreenState extends State<MapScreen> {
     showDialog(
       context: context,
       builder: (BuildContext context) {
-        return AlertDialog(
-          title: const Text('时间筛选'),
-          content: SizedBox(
-            width: double.minPositive,
+        return Dialog(
+          backgroundColor: const Color(0xFF1E1E1E),
+          insetPadding: const EdgeInsets.symmetric(horizontal: 28),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: const BorderSide(color: Colors.white12),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 18, 20, 12),
             child: Column(
               mainAxisSize: MainAxisSize.min,
-              children: _timeFilterOptions.keys.map((key) {
-                return RadioListTile<String>(
-                  title: Text(_getTimeFilterLabel(key)),
-                  value: key,
-                  groupValue: _selectedTimeFilter,
-                  onChanged: (String? value) {
-                    if (value != null) {
-                      setState(() {
-                        _selectedTimeFilter = value;
-                      });
-                      _loadTrainRecords();
-                      Navigator.pop(context);
-                    }
-                  },
-                  contentPadding: EdgeInsets.zero,
-                  dense: true,
-                );
-              }).toList(),
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  '时间筛选',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                ..._timeFilterOptions.keys.map((key) {
+                  final selected = key == _selectedTimeFilter;
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 3),
+                    child: Material(
+                      color: selected
+                          ? Colors.white.withValues(alpha: 0.10)
+                          : Colors.transparent,
+                      borderRadius: BorderRadius.circular(8),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(8),
+                        onTap: () {
+                          setState(() {
+                            _selectedTimeFilter = key;
+                          });
+                          _loadTrainRecords();
+                          Navigator.pop(context);
+                        },
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 10,
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                selected
+                                    ? Icons.radio_button_checked
+                                    : Icons.radio_button_unchecked,
+                                color: selected ? Colors.white : Colors.white54,
+                                size: 20,
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Text(
+                                  _getTimeFilterLabel(key),
+                                  style: TextStyle(
+                                    color: selected
+                                        ? Colors.white
+                                        : Colors.white70,
+                                    fontSize: 15,
+                                    fontWeight: selected
+                                        ? FontWeight.w600
+                                        : FontWeight.w400,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                }),
+                const SizedBox(height: 8),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text(
+                      '取消',
+                      style: TextStyle(color: Colors.white70),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('取消'),
-            ),
-          ],
         );
       },
     );
@@ -735,7 +791,7 @@ class _MapScreenState extends State<MapScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final markers = _buildTrainMarkers();
+    final markers = List<Marker>.of(_trainMarkers, growable: true);
 
     if (_userLocation != null) {
       markers.add(
@@ -797,11 +853,9 @@ class _MapScreenState extends State<MapScreen> {
                 minZoom: 2.0,
                 maxZoom: 18.0,
                 onPositionChanged: (MapCamera camera, bool hasGesture) {
-                  setState(() {
-                    _currentLocation = camera.center;
-                    _currentZoom = camera.zoom;
-                    _currentRotation = camera.rotation;
-                  });
+                  _currentLocation = camera.center;
+                  _currentZoom = camera.zoom;
+                  _currentRotation = camera.rotation;
 
                   _scheduleSettingsSave();
                 },

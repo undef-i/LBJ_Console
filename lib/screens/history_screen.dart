@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
-import 'package:geolocator/geolocator.dart';
 import '../models/merged_record.dart';
 import '../services/database_service.dart';
 import '../models/train_record.dart';
@@ -46,10 +45,6 @@ class HistoryScreenState extends State<HistoryScreen> {
 
   final Map<String, double> _mapOptimalZoom = {};
   final Map<String, bool> _mapCalculating = {};
-
-  LatLng? _currentUserLocation;
-  bool _isLocationPermissionGranted = false;
-  Timer? _locationTimer;
 
   int getSelectedCount() => _selectedRecords.length;
   Set<String> getSelectedRecordIds() => _selectedRecords;
@@ -239,7 +234,6 @@ class HistoryScreenState extends State<HistoryScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         loadRecords(scrollToTop: true);
-        _startLocationUpdates();
       }
     });
   }
@@ -247,7 +241,6 @@ class HistoryScreenState extends State<HistoryScreen> {
   @override
   void dispose() {
     _scrollController.dispose();
-    _locationTimer?.cancel();
     super.dispose();
   }
 
@@ -437,9 +430,24 @@ class HistoryScreenState extends State<HistoryScreen> {
       } else if (oldItem is MergedTrainRecord && newItem is MergedTrainRecord) {
         if (oldItem.groupKey != newItem.groupKey) return true;
         if (oldItem.records.length != newItem.records.length) return true;
+        final oldIds = oldItem.records.map((record) => record.uniqueId);
+        final newIds = newItem.records.map((record) => record.uniqueId);
+        if (!_sameOrderedIds(oldIds, newIds)) return true;
       }
     }
     return false;
+  }
+
+  bool _sameOrderedIds(Iterable<String> a, Iterable<String> b) {
+    final aIterator = a.iterator;
+    final bIterator = b.iterator;
+    while (true) {
+      final aHasNext = aIterator.moveNext();
+      final bHasNext = bIterator.moveNext();
+      if (aHasNext != bHasNext) return false;
+      if (!aHasNext) return true;
+      if (aIterator.current != bIterator.current) return false;
+    }
   }
 
   @override
@@ -723,7 +731,16 @@ class HistoryScreenState extends State<HistoryScreen> {
           .then((optimalZoom) {
         if (mounted) {
           setState(() {
-            _mapOptimalZoom[mapId] = optimalZoom;
+            _mapOptimalZoom[mapId] = optimalZoom.isFinite
+                ? optimalZoom
+                : _singlePointMapZoom;
+            _mapCalculating[mapId] = false;
+          });
+        }
+      }).catchError((_) {
+        if (mounted) {
+          setState(() {
+            _mapOptimalZoom[mapId] = _singlePointMapZoom;
             _mapCalculating[mapId] = false;
           });
         }
@@ -762,61 +779,8 @@ class HistoryScreenState extends State<HistoryScreen> {
             center: bounds.center,
             zoom: zoomLevel,
             groupKey: groupKey,
-            currentUserLocation: _currentUserLocation,
           ))
     ]);
-  }
-
-  Future<void> _requestLocationPermission() async {
-    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    if (!serviceEnabled) {
-      return;
-    }
-
-    LocationPermission permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-    }
-
-    if (permission == LocationPermission.deniedForever) {
-      return;
-    }
-
-    if (mounted) {
-      setState(() {
-        _isLocationPermissionGranted = true;
-      });
-    }
-
-    _getCurrentLocation();
-  }
-
-  Future<void> _getCurrentLocation() async {
-    try {
-      final locationSettings = AndroidSettings(
-        accuracy: LocationAccuracy.high,
-        forceLocationManager: true,
-      );
-      Position position = await Geolocator.getCurrentPosition(
-        locationSettings: locationSettings,
-      );
-
-      if (mounted) {
-        setState(() {
-          _currentUserLocation = LatLng(position.latitude, position.longitude);
-        });
-      }
-    } catch (e) {}
-  }
-
-  void _startLocationUpdates() {
-    _requestLocationPermission();
-
-    _locationTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
-      if (_isLocationPermissionGranted) {
-        _getCurrentLocation();
-      }
-    });
   }
 
   Widget _buildRecordCard(TrainRecord record,
@@ -1037,40 +1001,10 @@ class HistoryScreenState extends State<HistoryScreen> {
       return const SizedBox.shrink();
     }
 
-    if (!_mapOptimalZoom.containsKey(mapId) &&
-        !(_mapCalculating[mapId] ?? false)) {
-      _mapCalculating[mapId] = true;
-
-      _calculateOptimalZoomAsync([position],
-              containerWidth: 400, containerHeight: 220)
-          .then((optimalZoom) {
-        if (mounted) {
-          setState(() {
-            _mapOptimalZoom[mapId] = optimalZoom;
-            _mapCalculating[mapId] = false;
-          });
-        }
-      });
-    }
-
-    if (!_mapOptimalZoom.containsKey(mapId)) {
-      return const Column(
-        children: [
-          SizedBox(height: 8),
-          SizedBox(
-            height: 228,
-            child: Center(
-              child: CircularProgressIndicator(
-                color: Colors.white,
-                strokeWidth: 2,
-              ),
-            ),
-          ),
-        ],
-      );
-    }
-
-    final zoomLevel = _mapOptimalZoom[mapId]!;
+    final zoomLevel = _mapOptimalZoom.putIfAbsent(
+      mapId,
+      () => _singlePointMapZoom,
+    );
 
     return Column(children: [
       const SizedBox(height: 8),
@@ -1084,7 +1018,6 @@ class HistoryScreenState extends State<HistoryScreen> {
             position: position,
             zoom: zoomLevel,
             recordId: record.uniqueId,
-            currentUserLocation: _currentUserLocation,
           ))
     ]);
   }
@@ -1100,10 +1033,8 @@ class HistoryScreenState extends State<HistoryScreen> {
       if (parts.length >= 2) {
         final lat = _parseDmsCoordinate(parts[0]);
         final lng = _parseDmsCoordinate(parts[1]);
-        if (lat != null &&
-            lng != null &&
-            (lat.abs() > 0.001 || lng.abs() > 0.001)) {
-          return LatLng(lat, lng);
+        if (_isValidMapCoordinate(lat, lng)) {
+          return LatLng(lat!, lng!);
         }
       }
     } catch (e) {}
@@ -1133,6 +1064,16 @@ class HistoryScreenState extends State<HistoryScreen> {
     } catch (e) {
       return null;
     }
+  }
+
+  bool _isValidMapCoordinate(double? lat, double? lng) {
+    if (lat == null || lng == null || !lat.isFinite || !lng.isFinite) {
+      return false;
+    }
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+      return false;
+    }
+    return lat.abs() > 0.001 || lng.abs() > 0.001;
   }
 
   Future<_BoundaryBox> _calculateBoundaryBoxParallel(
@@ -1172,9 +1113,11 @@ class HistoryScreenState extends State<HistoryScreen> {
     if (positions.length == 1) return _singlePointMapZoom;
 
     final boundaryBox = await _calculateBoundaryBoxParallel(positions);
+    if (!boundaryBox.isValid) return _singlePointMapZoom;
 
     double latToY(double lat) {
-      final latRad = lat * math.pi / 180.0;
+      final clampedLat = lat.clamp(-85.05112878, 85.05112878).toDouble();
+      final latRad = clampedLat * math.pi / 180.0;
       return math.log(math.tan(latRad) + 1.0 / math.cos(latRad));
     }
 
@@ -1191,6 +1134,7 @@ class HistoryScreenState extends State<HistoryScreen> {
 
     final widthWorld = (maxX - minX) / worldSize;
     final heightWorld = (maxY - minY) / worldSize;
+    if (widthWorld <= 0 || heightWorld <= 0) return _singlePointMapZoom;
 
     const paddingRatio = 0.8;
 
@@ -1202,6 +1146,7 @@ class HistoryScreenState extends State<HistoryScreen> {
             math.log(2.0);
 
     final optimalZoom = math.min(widthZoom, heightZoom);
+    if (!optimalZoom.isFinite) return _singlePointMapZoom;
 
     return optimalZoom.clamp(_smallMapMinZoom, _smallMapMaxZoom).toDouble();
   }
@@ -1265,6 +1210,17 @@ class _BoundaryBox {
   final double maxLng;
 
   _BoundaryBox(this.minLat, this.maxLat, this.minLng, this.maxLng);
+
+  bool get isValid {
+    return minLat.isFinite &&
+        maxLat.isFinite &&
+        minLng.isFinite &&
+        maxLng.isFinite &&
+        minLat >= -90 &&
+        maxLat <= 90 &&
+        minLng >= -180 &&
+        maxLng <= 180;
+  }
 }
 
 _BoundaryBox _calculateBoundaryBoxIsolate(List<LatLng> positions) {
@@ -1287,14 +1243,12 @@ class _DelayedMapWithMarker extends StatefulWidget {
   final LatLng position;
   final double zoom;
   final String recordId;
-  final LatLng? currentUserLocation;
 
   const _DelayedMapWithMarker({
     super.key,
     required this.position,
     required this.zoom,
     required this.recordId,
-    this.currentUserLocation,
   });
 
   @override
@@ -1304,6 +1258,7 @@ class _DelayedMapWithMarker extends StatefulWidget {
 class _DelayedMapWithMarkerState extends State<_DelayedMapWithMarker> {
   late final MapController _mapController;
   late final String _mapKey;
+  Timer? _mapStateSaveTimer;
   bool _isInitializing = true;
 
   @override
@@ -1350,11 +1305,15 @@ class _DelayedMapWithMarkerState extends State<_DelayedMapWithMarker> {
       bearing: camera.rotation,
     );
 
-    MapStateService.instance.saveMapState(_mapKey, state);
+    _mapStateSaveTimer?.cancel();
+    _mapStateSaveTimer = Timer(const Duration(milliseconds: 600), () {
+      MapStateService.instance.saveMapState(_mapKey, state);
+    });
   }
 
   @override
   void dispose() {
+    _mapStateSaveTimer?.cancel();
     _mapController.dispose();
     super.dispose();
   }
@@ -1418,7 +1377,6 @@ class _DelayedMultiMarkerMap extends StatefulWidget {
   final LatLng center;
   final double zoom;
   final String groupKey;
-  final LatLng? currentUserLocation;
 
   const _DelayedMultiMarkerMap({
     super.key,
@@ -1426,7 +1384,6 @@ class _DelayedMultiMarkerMap extends StatefulWidget {
     required this.center,
     required this.zoom,
     required this.groupKey,
-    this.currentUserLocation,
   });
 
   @override
@@ -1436,6 +1393,7 @@ class _DelayedMultiMarkerMap extends StatefulWidget {
 class _DelayedMultiMarkerMapState extends State<_DelayedMultiMarkerMap> {
   late final MapController _mapController;
   late final String _mapKey;
+  Timer? _mapStateSaveTimer;
   bool _isInitializing = true;
 
   @override
@@ -1484,11 +1442,15 @@ class _DelayedMultiMarkerMapState extends State<_DelayedMultiMarkerMap> {
       bearing: camera.rotation,
     );
 
-    MapStateService.instance.saveMapState(_mapKey, state);
+    _mapStateSaveTimer?.cancel();
+    _mapStateSaveTimer = Timer(const Duration(milliseconds: 600), () {
+      MapStateService.instance.saveMapState(_mapKey, state);
+    });
   }
 
   @override
   void dispose() {
+    _mapStateSaveTimer?.cancel();
     _mapController.dispose();
     super.dispose();
   }

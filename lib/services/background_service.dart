@@ -43,7 +43,7 @@ class BackgroundService {
     await service.configure(
       androidConfiguration: AndroidConfiguration(
         onStart: _onStart,
-        autoStart: true,
+        autoStart: false,
         isForegroundMode: true,
         notificationChannelId: _notificationChannelId,
         initialNotificationTitle: 'LBJ Console',
@@ -51,7 +51,7 @@ class BackgroundService {
         foregroundServiceNotificationId: _notificationId,
       ),
       iosConfiguration: IosConfiguration(
-        autoStart: true,
+        autoStart: false,
         onForeground: _onStart,
         onBackground: _onIosBackground,
       ),
