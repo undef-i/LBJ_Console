@@ -84,15 +84,11 @@ class AppTheme {
         backgroundColor: const Color(0xFF1E1E1E),
         elevation: 8,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(28),
         ),
         titleTextStyle: const TextStyle(
             color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
         contentTextStyle: const TextStyle(color: Colors.white70, fontSize: 16),
-      ),
-      floatingActionButtonTheme: const FloatingActionButtonThemeData(
-        backgroundColor: Colors.blue,
-        foregroundColor: Colors.white,
       ),
     );
   }

@@ -452,95 +452,24 @@ class _MapScreenState extends State<MapScreen> {
     showDialog(
       context: context,
       builder: (BuildContext context) {
-        return Dialog(
-          backgroundColor: const Color(0xFF1E1E1E),
-          insetPadding: const EdgeInsets.symmetric(horizontal: 28),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-            side: const BorderSide(color: Colors.white12),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 18, 20, 12),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  '时间筛选',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                ..._timeFilterOptions.keys.map((key) {
-                  final selected = key == _selectedTimeFilter;
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 3),
-                    child: Material(
-                      color: selected
-                          ? Colors.white.withValues(alpha: 0.10)
-                          : Colors.transparent,
-                      borderRadius: BorderRadius.circular(8),
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(8),
-                        onTap: () {
-                          setState(() {
-                            _selectedTimeFilter = key;
-                          });
-                          _loadTrainRecords();
-                          Navigator.pop(context);
-                        },
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 10,
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(
-                                selected
-                                    ? Icons.radio_button_checked
-                                    : Icons.radio_button_unchecked,
-                                color: selected ? Colors.white : Colors.white54,
-                                size: 20,
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Text(
-                                  _getTimeFilterLabel(key),
-                                  style: TextStyle(
-                                    color: selected
-                                        ? Colors.white
-                                        : Colors.white70,
-                                    fontSize: 15,
-                                    fontWeight: selected
-                                        ? FontWeight.w600
-                                        : FontWeight.w400,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  );
-                }),
-                const SizedBox(height: 8),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: TextButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: const Text(
-                      '取消',
-                      style: TextStyle(color: Colors.white70),
-                    ),
-                  ),
-                ),
-              ],
-            ),
+        return RadioGroup<String>(
+          groupValue: _selectedTimeFilter,
+          onChanged: (value) {
+            if (value == null) return;
+            setState(() {
+              _selectedTimeFilter = value;
+            });
+            _loadTrainRecords();
+            Navigator.pop(context);
+          },
+          child: SimpleDialog(
+            title: const Text('时间筛选'),
+            children: _timeFilterOptions.keys.map((key) {
+              return RadioListTile<String>(
+                value: key,
+                title: Text(_getTimeFilterLabel(key)),
+              );
+            }).toList(),
           ),
         );
       },
@@ -719,7 +648,7 @@ class _MapScreenState extends State<MapScreen> {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8.0),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           SizedBox(
             width: 60,
@@ -777,6 +706,50 @@ class _MapScreenState extends State<MapScreen> {
 
     return Scaffold(
       backgroundColor: const Color(0xFF121212),
+      floatingActionButtonLocation: FloatingActionButtonLocation.endTop,
+      floatingActionButton: SafeArea(
+        minimum: const EdgeInsets.only(top: 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            FloatingActionButton.small(
+              heroTag: 'timeFilter',
+              backgroundColor: const Color(0xFF1E1E1E),
+              foregroundColor: Colors.white,
+              onPressed: _showTimeFilterDialog,
+              child: const Icon(Icons.filter_list),
+            ),
+            const SizedBox(height: 8),
+            FloatingActionButton.small(
+              heroTag: 'railwayLayer',
+              backgroundColor: const Color(0xFF1E1E1E),
+              foregroundColor: Colors.white,
+              onPressed: () {
+                setState(() {
+                  _railwayLayerVisible = !_railwayLayerVisible;
+                });
+                _settingsSaveTimer?.cancel();
+                _saveSettings();
+              },
+              child: Icon(
+                _railwayLayerVisible
+                    ? Icons.layers
+                    : Icons.layers_outlined,
+              ),
+            ),
+            const SizedBox(height: 8),
+            FloatingActionButton.small(
+              heroTag: 'myLocation',
+              backgroundColor: const Color(0xFF1E1E1E),
+              foregroundColor: Colors.white,
+              onPressed: () {
+                _forceUpdateLocation();
+              },
+              child: const Icon(Icons.my_location),
+            ),
+          ],
+        ),
+      ),
       body: Stack(
         children: [
           if (isDefaultLocation)
@@ -839,46 +812,6 @@ class _MapScreenState extends State<MapScreen> {
                 valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF007ACC)),
               ),
             ),
-          Positioned(
-            right: 16,
-            top: 40,
-            child: Column(
-              children: [
-                FloatingActionButton.small(
-                  heroTag: 'timeFilter',
-                  backgroundColor: const Color(0xFF1E1E1E),
-                  onPressed: _showTimeFilterDialog,
-                  child: const Icon(Icons.filter_list, color: Colors.white),
-                ),
-                const SizedBox(height: 8),
-                FloatingActionButton.small(
-                  heroTag: 'railwayLayer',
-                  backgroundColor: const Color(0xFF1E1E1E),
-                  onPressed: () {
-                    setState(() {
-                      _railwayLayerVisible = !_railwayLayerVisible;
-                    });
-                    _settingsSaveTimer?.cancel();
-                    _saveSettings();
-                  },
-                  child: Icon(
-                    _railwayLayerVisible ? Icons.layers : Icons.layers_outlined,
-                    color: Colors.white,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                FloatingActionButton.small(
-                  heroTag: 'myLocation',
-                  backgroundColor: const Color(0xFF1E1E1E),
-                  onPressed: () {
-                    _forceUpdateLocation();
-                  },
-                  child: const Icon(Icons.my_location, color: Colors.white),
-                ),
-                const SizedBox(height: 8),
-              ],
-            ),
-          ),
         ],
       ),
     );
