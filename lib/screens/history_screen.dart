@@ -12,6 +12,9 @@ import '../models/map_state.dart';
 import '../services/map_state_service.dart';
 import 'package:lbjconsole/ui/web_map.dart';
 import 'package:lbjconsole/ui/glass_card.dart';
+import 'package:lbjconsole/ui/glass_clipper.dart';
+import 'package:lbjconsole/ui/glass_styles.dart';
+import 'package:lbjconsole/ui/liquid_glass.dart';
 import 'package:lbjconsole/ui/shape.dart';
 
 class HistoryScreen extends StatefulWidget {
@@ -28,8 +31,7 @@ class HistoryScreen extends StatefulWidget {
   HistoryScreenState createState() => HistoryScreenState();
 }
 
-class HistoryScreenState extends State<HistoryScreen>
-    with TickerProviderStateMixin {
+class HistoryScreenState extends State<HistoryScreen> {
 
   static const double _smallMapMinZoom = 2.0;
   static const double _smallMapMaxZoom = 18.0;
@@ -39,30 +41,16 @@ class HistoryScreenState extends State<HistoryScreen>
   bool _isLoading = true;
   bool _isEditMode = false;
   final Set<String> _selectedRecords = {};
-  final Map<String, bool> _expandedStates = {};
-  // Reveal animations are owned here, keyed by display item, not
-  // by the list item's element: list items are destroyed and
-  // recreated as they scroll out and back in, and an animation
-  // controller living in the item restarted settled every time,
-  // so the same tap animated or snapped depending on whether the
-  // element happened to have survived. Owned here, a controller
-  // keeps its value across item recreation and the reveal behaves
-  // the same on every tap.
-  final Map<String, AnimationController> _revealControllers = {};
-  final Map<String, Animation<double>> _revealAnimations = {};
-  final Set<String> _revealMounted = {};
   late final ScrollController _scrollController;
   bool _isAtTop = true;
   final GlobalKey _listViewportKey = GlobalKey();
   final Map<String, GlobalKey> _itemKeys = {};
   _RenderViewportAnchor? _pendingRenderViewportAnchor;
   int _pendingAnchorPasses = 0;
-  // Anchor support state: keyed boxes inside expanded merged
-  // cards, and the last measured height of every display item.
-  // The height registry is what lets a restore seek toward an
-  // anchor item that a large data change pushed out of the laid
-  // out window, instead of giving up on it.
-  final Map<String, GlobalKey> _subKeys = {};
+  // The last measured height of every display item: the registry
+  // is what lets an anchor restore seek toward an anchor item
+  // that a large data change pushed out of the laid out window,
+  // instead of giving up on it.
   final Map<String, double> _itemHeights = {};
   MergeSettings _mergeSettings = MergeSettings();
 
@@ -107,54 +95,9 @@ class HistoryScreenState extends State<HistoryScreen>
     return {(item as TrainRecord).uniqueId};
   }
 
-  List<Set<String>> _expandedRecordIdGroups() {
-    final groups = <Set<String>>[];
-    for (final item in _displayItems) {
-      final key = _displayItemKey(item);
-      if (_expandedStates[key] == true) {
-        groups.add(_displayItemRecordIds(item));
-      }
-    }
-    return groups;
-  }
-
-  void _restoreExpandedStates(List<Set<String>> expandedRecordIdGroups) {
-    final nextStates = <String, bool>{};
-    for (final item in _displayItems) {
-      final recordIds = _displayItemRecordIds(item);
-      final shouldExpand = expandedRecordIdGroups.any(
-        (expandedIds) => expandedIds.intersection(recordIds).isNotEmpty,
-      );
-      if (shouldExpand) {
-        nextStates[_displayItemKey(item)] = true;
-      }
-    }
-
-    // A restore is data bookkeeping, not a gesture: any reveal it
-    // changes is snapped to its restored value, never animated.
-    for (final item in _displayItems) {
-      final key = _displayItemKey(item);
-      final was = _expandedStates[key] ?? false;
-      final will = nextStates[key] ?? false;
-      if (was != will) {
-        if (will) _revealMounted.add(key);
-        final controller = _revealControllers[key];
-        if (controller != null) controller.value = will ? 1 : 0;
-      }
-    }
-
-    _expandedStates
-      ..clear()
-      ..addAll(nextStates);
-  }
-
   GlobalKey _keyForDisplayItem(Object item) {
     final key = _displayItemKey(item);
     return _itemKeys.putIfAbsent(key, GlobalKey.new);
-  }
-
-  GlobalKey _subKeyFor(String subId) {
-    return _subKeys.putIfAbsent(subId, GlobalKey.new);
   }
 
   RenderBox? _liveBox(GlobalKey? key) {
@@ -189,34 +132,6 @@ class HistoryScreenState extends State<HistoryScreen>
       if (bottom <= 0 || dy >= viewportHeight) continue;
 
       // The first item intersecting the viewport is the anchor.
-      // Inside an expanded merged card, refine the pin to the
-      // first intersecting sub-box: growth inside the card above
-      // that box (a new sub-record at the head of the list, a
-      // taller header) then moves the box, and the restore can
-      // correct for it, where an item-level pin sees a top edge
-      // that never moved and corrects nothing.
-      if (item is MergedTrainRecord &&
-          (_expandedStates[itemKey] ?? false)) {
-        final subIds = <String>[
-          'map:${item.groupKey}',
-          for (final record in item.records) 'sub:${record.uniqueId}',
-        ];
-        for (final subId in subIds) {
-          final subBox = _liveBox(_subKeys[subId]);
-          if (subBox == null) continue;
-          final subDy = subBox.localToGlobal(Offset.zero).dy - viewportTop;
-          final subBottom = subDy + subBox.size.height;
-          if (subBottom <= 0 || subDy >= viewportHeight) continue;
-          return _RenderViewportAnchor(
-            itemKey: itemKey,
-            recordIds: _displayItemRecordIds(item),
-            dy: subDy,
-            subId: subId,
-            index: index,
-          );
-        }
-      }
-
       return _RenderViewportAnchor(
         itemKey: itemKey,
         recordIds: _displayItemRecordIds(item),
@@ -292,27 +207,22 @@ class HistoryScreenState extends State<HistoryScreen>
     // single that became a group, the group that absorbed it),
     // else by the item that took its place in the list.
     var itemKey = anchor.itemKey;
-    var subId = anchor.subId;
     final itemSurvives =
         _displayItems.any((item) => _displayItemKey(item) == itemKey);
     if (!itemSurvives) {
       final fallback = _fallbackItemKeyForAnchor(anchor);
       if (fallback != null) {
         itemKey = fallback;
-        subId = null;
       } else if (_displayItems.isNotEmpty) {
         final clamped = anchor.index.clamp(0, _displayItems.length - 1);
         itemKey = _displayItemKey(_displayItems[clamped]);
-        subId = null;
       } else {
         _pendingRenderViewportAnchor = null;
         return false;
       }
     }
 
-    RenderBox? targetBox;
-    if (subId != null) targetBox = _liveBox(_subKeys[subId]);
-    targetBox ??= _liveBox(_itemKeys[itemKey]);
+    final targetBox = _liveBox(_itemKeys[itemKey]);
 
     if (targetBox != null) {
       final newDy = targetBox.localToGlobal(Offset.zero).dy - viewportTop;
@@ -414,46 +324,8 @@ class HistoryScreenState extends State<HistoryScreen>
 
   @override
   void dispose() {
-    for (final controller in _revealControllers.values) {
-      controller.dispose();
-    }
     _scrollController.dispose();
     super.dispose();
-  }
-
-  Animation<double> _revealAnimationFor(String itemKey, bool expanded) {
-    return _revealAnimations.putIfAbsent(itemKey, () {
-      final controller = AnimationController(
-        vsync: this,
-        duration: const Duration(milliseconds: 280),
-        reverseDuration: const Duration(milliseconds: 220),
-        value: expanded ? 1 : 0,
-      );
-      _revealControllers[itemKey] = controller;
-      return CurvedAnimation(
-        parent: controller,
-        curve: Curves.easeOutCubic,
-        reverseCurve: Curves.easeInCubic,
-      );
-    });
-  }
-
-  void _setExpanded(String itemKey, bool value, {required bool animate}) {
-    setState(() {
-      _expandedStates[itemKey] = value;
-      if (value) _revealMounted.add(itemKey);
-    });
-    final controller = _revealControllers[itemKey];
-    if (controller == null) return;
-    if (animate) {
-      if (value) {
-        controller.forward();
-      } else {
-        controller.reverse();
-      }
-    } else {
-      controller.value = value ? 1 : 0;
-    }
   }
 
   Future<void> loadRecords({bool scrollToTop = true}) async {
@@ -530,13 +402,11 @@ class HistoryScreenState extends State<HistoryScreen>
         final hasDataChanged = _hasDataChanged(items);
 
         if (hasDataChanged) {
-          final expandedRecordIdGroups = _expandedRecordIdGroups();
           final shouldRevealAfterJump = _isLoading && scrollToTop;
           setState(() {
             _displayItems
               ..clear()
               ..addAll(items);
-            _restoreExpandedStates(expandedRecordIdGroups);
             if (!shouldRevealAfterJump) {
               _isLoading = false;
             }
@@ -601,13 +471,11 @@ class HistoryScreenState extends State<HistoryScreen>
         allRecords.insert(0, newRecord);
         final mergedItems =
             MergeService.getMixedList(allRecords, _mergeSettings);
-        final expandedRecordIdGroups = _expandedRecordIdGroups();
 
         setState(() {
           _displayItems
             ..clear()
             ..addAll(mergedItems);
-          _restoreExpandedStates(expandedRecordIdGroups);
 
           _selectedRecords.clear();
           for (final item in _displayItems) {
@@ -736,8 +604,6 @@ class HistoryScreenState extends State<HistoryScreen>
   Widget _buildMergedRecordCard(MergedTrainRecord mergedRecord) {
     final bool isSelected =
         mergedRecord.records.any((r) => _selectedRecords.contains(r.uniqueId));
-    final itemKey = _displayItemKey(mergedRecord);
-    final isExpanded = _expandedStates[itemKey] ?? false;
     return GlassCard(
         key: ValueKey(mergedRecord.groupKey),
         margin: const EdgeInsets.only(bottom: 8.0),
@@ -758,7 +624,7 @@ class HistoryScreenState extends State<HistoryScreen>
                   widget.onSelectionChanged();
                 });
               } else {
-                _setExpanded(itemKey, !isExpanded, animate: true);
+                _showRecordSheet(mergedRecord: mergedRecord);
               }
             },
             onLongPress: () {
@@ -781,37 +647,70 @@ class HistoryScreenState extends State<HistoryScreen>
                           isMerged: true),
                       _buildPositionAndSpeed(mergedRecord.latestRecord),
                       _buildLocoInfo(mergedRecord.latestRecord),
-                      _Reveal(
-                          animation:
-                              _revealAnimationFor(itemKey, isExpanded),
-                          mounted: _revealMounted.contains(itemKey) ||
-                              isExpanded,
-                          child:
-                              _buildMergedExpandedContent(mergedRecord)),
                     ]))));
   }
 
-  Widget _buildMergedExpandedContent(MergedTrainRecord mergedRecord) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        RepaintBoundary(
-          key: _subKeyFor('map:${mergedRecord.groupKey}'),
-          child: _buildExpandedMapForAll(
-              mergedRecord.records, mergedRecord.groupKey),
-        ),
-        const SizedBox(height: 12),
-        ...mergedRecord.records.map(
-          (record) => RepaintBoundary(
-            key: _subKeyFor('sub:${record.uniqueId}'),
-            child: _buildSubRecordItem(
-              record,
-              mergedRecord.latestRecord,
-              _mergeSettings.groupBy,
+  void _showRecordSheet({
+    TrainRecord? record,
+    MergedTrainRecord? mergedRecord,
+  }) {
+    final base = mergedRecord?.latestRecord ?? record!;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      isDismissible: true,
+      enableDrag: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      builder: (sheetContext) {
+        return Stack(
+          children: [
+            Positioned.fill(
+              child: LiquidGlass(
+                style: glassMenuStyle(Theme.of(sheetContext).colorScheme),
+                clipper: const SuperellipseClipper(
+                  BorderRadius.vertical(top: Radius.circular(28)),
+                ),
+                child: const SizedBox.expand(),
+              ),
             ),
-          ),
-        ),
-      ],
+            ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(sheetContext).size.height * 0.85,
+              ),
+              child: SingleChildScrollView(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _buildRecordHeader(base,
+                          isMerged: mergedRecord != null),
+                      _buildPositionAndSpeed(base),
+                      _buildLocoInfo(base),
+                      if (mergedRecord != null) ...[
+                        _buildExpandedMapForAll(
+                            mergedRecord.records, mergedRecord.groupKey),
+                        const SizedBox(height: 12),
+                        for (final sub in mergedRecord.records)
+                          _buildSubRecordItem(
+                            sub,
+                            mergedRecord.latestRecord,
+                            _mergeSettings.groupBy,
+                          ),
+                      ] else
+                        _buildExpandedContent(base),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -1021,15 +920,12 @@ class HistoryScreenState extends State<HistoryScreen>
     ]);
   }
 
-  Widget _buildRecordCard(TrainRecord record,
-      {bool isSubCard = false, Key? key}) {
+  Widget _buildRecordCard(TrainRecord record, {Key? key}) {
     final isSelected = _selectedRecords.contains(record.uniqueId);
-    final itemKey = _displayItemKey(record);
-    final isExpanded = _expandedStates[itemKey] ?? false;
 
     return GlassCard(
         key: key,
-        margin: EdgeInsets.only(bottom: isSubCard ? 4.0 : 8.0),
+        margin: const EdgeInsets.only(bottom: 8.0),
         radius: 16,
         selected: isSelected && _isEditMode,
         child: InkWell(
@@ -1045,7 +941,7 @@ class HistoryScreenState extends State<HistoryScreen>
                   widget.onSelectionChanged();
                 });
               } else {
-                _setExpanded(itemKey, !isExpanded, animate: true);
+                _showRecordSheet(record: record);
               }
             },
             onLongPress: () {
@@ -1065,12 +961,6 @@ class HistoryScreenState extends State<HistoryScreen>
                       _buildRecordHeader(record),
                       _buildPositionAndSpeed(record),
                       _buildLocoInfo(record),
-                      _Reveal(
-                          animation:
-                              _revealAnimationFor(itemKey, isExpanded),
-                          mounted: _revealMounted.contains(itemKey) ||
-                              isExpanded,
-                          child: _buildExpandedContent(record)),
                     ]))));
   }
 
@@ -1388,12 +1278,6 @@ class _RenderViewportAnchor {
   final Set<String> recordIds;
   final double dy;
 
-  // The finest box the pin applies to: null pins the item itself,
-  // a sub id pins a keyed box inside an expanded merged card (its
-  // map block or one of its sub-record rows), which is what makes
-  // growth inside the card above the reading point correctable.
-  final String? subId;
-
   // The item's index in the display list at capture time; the
   // neighbour fallback and the seek both work from it.
   final int index;
@@ -1402,7 +1286,6 @@ class _RenderViewportAnchor {
     required this.itemKey,
     required this.recordIds,
     required this.dy,
-    this.subId,
     this.index = 0,
   });
 }
@@ -1684,38 +1567,4 @@ class _DelayedMultiMarkerMapState extends State<_DelayedMultiMarkerMap> {
   }
 }
 
-/// Expand/collapse as a reveal: the content is laid out once at
-/// its natural height and the animation only moves a clip window
-/// over it, so the embedded map's surface is created at its final
-/// size and is never resized by the animation. The animation and
-/// the mounted latch live in the screen's state, keyed by item
-/// (see _revealAnimationFor), so they survive the list item being
-/// destroyed and recreated by scrolling; this widget only paints
-/// the current frame of an animation it is handed.
-class _Reveal extends StatelessWidget {
-  const _Reveal({
-    required this.animation,
-    required this.mounted,
-    required this.child,
-  });
 
-  final Animation<double> animation;
-  final bool mounted;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    if (!mounted) return const SizedBox.shrink();
-    return AnimatedBuilder(
-      animation: animation,
-      builder: (context, child) => ClipRect(
-        child: Align(
-          alignment: Alignment.topCenter,
-          heightFactor: animation.value,
-          child: child,
-        ),
-      ),
-      child: child,
-    );
-  }
-}
