@@ -11,6 +11,7 @@ import '../services/merge_service.dart';
 import '../models/map_state.dart';
 import '../services/map_state_service.dart';
 import 'package:lbjconsole/ui/web_map.dart';
+import 'package:lbjconsole/ui/fl_list.dart';
 import 'package:lbjconsole/ui/glass_card.dart';
 import 'package:lbjconsole/ui/glass_clipper.dart';
 import 'package:lbjconsole/ui/glass_styles.dart';
@@ -658,6 +659,7 @@ class HistoryScreenState extends State<HistoryScreen> {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
+      barrierColor: Colors.transparent,
       isScrollControlled: true,
       isDismissible: true,
       enableDrag: true,
@@ -665,11 +667,12 @@ class HistoryScreenState extends State<HistoryScreen> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
       builder: (sheetContext) {
+        final scheme = Theme.of(sheetContext).colorScheme;
         return Stack(
           children: [
             Positioned.fill(
               child: LiquidGlass(
-                style: glassMenuStyle(Theme.of(sheetContext).colorScheme),
+                style: glassMenuStyle(scheme),
                 clipper: const SuperellipseClipper(
                   BorderRadius.vertical(top: Radius.circular(28)),
                 ),
@@ -681,30 +684,41 @@ class HistoryScreenState extends State<HistoryScreen> {
                 maxHeight: MediaQuery.of(sheetContext).size.height * 0.85,
               ),
               child: SingleChildScrollView(
-                child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _buildRecordHeader(base,
-                          isMerged: mergedRecord != null),
-                      _buildPositionAndSpeed(base),
-                      _buildLocoInfo(base),
-                      if (mergedRecord != null) ...[
-                        _buildExpandedMapForAll(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _sheetHeader(base),
+                    _sheetInfoList(base),
+                    if (mergedRecord != null) ...[
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+                        child: _buildExpandedMapForAll(
                             mergedRecord.records, mergedRecord.groupKey),
-                        const SizedBox(height: 12),
-                        for (final sub in mergedRecord.records)
-                          _buildSubRecordItem(
-                            sub,
-                            mergedRecord.latestRecord,
-                            _mergeSettings.groupBy,
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 20, 20, 2),
+                        child: Text('子记录', style: flCaptionStyle(scheme)),
+                      ),
+                      for (var i = 0; i < mergedRecord.records.length; i++) ...[
+                        if (i > 0)
+                          Divider(
+                            height: 1,
+                            indent: 20,
+                            endIndent: 20,
+                            color:
+                                scheme.outlineVariant.withValues(alpha: 0.55),
                           ),
-                      ] else
-                        _buildExpandedContent(base),
-                    ],
-                  ),
+                        _sheetSubRow(mergedRecord.records[i],
+                            mergedRecord.latestRecord),
+                      ],
+                    ] else
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+                        child: _buildExpandedContent(base),
+                      ),
+                    const SizedBox(height: 16),
+                  ],
                 ),
               ),
             ),
@@ -714,44 +728,194 @@ class HistoryScreenState extends State<HistoryScreen> {
     );
   }
 
-  Widget _buildSubRecordItem(
-      TrainRecord record, TrainRecord latest, GroupBy groupBy) {
-    String differingInfo = _getDifferingInfo(record, latest, groupBy);
-    String locationInfo = _getLocationInfo(record);
-
+  Widget _sheetHeader(TrainRecord record) {
+    final scheme = Theme.of(context).colorScheme;
+    final timeText = (record.time == '<NUL>' || record.time.isEmpty)
+        ? record.receivedTimestamp.toString().split('.')[0]
+        : record.time.split('\n')[0];
+    final hasTrain = record.fullTrainNumber.isNotEmpty;
+    final hasDirection = record.direction == 1 || record.direction == 3;
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8.0, top: 4.0),
+      padding: const EdgeInsets.fromLTRB(20, 20, 20, 10),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Text(
-                record.receivedTimestamp.toString().split('.')[0],
-                style: const TextStyle(color: Colors.grey, fontSize: 12),
-              ),
-              if (differingInfo.isNotEmpty)
-                Text(
-                  differingInfo,
-                  style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 12),
-                ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Flexible(
+              Expanded(
                 child: Text(
-                  locationInfo,
-                  style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 14),
+                  hasTrain ? record.fullTrainNumber : timeText,
+                  style: TextStyle(
+                    fontSize: hasTrain ? 22 : 15,
+                    fontWeight: FontWeight.bold,
+                    color: scheme.onSurface,
+                  ),
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
+              if (hasDirection) ...[
+                const SizedBox(width: 8),
+                Container(
+                  width: 20,
+                  height: 20,
+                  decoration: BoxDecoration(
+                    color: scheme.onSurface,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                  child: Center(
+                    child: Text(
+                      record.direction == 1 ? '下' : '上',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: scheme.surface,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+              if (record.trainType.isNotEmpty) ...[
+                const SizedBox(width: 8),
+                Text(
+                  record.trainType,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ],
+          ),
+          if (hasTrain) ...[
+            const SizedBox(height: 4),
+            Text(
+              timeText,
+              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _sheetInfoList(TrainRecord record) {
+    final scheme = Theme.of(context).colorScheme;
+    final pairs = <(String, String)>[];
+    final loco = _formatLocoInfo(record);
+    if (loco.isNotEmpty && loco != '<NUL>') pairs.add(('机车', loco));
+    final locoInfo = record.locoInfo;
+    if (locoInfo != null && locoInfo.isNotEmpty) {
+      pairs.add(('机车信息', locoInfo));
+    }
+    if (record.direction != 0) {
+      pairs.add(('方向', record.direction == 1 ? '下行' : '上行'));
+    }
+    final route = record.route.trim();
+    if (route.isNotEmpty && !route.runes.every((r) => r == '*'.runes.first)) {
+      pairs.add(('线路', route));
+    }
+    final position = record.position.trim();
+    if (position.isNotEmpty &&
+        position != '<NUL>' &&
+        !position.runes
+            .every((r) => r == '-'.runes.first || r == '.'.runes.first)) {
+      final clean = position.endsWith('.')
+          ? position.substring(0, position.length - 1)
+          : position;
+      pairs.add(('位置', '${clean}K'));
+    }
+    final speed = record.speed.trim();
+    if (speed.isNotEmpty &&
+        speed != 'NUL' &&
+        speed != '<NUL>' &&
+        !speed.runes
+            .every((r) => r == '*'.runes.first || r == '-'.runes.first)) {
+      pairs.add(('速度', '${speed.replaceAll(' ', '')} km/h'));
+    }
+    pairs.add(
+        ('接收时间', record.receivedTimestamp.toString().split('.')[0]));
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (var i = 0; i < pairs.length; i++) ...[
+          if (i > 0)
+            Divider(
+              height: 1,
+              indent: 20,
+              endIndent: 20,
+              color: scheme.outlineVariant.withValues(alpha: 0.55),
+            ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 11),
+            child: Row(
+              children: [
+                Text(
+                  pairs[i].$1,
+                  style:
+                      TextStyle(fontSize: 14, color: scheme.onSurfaceVariant),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Text(
+                    pairs[i].$2,
+                    textAlign: TextAlign.end,
+                    style: TextStyle(fontSize: 15, color: scheme.onSurface),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _sheetSubRow(TrainRecord record, TrainRecord latest) {
+    final scheme = Theme.of(context).colorScheme;
+    final differing =
+        _getDifferingInfo(record, latest, _mergeSettings.groupBy);
+    final location = _getLocationInfo(record);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
               Text(
-                record.speed.isNotEmpty ? "${record.speed} km/h" : "",
-                style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 14),
+                record.receivedTimestamp.toString().split('.')[0],
+                style:
+                    TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
               ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  differing,
+                  textAlign: TextAlign.end,
+                  style:
+                      TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 3),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  location,
+                  style: TextStyle(fontSize: 14, color: scheme.onSurface),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              if (record.speed.isNotEmpty)
+                Text(
+                  '${record.speed} km/h',
+                  style: TextStyle(fontSize: 14, color: scheme.onSurface),
+                ),
             ],
           ),
         ],
@@ -909,7 +1073,7 @@ class HistoryScreenState extends State<HistoryScreen> {
           height: 220,
           margin: const EdgeInsets.symmetric(vertical: 4),
           decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(8), color: Colors.grey[900]),
+              borderRadius: BorderRadius.circular(12), color: Colors.grey[900]),
           child: _DelayedMultiMarkerMap(
             key: ValueKey('multi_map_${mapId}_$zoomLevel'),
             positions: positions,
@@ -1132,7 +1296,7 @@ class HistoryScreenState extends State<HistoryScreen> {
           height: 220,
           margin: const EdgeInsets.symmetric(vertical: 4),
           decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(8), color: Colors.grey[900]),
+              borderRadius: BorderRadius.circular(12), color: Colors.grey[900]),
           child: _DelayedMapWithMarker(
             key: ValueKey('map_${mapId}_$zoomLevel'),
             position: position,

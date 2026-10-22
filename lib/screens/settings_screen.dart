@@ -166,7 +166,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final scheme = Theme.of(context).colorScheme;
     return Container(
       constraints: const BoxConstraints(minHeight: 56),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      padding: const EdgeInsets.fromLTRB(16, 10, 2, 10),
       child: Row(
         children: [
           Flexible(
@@ -174,9 +174,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const SizedBox(width: 16),
           Expanded(
-            child: Transform.translate(
-              offset: const Offset(3, 0),
-              child: TextField(
+            child: TextField(
                 controller: controller,
                 keyboardType: keyboardType,
                 textAlign: TextAlign.end,
@@ -197,7 +195,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   color: scheme.onSurface,
                 ),
                 onChanged: onChanged,
-              ),
             ),
           ),
         ],
