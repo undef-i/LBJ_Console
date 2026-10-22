@@ -14,7 +14,6 @@ import 'package:lbjconsole/services/notification_service.dart';
 import 'package:lbjconsole/services/background_service.dart';
 import 'package:lbjconsole/services/rtl_tcp_service.dart';
 import 'package:lbjconsole/services/audio_input_service.dart';
-import 'package:lbjconsole/themes/app_theme.dart';
 import 'package:lbjconsole/ui/glass_dock.dart';
 import 'package:lbjconsole/ui/glass_styles.dart';
 import 'package:lbjconsole/ui/liquid_glass.dart';
@@ -23,8 +22,6 @@ import 'package:lbjconsole/util/app_log.dart';
 import 'package:lbjconsole/widgets/audio_waterfall_widget.dart';
 import 'package:lbjconsole/ui/glass_card.dart';
 import 'package:lbjconsole/ui/glass_dialog.dart';
-import 'package:flutter/physics.dart';
-import 'package:lbjconsole/ui/motion.dart';
 import 'package:lbjconsole/ui/glass_morph_menu.dart';
 import 'package:lbjconsole/ui/scroll_edge_fade.dart';
 
@@ -88,26 +85,22 @@ class _ConnectionStatusWidgetState extends State<_ConnectionStatusWidget> {
   @override
   Widget build(BuildContext context) {
     bool isConnected;
-    Color statusColor;
     String statusText;
     DateTime? displayTime;
 
     switch (widget.inputSource) {
       case InputSource.rtlTcp:
         isConnected = widget.rtlTcpConnected;
-        statusColor = isConnected ? Colors.green : Colors.red;
         statusText = isConnected ? '已连接' : '未连接';
         displayTime = widget.rtlTcpLastReceivedTime;
         break;
       case InputSource.audioInput:
         isConnected = AudioInputService().isListening;
-        statusColor = isConnected ? Colors.green : Colors.red;
         statusText = isConnected ? '监听中' : '已停止';
         displayTime = widget.audioLastReceivedTime;
         break;
       case InputSource.bluetooth:
         isConnected = widget.bleService.isConnected;
-        statusColor = isConnected ? Colors.green : Colors.red;
         statusText = _deviceStatus;
         displayTime = widget.lastReceivedTime;
         break;
@@ -120,15 +113,6 @@ class _ConnectionStatusWidgetState extends State<_ConnectionStatusWidget> {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Container(
-          width: 8,
-          height: 8,
-          decoration: BoxDecoration(
-            color: statusColor,
-            shape: BoxShape.circle,
-          ),
-        ),
-        const SizedBox(width: 7),
         SizedBox(
           width: 56,
           child: displayTime != null && isConnected
@@ -678,12 +662,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
             audioLastReceivedTime: _audioLastReceivedTime,
             inputSource: _inputSource,
             rtlTcpConnected: _rtlTcpConnected,
-          ),
-          Container(
-            width: 1,
-            height: 18,
-            margin: const EdgeInsets.symmetric(horizontal: 2),
-            color: colorScheme.onSurface.withValues(alpha: 0.15),
           ),
           IconButton(
             icon: Icon(statusIcon, size: 24),

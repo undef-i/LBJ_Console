@@ -110,60 +110,6 @@ maplibregl.addProtocol('ormsprite', (params) => {
   return Promise.resolve({ data: data });
 });
 
-// Snapshot exports are armed for the next rendered frame and
-// captured inside its render callback, where the drawing buffer
-// is still valid without preserveDrawingBuffer (whose permanent
-// framebuffer copy taxes every frame on tile-based GPUs). They
-// run continuously — while the camera flies, not only once it
-// rests — throttled to a cadence the page can sustain, because a
-// backdrop that only refreshes at rest leaves the glass
-// refracting a stale photograph for the whole drag. The export
-// is half resolution (the underlay is only ever seen through
-// glass blur and refraction) and encodes through toBlob, which
-// keeps the JPEG work off the frame's critical path; between
-// exports the Dart side tracks the camera by transforming the
-// last frame, so geometry never waits on the next export.
-let snapQueued = false;
-let lastSnapAt = 0;
-function postSnapshot() {
-  if (!map || snapQueued) return;
-  // The throttle gate sits before the forced repaint: the export's
-  // own frame makes the map report idle again, and an ungated
-  // re-arm would keep repainting forever.
-  if (performance.now() - lastSnapAt < 100) return;
-  snapQueued = true;
-  map.once('render', () => {
-    snapQueued = false;
-    lastSnapAt = performance.now();
-    try {
-      const src = map.getCanvas();
-      const center = map.getCenter();
-      const zoom = map.getZoom();
-      const c = document.createElement('canvas');
-      c.width = Math.max(1, Math.round(src.width * 0.5));
-      c.height = Math.max(1, Math.round(src.height * 0.5));
-      c.getContext('2d').drawImage(src, 0, 0, c.width, c.height);
-      c.toBlob((blob) => {
-        if (!blob) return;
-        const reader = new FileReader();
-        reader.onload = () => post({
-          t: 'snapshot',
-          data: reader.result,
-          lng: center.lng,
-          lat: center.lat,
-          zoom,
-        });
-        reader.readAsDataURL(blob);
-      }, 'image/jpeg', 0.75);
-    } catch (e) {}
-  });
-  map.triggerRepaint();
-}
-
-function armSnapshot() {
-  postSnapshot();
-}
-
 // While the camera moves, symbol layers are the frame budget:
 // every label is re-placed and re-collided on the page's single
 // thread for every frame of a fast pan, and the geometry layers
@@ -476,7 +422,6 @@ window.LbjInit = async function (opts) {
     ensureOverlays();
     applyTheme();
     trackSymbolLayers();
-    armSnapshot();
     if (!window._mapReady) {
       window._mapReady = true;
       renderStatus();
@@ -484,31 +429,11 @@ window.LbjInit = async function (opts) {
     }
   });
   map.on('error', handleRailwayVectorError);
-  // The WebView is a platform view: Flutter's glass capture cannot
-  // sample its pixels, so the settled canvas is exported and Dart
-  // keeps it as an image layer directly beneath the WebView, where
-  // the capture replay finds it as the glass backdrop. Exports are
-  // armed for the next render after the style loads, after the
-  // camera settles and after data changes, with the map's own idle
-  // (everything streamed in) as the catch-all; the move stream
-  // below keeps exports flowing for the whole flight.
   map.on('movestart', hideLabels);
   map.on('moveend', showLabels);
-  map.on('idle', postSnapshot);
-  // The camera streams on every move so Dart can keep the glass
-  // underlay pinned to the live map: the latest snapshot is
-  // transformed by the same pan/zoom the real camera undergoes,
-  // and the glass samples the map where it is now, not where it
-  // rested when the snapshot was taken.
-  map.on('move', () => {
-    const c = map.getCenter();
-    post({ t: 'move', lng: c.lng, lat: c.lat, zoom: map.getZoom() });
-    armSnapshot();
-  });
   map.on('moveend', () => {
     const c = map.getCenter();
     post({ t: 'camera', lng: c.lng, lat: c.lat, zoom: map.getZoom(), bearing: map.getBearing() });
-    armSnapshot();
   });
   map.on('click', (e) => {
     let best = null;
@@ -587,7 +512,6 @@ window.LbjSetData = function (data) {
       dotMarkers.delete(key);
     }
   }
-  armSnapshot();
 };
 
 window.LbjMoveTo = function (lng, lat, zoom, bearing) {

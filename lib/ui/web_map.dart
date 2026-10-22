@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
@@ -141,15 +140,6 @@ class WebMapController {
 /// handed to the page because openrailwaymap.app serves no CORS
 /// headers for a WebView origin to fetch them directly.
 ///
-/// A WebView is a platform view, invisible to the glass capture
-/// replay, so the page exports its settled canvas and the bytes
-/// are kept as an image layer directly beneath the WebView:
-/// floating glass samples the map itself instead of the black the
-/// platform view leaves in the layer tree. Exports flow for the
-/// whole flight, not only at rest, and between exports the page
-/// streams the camera on every move so the underlay is
-/// transformed by the same pan and zoom: the glass keeps sampling
-/// the map where it is now, in content and in position alike.
 class WebMapView extends StatefulWidget {
   final WebMapController controller;
   final LatLng initialCenter;
@@ -209,16 +199,6 @@ class _OrmData {
 
 class _WebMapViewState extends State<WebMapView> {
   late final WebViewController _webView;
-  Uint8List? _snapshotBytes;
-  // The camera the current snapshot was exported at, and the
-  // latest camera the page has streamed; the underlay's transform
-  // is the pan/zoom from the first to the second.
-  double _snapLng = 0;
-  double _snapLat = 0;
-  double _snapZoom = 0;
-  double _curLng = 0;
-  double _curLat = 0;
-  double _curZoom = 0;
 
   static Future<_OrmData?>? _ormDataFuture;
 
@@ -329,9 +309,6 @@ class _WebMapViewState extends State<WebMapView> {
   @override
   void initState() {
     super.initState();
-    _snapLng = _curLng = widget.initialCenter.longitude;
-    _snapLat = _curLat = widget.initialCenter.latitude;
-    _snapZoom = _curZoom = widget.initialZoom;
     _webView = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setBackgroundColor(const Color(0xFFCCCCCC))
@@ -379,37 +356,14 @@ class _WebMapViewState extends State<WebMapView> {
       case 'error':
         widget.onError?.call();
       case 'camera':
-        _curLng = (decoded['lng'] as num).toDouble();
-        _curLat = (decoded['lat'] as num).toDouble();
-        _curZoom = (decoded['zoom'] as num).toDouble();
         widget.onCameraIdle?.call(
-          LatLng(_curLat, _curLng),
-          _curZoom,
+          LatLng(
+            (decoded['lat'] as num).toDouble(),
+            (decoded['lng'] as num).toDouble(),
+          ),
+          (decoded['zoom'] as num).toDouble(),
           (decoded['bearing'] as num).toDouble(),
         );
-      case 'move':
-        if (!mounted) return;
-        setState(() {
-          _curLng = (decoded['lng'] as num).toDouble();
-          _curLat = (decoded['lat'] as num).toDouble();
-          _curZoom = (decoded['zoom'] as num).toDouble();
-        });
-      case 'snapshot':
-        final data = decoded['data'] as String?;
-        if (data == null) return;
-        final comma = data.indexOf(',');
-        if (comma < 0) return;
-        try {
-          final bytes = base64Decode(data.substring(comma + 1));
-          if (mounted && bytes.isNotEmpty) {
-            setState(() {
-              _snapshotBytes = bytes;
-              _snapLng = (decoded['lng'] as num).toDouble();
-              _snapLat = (decoded['lat'] as num).toDouble();
-              _snapZoom = (decoded['zoom'] as num).toDouble();
-            });
-          }
-        } catch (_) {}
       case 'chipTap':
         widget.onChipTap?.call(decoded['id'] as String);
       case 'tap':
@@ -422,85 +376,31 @@ class _WebMapViewState extends State<WebMapView> {
     }
   }
 
-  // Web Mercator world pixels at [zoom], the plane both the
-  // snapshot's camera and the live camera are projected onto.
-  static Offset _worldPx(double lng, double lat, double zoom) {
-    final world = 512.0 * math.pow(2.0, zoom).toDouble();
-    final x = (lng + 180.0) / 360.0 * world;
-    final phi = lat * math.pi / 180.0;
-    final y =
-        (1.0 - math.log(math.tan(phi) + 1.0 / math.cos(phi)) / math.pi) /
-        2.0 *
-        world;
-    return Offset(x, y);
-  }
-
-  // The affine that carries the snapshot's frame onto the live
-  // camera's: a point of the snapshot lands where the same world
-  // point sits on screen now. Both centers are projected at the
-  // snapshot's zoom, so the translation is k times their world
-  // offset plus the recentering of the scale itself.
-  Matrix4 _underlayMatrix(Size viewport) {
-    final k = math.pow(2.0, _curZoom - _snapZoom).toDouble();
-    final snapCenter = _worldPx(_snapLng, _snapLat, _snapZoom);
-    final curCenter = _worldPx(_curLng, _curLat, _snapZoom);
-    final tx = k * (snapCenter.dx - curCenter.dx) + (1 - k) * viewport.width / 2;
-    final ty =
-        k * (snapCenter.dy - curCenter.dy) + (1 - k) * viewport.height / 2;
-    return Matrix4.identity()
-      ..translateByDouble(tx, ty, 0, 1)
-      ..scaleByDouble(k, k, 1, 1);
-  }
-
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final viewport = Size(constraints.maxWidth, constraints.maxHeight);
-        return Stack(
-          children: [
-            if (_snapshotBytes != null)
-              Positioned.fill(
-                child: IgnorePointer(
-                  child: Transform(
-                    transform: _underlayMatrix(viewport),
-                    child: Image.memory(
-                      _snapshotBytes!,
-                      fit: BoxFit.fill,
-                      gaplessPlayback: true,
-                    ),
-                  ),
-                ),
-              ),
-            Positioned.fill(
-              child: WebViewWidget.fromPlatformCreationParams(
-                params: Platform.isAndroid
-                    ? AndroidWebViewWidgetCreationParams(
-                        controller: _webView.platform,
-                        displayWithHybridComposition: false,
-                        gestureRecognizers: widget.interactive
-                            ? {
-                                Factory<OneSequenceGestureRecognizer>(
-                                  () => EagerGestureRecognizer(),
-                                ),
-                              }
-                            : const {},
-                      )
-                    : PlatformWebViewWidgetCreationParams(
-                        controller: _webView.platform,
-                        gestureRecognizers: widget.interactive
-                            ? {
-                                Factory<OneSequenceGestureRecognizer>(
-                                  () => EagerGestureRecognizer(),
-                                ),
-                              }
-                            : const {},
+    return WebViewWidget.fromPlatformCreationParams(
+      params: Platform.isAndroid
+          ? AndroidWebViewWidgetCreationParams(
+              controller: _webView.platform,
+              displayWithHybridComposition: false,
+              gestureRecognizers: widget.interactive
+                  ? {
+                      Factory<OneSequenceGestureRecognizer>(
+                        () => EagerGestureRecognizer(),
                       ),
-              ),
+                    }
+                  : const {},
+            )
+          : PlatformWebViewWidgetCreationParams(
+              controller: _webView.platform,
+              gestureRecognizers: widget.interactive
+                  ? {
+                      Factory<OneSequenceGestureRecognizer>(
+                        () => EagerGestureRecognizer(),
+                      ),
+                    }
+                  : const {},
             ),
-          ],
-        );
-      },
     );
   }
 }
