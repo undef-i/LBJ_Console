@@ -809,6 +809,7 @@ class _MapScreenState extends State<MapScreen> {
               minZoom: 2,
               maxZoom: 18,
               interactive: true,
+              hybridComposition: true,
               orm: true,
               ormVisible: _railwayLayerVisible,
               dark: Theme.of(context).brightness == Brightness.dark,

@@ -148,6 +148,7 @@ class WebMapView extends StatefulWidget {
   final double minZoom;
   final double maxZoom;
   final bool interactive;
+  final bool hybridComposition;
 
   /// Whether this map carries the OpenRailwayMap overlay at all.
   final bool orm;
@@ -171,6 +172,7 @@ class WebMapView extends StatefulWidget {
     this.minZoom = 2,
     this.maxZoom = 18,
     this.interactive = true,
+    this.hybridComposition = false,
     this.orm = false,
     this.ormVisible = true,
     this.dark = false,
@@ -382,7 +384,7 @@ class _WebMapViewState extends State<WebMapView> {
       params: Platform.isAndroid
           ? AndroidWebViewWidgetCreationParams(
               controller: _webView.platform,
-              displayWithHybridComposition: false,
+              displayWithHybridComposition: widget.hybridComposition,
               gestureRecognizers: widget.interactive
                   ? {
                       Factory<OneSequenceGestureRecognizer>(
