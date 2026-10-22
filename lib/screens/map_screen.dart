@@ -6,6 +6,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:lbjconsole/services/database_service.dart';
 import 'package:lbjconsole/models/train_record.dart';
 import 'package:lbjconsole/ui/web_map.dart';
+import 'package:lbjconsole/ui/app_map.dart';
 import 'package:lbjconsole/ui/glass_morph_menu.dart';
 import 'package:lbjconsole/models/merged_record.dart';
 import 'package:lbjconsole/services/merge_service.dart';
@@ -22,7 +23,7 @@ class MapScreen extends StatefulWidget {
 }
 
 class _MapScreenState extends State<MapScreen> {
-  WebMapController _webMap = WebMapController();
+  AppMapController _webMap = AppMapController();
   int _mapGeneration = 0;
   bool _mapReady = false;
   bool _styleFailed = false;
@@ -786,7 +787,7 @@ class _MapScreenState extends State<MapScreen> {
                     _styleFailed = false;
                     _mapReady = false;
                     _mapGeneration++;
-                    _webMap = WebMapController();
+                    _webMap = AppMapController();
                   });
                 },
                 child: Text(
@@ -798,7 +799,7 @@ class _MapScreenState extends State<MapScreen> {
               ),
             )
           else ...[
-            WebMapView(
+            AppMapView(
               key: ValueKey(_mapGeneration),
               controller: _webMap,
               initialCenter: _currentLocation ??

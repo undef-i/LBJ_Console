@@ -11,6 +11,7 @@ import '../services/merge_service.dart';
 import '../models/map_state.dart';
 import '../services/map_state_service.dart';
 import 'package:lbjconsole/ui/web_map.dart';
+import 'package:lbjconsole/ui/app_map.dart';
 import 'package:lbjconsole/ui/glass_card.dart';
 import 'package:lbjconsole/ui/shape.dart';
 
@@ -1432,7 +1433,7 @@ class _DelayedMapWithMarker extends StatefulWidget {
 }
 
 class _DelayedMapWithMarkerState extends State<_DelayedMapWithMarker> {
-  final WebMapController _webMap = WebMapController();
+  final AppMapController _webMap = AppMapController();
   late final String _mapKey;
   Timer? _mapStateSaveTimer;
   ({LatLng center, double zoom, double bearing})? _initialCamera;
@@ -1497,7 +1498,7 @@ class _DelayedMapWithMarkerState extends State<_DelayedMapWithMarker> {
     if (!_ready || _initialCamera == null) {
       return const SizedBox.expand();
     }
-    return WebMapView(
+    return AppMapView(
       controller: _webMap,
       initialCenter: _initialCamera!.center,
       initialZoom: _initialCamera!.zoom,
@@ -1534,7 +1535,7 @@ class _DelayedMultiMarkerMap extends StatefulWidget {
 }
 
 class _DelayedMultiMarkerMapState extends State<_DelayedMultiMarkerMap> {
-  final WebMapController _webMap = WebMapController();
+  final AppMapController _webMap = AppMapController();
   late final String _mapKey;
   Timer? _mapStateSaveTimer;
   ({LatLng center, double zoom, double bearing})? _initialCamera;
@@ -1599,7 +1600,7 @@ class _DelayedMultiMarkerMapState extends State<_DelayedMultiMarkerMap> {
     if (!_ready || _initialCamera == null) {
       return const SizedBox.expand();
     }
-    return WebMapView(
+    return AppMapView(
       controller: _webMap,
       initialCenter: _initialCamera!.center,
       initialZoom: _initialCamera!.zoom,

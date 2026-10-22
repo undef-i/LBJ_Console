@@ -13,6 +13,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:lbjconsole/ui/app_map.dart';
 import 'package:lbjconsole/ui/fl_list.dart';
 import 'package:lbjconsole/ui/glass_dialog.dart';
 import 'package:lbjconsole/ui/glass_styles.dart';
@@ -57,6 +58,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   TimeWindow _timeWindow = TimeWindow.unlimited;
 
   InputSource _inputSource = InputSource.bluetooth;
+  MapEngine _mapEngine = MapEngine.vector;
 
   String _rtlTcpHost = '127.0.0.1';
   String _rtlTcpPort = '14423';
@@ -102,6 +104,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
           orElse: () => InputSource.bluetooth,
         );
 
+        final engineStr = settingsMap['mapEngine'] as String? ?? 'vector';
+        _mapEngine = MapEngine.values.firstWhere(
+          (e) => e.name == engineStr,
+          orElse: () => MapEngine.vector,
+        );
+
         _settingsLoaded = true;
       });
     }
@@ -120,6 +128,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       'groupBy': _groupBy.name,
       'timeWindow': _timeWindow.name,
       'inputSource': _inputSource.name,
+      'mapEngine': _mapEngine.name,
       'rtlTcpHost': _rtlTcpHost,
       'rtlTcpPort': _rtlTcpPort,
     });
@@ -348,6 +357,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
           });
           _saveSettings();
         }),
+        FlRow(
+          title: const Text('地图'),
+          trailing: GlassSelect<MapEngine>(
+            value: _mapEngine,
+            items: const [
+              DropdownMenuItem(value: MapEngine.vector, child: Text('矢量')),
+              DropdownMenuItem(value: MapEngine.raster, child: Text('位图')),
+            ],
+            onChanged: (value) {
+              if (value != null) {
+                setState(() {
+                  _mapEngine = value;
+                });
+                MapEngineStore.instance.value = value;
+                _saveSettings();
+              }
+            },
+          ),
+        ),
       ],
     );
   }

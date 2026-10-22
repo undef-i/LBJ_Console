@@ -7,6 +7,7 @@ import '../services/database_service.dart';
 import '../models/train_record.dart';
 import '../services/merge_service.dart';
 import 'package:lbjconsole/ui/web_map.dart';
+import 'package:lbjconsole/ui/app_map.dart';
 import 'package:lbjconsole/ui/glass_card.dart';
 import 'package:lbjconsole/ui/glass_dialog.dart';
 
@@ -32,7 +33,7 @@ class RealtimeScreenState extends State<RealtimeScreen> {
   StreamSubscription? _recordDeleteSubscription;
   StreamSubscription? _settingsSubscription;
 
-  final WebMapController _webMap = WebMapController();
+  final AppMapController _webMap = AppMapController();
   bool _mapReady = false;
   bool _railwayLayerVisible = true;
   bool _showMap = true;
@@ -727,7 +728,7 @@ class RealtimeScreenState extends State<RealtimeScreen> {
             flex: 1,
             child: Stack(
               children: [
-                WebMapView(
+                AppMapView(
                   controller: _webMap,
                   initialCenter: const LatLng(35.8617, 104.1954),
                   initialZoom: 2,

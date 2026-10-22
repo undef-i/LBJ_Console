@@ -8,6 +8,7 @@ import 'package:lbjconsole/screens/history_screen.dart';
 import 'package:lbjconsole/screens/map_screen.dart';
 import 'package:lbjconsole/screens/realtime_screen.dart';
 import 'package:lbjconsole/screens/settings_screen.dart';
+import 'package:lbjconsole/ui/app_map.dart';
 import 'package:lbjconsole/services/ble_service.dart';
 import 'package:lbjconsole/services/database_service.dart';
 import 'package:lbjconsole/services/notification_service.dart';
@@ -288,6 +289,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
   void _loadInputSettings() async {
     final settings = await _databaseService.getAllSettings();
+    MapEngineStore.instance.applySettings(settings);
     final sourceStr = settings?['inputSource'] as String? ?? 'bluetooth';
 
     if (mounted) {

@@ -16,7 +16,7 @@ class DatabaseService {
   DatabaseService._internal();
 
   static const String _databaseName = 'train_database';
-  static const _databaseVersion = 10;
+  static const _databaseVersion = 11;
 
   static const String trainRecordsTable = 'train_records';
   static const String appSettingsTable = 'app_settings';
@@ -128,6 +128,10 @@ class DatabaseService {
     if (oldVersion < 10) {
       await _ensureIndexes(db);
     }
+    if (oldVersion < 11) {
+      await db.execute(
+          'ALTER TABLE $appSettingsTable ADD COLUMN mapEngine TEXT NOT NULL DEFAULT "vector"');
+    }
   }
 
   Future<void> _ensureIndexes(Database db) async {
@@ -189,7 +193,8 @@ class DatabaseService {
         rtlTcpEnabled INTEGER NOT NULL DEFAULT 0,
         rtlTcpHost TEXT NOT NULL DEFAULT '127.0.0.1',
         rtlTcpPort TEXT NOT NULL DEFAULT '14423',
-        inputSource TEXT NOT NULL DEFAULT 'bluetooth'
+        inputSource TEXT NOT NULL DEFAULT 'bluetooth',
+        mapEngine TEXT NOT NULL DEFAULT 'vector'
       )
     ''');
 
