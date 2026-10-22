@@ -685,7 +685,7 @@ class _MapScreenState extends State<MapScreen> {
       floatingActionButtonLocation: FloatingActionButtonLocation.endTop,
       floatingActionButton: Padding(
         padding: EdgeInsets.only(
-            top: MediaQuery.paddingOf(context).top + 88),
+            top: MediaQuery.paddingOf(context).top + 72),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [

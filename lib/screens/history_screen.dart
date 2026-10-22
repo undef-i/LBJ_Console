@@ -1140,14 +1140,17 @@ class HistoryScreenState extends State<HistoryScreen>
                           width: 20,
                           height: 20,
                           decoration: BoxDecoration(
-                              color: Colors.white,
+                              color:
+                                  Theme.of(context).colorScheme.onSurface,
                               borderRadius: BorderRadius.circular(2)),
                           child: Center(
                               child: Text(record.direction == 1 ? "下" : "上",
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                       fontSize: 12,
                                       fontWeight: FontWeight.bold,
-                                      color: Colors.black))))
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .surface))))
                   ])),
               if (hasLocoInfo)
                 Text(formattedLocoInfo,

@@ -110,47 +110,6 @@ maplibregl.addProtocol('ormsprite', (params) => {
   return Promise.resolve({ data: data });
 });
 
-// While the camera moves, symbol layers are the frame budget:
-// every label is re-placed and re-collided on the page's single
-// thread for every frame of a fast pan, and the geometry layers
-// left behind render at a fraction of the cost. Labels therefore
-// ride out the flight hidden and return the moment the camera
-// rests; the map (and the glass backdrop exported from it) shows
-// lines only while moving, exactly as the live view does.
-let symbolLayers = [];
-let labelsHidden = false;
-function trackSymbolLayers() {
-  if (!map || !map.getStyle()) return;
-  symbolLayers = map.getStyle().layers
-    .filter((l) => l.type === 'symbol')
-    .map((l) => ({
-      id: l.id,
-      visibility: (l.layout && l.layout.visibility) || 'visible',
-    }));
-  if (labelsHidden) applyLabelVisibility('none');
-}
-function applyLabelVisibility(visibility) {
-  for (const s of symbolLayers) {
-    try {
-      map.setLayoutProperty(s.id, 'visibility', visibility);
-    } catch (e) {}
-  }
-}
-function hideLabels() {
-  if (labelsHidden) return;
-  labelsHidden = true;
-  applyLabelVisibility('none');
-}
-function showLabels() {
-  if (!labelsHidden) return;
-  labelsHidden = false;
-  for (const s of symbolLayers) {
-    try {
-      map.setLayoutProperty(s.id, 'visibility', s.visibility);
-    } catch (e) {}
-  }
-}
-
 let baseStyleRef = null;
 let combinedStyle = null;
 let railwayRasterFallbackStyle = null;
@@ -423,7 +382,6 @@ window.LbjInit = async function (opts) {
     forceSansSerifLabels();
     ensureOverlays();
     applyTheme();
-    trackSymbolLayers();
     if (!window._mapReady) {
       window._mapReady = true;
       renderStatus();
@@ -431,8 +389,6 @@ window.LbjInit = async function (opts) {
     }
   });
   map.on('error', handleRailwayVectorError);
-  map.on('movestart', hideLabels);
-  map.on('moveend', showLabels);
   map.on('moveend', () => {
     const c = map.getCenter();
     post({ t: 'camera', lng: c.lng, lat: c.lat, zoom: map.getZoom(), bearing: map.getBearing() });
