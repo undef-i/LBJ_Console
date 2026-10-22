@@ -21,6 +21,7 @@ AudioFFT::AudioFFT(int fftSize)
     
     for (int i = 0; i < fftSize_; i++) {
         windowBuffer_[i] = 0.54f - 0.46f * std::cos(2.0f * M_PI * i / (fftSize_ - 1));
+        windowSum_ += windowBuffer_[i];
     }
     
     LOGD("AudioFFT initialized with size %d", fftSize_);
@@ -105,13 +106,14 @@ void AudioFFT::computeFFT() {
 void AudioFFT::getSpectrum(float* output, int outputSize) {
     int copySize = std::min(outputSize, fftSize_ / 2);
     
+    const float fullScale = windowSum_ * 0.5f;
     for (int i = 0; i < copySize; i++) {
         float mag = magnitude_[i];
         if (mag < 1e-10f) mag = 1e-10f;
-        
-        float db = 20.0f * std::log10(mag);
-        
-        float normalized = (db + 80.0f) / 80.0f;
+
+        float dbfs = 20.0f * std::log10(mag / fullScale);
+
+        float normalized = (dbfs + 80.0f) / 80.0f;
         output[i] = std::max(0.0f, std::min(1.0f, normalized));
     }
 }

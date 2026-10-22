@@ -23,6 +23,7 @@ private:
     std::vector<float> realPart_;
     std::vector<float> imagPart_;
     std::vector<float> magnitude_;
+    float windowSum_ = 0.0f;
     int bufferPos_;
 };
 

@@ -796,8 +796,6 @@ class _Replay {
   _Replay(this.canvas, this.drawn, this.entry, {this.probing = false})
     : _toHost = [entry.rootToHost];
 
-  /// Null while probing: a probe computes [drawn] alone, so that a band
-  /// whose fingerprint is unchanged never pays to be recorded at all.
   final Canvas? canvas;
   final bool probing;
   final List<Object?> drawn;

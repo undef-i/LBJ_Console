@@ -106,30 +106,19 @@ class _ConnectionStatusWidgetState extends State<_ConnectionStatusWidget> {
         break;
     }
 
-    // One line, fixed text slot: the relative time changes width as
-    // it ticks ("9秒前" to "10秒前"), and a capsule that breathes
-    // every second reads as a defect, so the slot's width is fixed
-    // to the longest label and the pill never resizes.
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        SizedBox(
-          width: 56,
-          child: displayTime != null && isConnected
-              ? _LastReceivedTimeWidget(
-                  lastReceivedTime: displayTime,
-                  isConnected: isConnected,
-                )
-              : Text(
-                  statusText,
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-        ),
-      ],
+    if (displayTime != null && isConnected) {
+      return _LastReceivedTimeWidget(
+        lastReceivedTime: displayTime,
+        isConnected: isConnected,
+      );
+    }
+    return Text(
+      statusText,
+      style: TextStyle(
+        color: Theme.of(context).colorScheme.onSurfaceVariant,
+        fontSize: 13,
+        fontWeight: FontWeight.w500,
+      ),
     );
   }
 }

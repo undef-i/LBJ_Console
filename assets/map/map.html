@@ -416,6 +416,8 @@ window.LbjInit = async function (opts) {
     interactive: opts.interactive !== false,
     touchPitch: false,
     pixelRatio: Math.min(window.devicePixelRatio || 1, 2),
+    fadeDuration: 0,
+    maxTileCacheSize: 256,
   });
   map.on('style.load', () => {
     forceSansSerifLabels();

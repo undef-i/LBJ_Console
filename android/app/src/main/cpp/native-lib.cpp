@@ -203,8 +203,13 @@ Java_org_noxylva_lbjconsole_flutter_AudioInputHandler_getAudioSpectrum(JNIEnv *e
     std::vector<float> downsampled(outputBins);
 
     for (int i = 0; i < outputBins; i++) {
-        int srcIdx = (i * spectrumSize) / outputBins;
-        downsampled[i] = spectrum[srcIdx];
+        int begin = (i * spectrumSize) / outputBins;
+        int end = ((i + 1) * spectrumSize) / outputBins;
+        float peak = 0.0f;
+        for (int j = begin; j < end; j++) {
+            if (spectrum[j] > peak) peak = spectrum[j];
+        }
+        downsampled[i] = peak;
     }
 
     jfloatArray result = env->NewFloatArray(outputBins);

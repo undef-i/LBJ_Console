@@ -173,7 +173,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             child: Text(title, style: flListTitleStyle(scheme)),
           ),
           const SizedBox(width: 16),
-          Flexible(
+          Expanded(
             child: Transform.translate(
               offset: const Offset(3, 0),
               child: TextField(
