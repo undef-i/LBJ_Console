@@ -50,6 +50,7 @@ class LBJReceiverApp extends StatelessWidget {
       themeMode: ThemeMode.system,
       builder: (context, child) => LiquidGlassScope(
         enabled: true,
+        quality: LiquidGlassQuality.standard,
         child: LiquidGlassHost(enabled: true, child: child!),
       ),
       home: const MainScreen(),

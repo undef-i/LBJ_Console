@@ -508,7 +508,7 @@ class _LiquidGlassHostLayer extends ContainerLayer {
     }
     double step(double extent) => (extent / _atlasStep).ceil() * _atlasStep;
     final bands = <_Band>[];
-    final pictures = <ui.Picture>[];
+    final bandEntries = <List<_Behind>>[];
     var top = 0.0;
     for (final entries in classes.values) {
       var bottom = 0.0;
@@ -521,26 +521,16 @@ class _LiquidGlassHostLayer extends ContainerLayer {
       final rect = Rect.fromLTWH(0, top, step(width), step(bottom));
       final sigma = entries.first.blurSigma;
       final drawn = <Object?>[sigma, rect.size];
-      final recorder = ui.PictureRecorder();
-      final canvas = Canvas(recorder);
       for (final entry in entries) {
         final place = entry.place.shift(-rect.topLeft);
         drawn
           ..add(place)
           ..add(entry.slot)
           ..addAll(entry.rootToHost.storage);
-        canvas
-          ..save()
-          ..clipRect(place)
-          ..translate(place.left, place.top)
-          ..scale(entry.texelsPerDp)
-          ..translate(-entry.slot.left, -entry.slot.top)
-          ..transform(entry.rootToHost.storage);
-        _Replay(canvas, drawn, entry).run();
-        canvas.restore();
+        _Replay(null, drawn, entry, probing: true).run();
       }
       bands.add((rect: rect, sigma: sigma, drawn: drawn));
-      pictures.add(recorder.endRecording());
+      bandEntries.add(entries);
       top = rect.bottom;
     }
     final size = Size(
@@ -558,10 +548,26 @@ class _LiquidGlassHostLayer extends ContainerLayer {
               band.$2.rect == last[band.$1].rect &&
               listEquals(band.$2.drawn, last[band.$1].drawn),
         )) {
-      for (final picture in pictures) {
-        picture.dispose();
-      }
       return (atlas: previous.image, taken: false, kept: 0);
+    }
+    final pictures = <ui.Picture>[];
+    for (final (index, entries) in bandEntries.indexed) {
+      final band = bands[index];
+      final recorder = ui.PictureRecorder();
+      final canvas = Canvas(recorder);
+      for (final entry in entries) {
+        final place = entry.place.shift(-band.rect.topLeft);
+        canvas
+          ..save()
+          ..clipRect(place)
+          ..translate(place.left, place.top)
+          ..scale(entry.texelsPerDp)
+          ..translate(-entry.slot.left, -entry.slot.top)
+          ..transform(entry.rootToHost.storage);
+        _Replay(canvas, <Object?>[], entry).run();
+        canvas.restore();
+      }
+      pictures.add(recorder.endRecording());
     }
     // Skia keeps what an image was drawn from for as long as the image lives,
     // so a capture copied from the last would hold every one before it.
@@ -787,9 +793,13 @@ bool _drawsOffscreen(Layer layer) {
 /// engine composites it, but for the root's own effect, which the engine
 /// applies to the glass as well.
 class _Replay {
-  _Replay(this.canvas, this.drawn, this.entry) : _toHost = [entry.rootToHost];
+  _Replay(this.canvas, this.drawn, this.entry, {this.probing = false})
+    : _toHost = [entry.rootToHost];
 
-  final Canvas canvas;
+  /// Null while probing: a probe computes [drawn] alone, so that a band
+  /// whose fingerprint is unchanged never pays to be recorded at all.
+  final Canvas? canvas;
+  final bool probing;
   final List<Object?> drawn;
   final _Behind entry;
   final List<Matrix4> _toHost;
@@ -848,7 +858,9 @@ class _Replay {
     while (_saves.length < _entered.length) {
       _saves.add(_apply(_entered[_saves.length]));
     }
-    canvas.drawPicture(picture);
+    if (!probing) {
+      canvas!.drawPicture(picture);
+    }
     drawn.add(picture);
   }
 
@@ -856,9 +868,11 @@ class _Replay {
     final (layer, geometry, root) = entered;
     var saves = 0;
     if (geometry != null) {
-      canvas
-        ..save()
-        ..transform(geometry.storage);
+      if (!probing) {
+        canvas!
+          ..save()
+          ..transform(geometry.storage);
+      }
       drawn.addAll(geometry.storage);
       saves++;
     }
@@ -881,7 +895,9 @@ class _Replay {
             _ => null,
           };
     if (effect case (final paint, final key)?) {
-      canvas.saveLayer(null, paint);
+      if (!probing) {
+        canvas!.saveLayer(null, paint);
+      }
       drawn
         ..add(layer.runtimeType)
         ..add(key);
@@ -898,27 +914,33 @@ class _Replay {
     switch (layer) {
       case ClipRectLayer(:final clipRect?, :final clipBehavior)
           when clipBehavior != Clip.none:
-        canvas
-          ..save()
-          ..clipRect(clipRect, doAntiAlias: clipBehavior != Clip.hardEdge);
+        if (!probing) {
+          canvas!
+            ..save()
+            ..clipRect(clipRect, doAntiAlias: clipBehavior != Clip.hardEdge);
+        }
         clip = clipRect;
       case ClipRSuperellipseLayer(
             :final clipRSuperellipse?,
             :final clipBehavior,
           )
           when clipBehavior != Clip.none:
-        canvas
-          ..save()
-          ..clipRSuperellipse(
-            clipRSuperellipse,
-            doAntiAlias: clipBehavior != Clip.hardEdge,
-          );
+        if (!probing) {
+          canvas!
+            ..save()
+            ..clipRSuperellipse(
+              clipRSuperellipse,
+              doAntiAlias: clipBehavior != Clip.hardEdge,
+            );
+        }
         clip = clipRSuperellipse;
       case ClipPathLayer(:final clipPath?, :final clipBehavior)
           when clipBehavior != Clip.none:
-        canvas
-          ..save()
-          ..clipPath(clipPath, doAntiAlias: clipBehavior != Clip.hardEdge);
+        if (!probing) {
+          canvas!
+            ..save()
+            ..clipPath(clipPath, doAntiAlias: clipBehavior != Clip.hardEdge);
+        }
         clip = clipPath;
       default:
         // Lib clips to no rounded rect, so one a package draws clips by its
@@ -927,9 +949,11 @@ class _Replay {
         if (bounds == null) {
           return false;
         }
-        canvas
-          ..save()
-          ..clipRect(bounds);
+        if (!probing) {
+          canvas!
+            ..save()
+            ..clipRect(bounds);
+        }
         clip = bounds;
     }
     drawn.add(clip);
@@ -947,20 +971,24 @@ class _Replay {
       :final maskRect?,
       :final blendMode?,
     ) when !root) {
-      canvas
-        ..translate(maskRect.left, maskRect.top)
-        ..drawRect(
-          Offset.zero & maskRect.size,
-          Paint()
-            ..shader = shader
-            ..blendMode = blendMode,
-        );
+      if (!probing) {
+        canvas!
+          ..translate(maskRect.left, maskRect.top)
+          ..drawRect(
+            Offset.zero & maskRect.size,
+            Paint()
+              ..shader = shader
+              ..blendMode = blendMode,
+          );
+      }
       drawn
         ..add(maskRect)
         ..add(blendMode);
     }
-    for (var index = 0; index < saves; index++) {
-      canvas.restore();
+    if (!probing) {
+      for (var index = 0; index < saves; index++) {
+        canvas!.restore();
+      }
     }
     drawn.add(saves);
   }
