@@ -11,11 +11,7 @@ import '../services/merge_service.dart';
 import '../models/map_state.dart';
 import '../services/map_state_service.dart';
 import 'package:lbjconsole/ui/web_map.dart';
-import 'package:lbjconsole/ui/fl_list.dart';
 import 'package:lbjconsole/ui/glass_card.dart';
-import 'package:lbjconsole/ui/glass_clipper.dart';
-import 'package:lbjconsole/ui/glass_styles.dart';
-import 'package:lbjconsole/ui/liquid_glass.dart';
 import 'package:lbjconsole/ui/shape.dart';
 
 class HistoryScreen extends StatefulWidget {
@@ -42,16 +38,19 @@ class HistoryScreenState extends State<HistoryScreen> {
   bool _isLoading = true;
   bool _isEditMode = false;
   final Set<String> _selectedRecords = {};
+  final Map<String, bool> _expandedStates = {};
   late final ScrollController _scrollController;
   bool _isAtTop = true;
   final GlobalKey _listViewportKey = GlobalKey();
   final Map<String, GlobalKey> _itemKeys = {};
   _RenderViewportAnchor? _pendingRenderViewportAnchor;
   int _pendingAnchorPasses = 0;
-  // The last measured height of every display item: the registry
-  // is what lets an anchor restore seek toward an anchor item
-  // that a large data change pushed out of the laid out window,
-  // instead of giving up on it.
+  // Anchor support state: keyed boxes inside expanded merged
+  // cards, and the last measured height of every display item.
+  // The height registry is what lets a restore seek toward an
+  // anchor item that a large data change pushed out of the laid
+  // out window, instead of giving up on it.
+  final Map<String, GlobalKey> _subKeys = {};
   final Map<String, double> _itemHeights = {};
   MergeSettings _mergeSettings = MergeSettings();
 
@@ -96,9 +95,41 @@ class HistoryScreenState extends State<HistoryScreen> {
     return {(item as TrainRecord).uniqueId};
   }
 
+  List<Set<String>> _expandedRecordIdGroups() {
+    final groups = <Set<String>>[];
+    for (final item in _displayItems) {
+      final key = _displayItemKey(item);
+      if (_expandedStates[key] == true) {
+        groups.add(_displayItemRecordIds(item));
+      }
+    }
+    return groups;
+  }
+
+  void _restoreExpandedStates(List<Set<String>> expandedRecordIdGroups) {
+    final nextStates = <String, bool>{};
+    for (final item in _displayItems) {
+      final recordIds = _displayItemRecordIds(item);
+      final shouldExpand = expandedRecordIdGroups.any(
+        (expandedIds) => expandedIds.intersection(recordIds).isNotEmpty,
+      );
+      if (shouldExpand) {
+        nextStates[_displayItemKey(item)] = true;
+      }
+    }
+
+    _expandedStates
+      ..clear()
+      ..addAll(nextStates);
+  }
+
   GlobalKey _keyForDisplayItem(Object item) {
     final key = _displayItemKey(item);
     return _itemKeys.putIfAbsent(key, GlobalKey.new);
+  }
+
+  GlobalKey _subKeyFor(String subId) {
+    return _subKeys.putIfAbsent(subId, GlobalKey.new);
   }
 
   RenderBox? _liveBox(GlobalKey? key) {
@@ -133,6 +164,34 @@ class HistoryScreenState extends State<HistoryScreen> {
       if (bottom <= 0 || dy >= viewportHeight) continue;
 
       // The first item intersecting the viewport is the anchor.
+      // Inside an expanded merged card, refine the pin to the
+      // first intersecting sub-box: growth inside the card above
+      // that box (a new sub-record at the head of the list, a
+      // taller header) then moves the box, and the restore can
+      // correct for it, where an item-level pin sees a top edge
+      // that never moved and corrects nothing.
+      if (item is MergedTrainRecord &&
+          (_expandedStates[itemKey] ?? false)) {
+        final subIds = <String>[
+          'map:${item.groupKey}',
+          for (final record in item.records) 'sub:${record.uniqueId}',
+        ];
+        for (final subId in subIds) {
+          final subBox = _liveBox(_subKeys[subId]);
+          if (subBox == null) continue;
+          final subDy = subBox.localToGlobal(Offset.zero).dy - viewportTop;
+          final subBottom = subDy + subBox.size.height;
+          if (subBottom <= 0 || subDy >= viewportHeight) continue;
+          return _RenderViewportAnchor(
+            itemKey: itemKey,
+            recordIds: _displayItemRecordIds(item),
+            dy: subDy,
+            subId: subId,
+            index: index,
+          );
+        }
+      }
+
       return _RenderViewportAnchor(
         itemKey: itemKey,
         recordIds: _displayItemRecordIds(item),
@@ -208,22 +267,27 @@ class HistoryScreenState extends State<HistoryScreen> {
     // single that became a group, the group that absorbed it),
     // else by the item that took its place in the list.
     var itemKey = anchor.itemKey;
+    var subId = anchor.subId;
     final itemSurvives =
         _displayItems.any((item) => _displayItemKey(item) == itemKey);
     if (!itemSurvives) {
       final fallback = _fallbackItemKeyForAnchor(anchor);
       if (fallback != null) {
         itemKey = fallback;
+        subId = null;
       } else if (_displayItems.isNotEmpty) {
         final clamped = anchor.index.clamp(0, _displayItems.length - 1);
         itemKey = _displayItemKey(_displayItems[clamped]);
+        subId = null;
       } else {
         _pendingRenderViewportAnchor = null;
         return false;
       }
     }
 
-    final targetBox = _liveBox(_itemKeys[itemKey]);
+    RenderBox? targetBox;
+    if (subId != null) targetBox = _liveBox(_subKeys[subId]);
+    targetBox ??= _liveBox(_itemKeys[itemKey]);
 
     if (targetBox != null) {
       final newDy = targetBox.localToGlobal(Offset.zero).dy - viewportTop;
@@ -329,6 +393,12 @@ class HistoryScreenState extends State<HistoryScreen> {
     super.dispose();
   }
 
+  void _setExpanded(String itemKey, bool value) {
+    setState(() {
+      _expandedStates[itemKey] = value;
+    });
+  }
+
   Future<void> loadRecords({bool scrollToTop = true}) async {
     final renderAnchor =
         scrollToTop || _isViewingLatest ? null : _currentRenderViewportAnchor();
@@ -403,11 +473,13 @@ class HistoryScreenState extends State<HistoryScreen> {
         final hasDataChanged = _hasDataChanged(items);
 
         if (hasDataChanged) {
+          final expandedRecordIdGroups = _expandedRecordIdGroups();
           final shouldRevealAfterJump = _isLoading && scrollToTop;
           setState(() {
             _displayItems
               ..clear()
               ..addAll(items);
+            _restoreExpandedStates(expandedRecordIdGroups);
             if (!shouldRevealAfterJump) {
               _isLoading = false;
             }
@@ -472,11 +544,13 @@ class HistoryScreenState extends State<HistoryScreen> {
         allRecords.insert(0, newRecord);
         final mergedItems =
             MergeService.getMixedList(allRecords, _mergeSettings);
+        final expandedRecordIdGroups = _expandedRecordIdGroups();
 
         setState(() {
           _displayItems
             ..clear()
             ..addAll(mergedItems);
+          _restoreExpandedStates(expandedRecordIdGroups);
 
           _selectedRecords.clear();
           for (final item in _displayItems) {
@@ -605,6 +679,8 @@ class HistoryScreenState extends State<HistoryScreen> {
   Widget _buildMergedRecordCard(MergedTrainRecord mergedRecord) {
     final bool isSelected =
         mergedRecord.records.any((r) => _selectedRecords.contains(r.uniqueId));
+    final itemKey = _displayItemKey(mergedRecord);
+    final isExpanded = _expandedStates[itemKey] ?? false;
     return GlassCard(
         key: ValueKey(mergedRecord.groupKey),
         margin: const EdgeInsets.only(bottom: 8.0),
@@ -625,7 +701,7 @@ class HistoryScreenState extends State<HistoryScreen> {
                   widget.onSelectionChanged();
                 });
               } else {
-                _showRecordSheet(mergedRecord: mergedRecord);
+                _setExpanded(itemKey, !isExpanded);
               }
             },
             onLongPress: () {
@@ -648,274 +724,73 @@ class HistoryScreenState extends State<HistoryScreen> {
                           isMerged: true),
                       _buildPositionAndSpeed(mergedRecord.latestRecord),
                       _buildLocoInfo(mergedRecord.latestRecord),
+                      if (isExpanded)
+                        _buildMergedExpandedContent(mergedRecord),
                     ]))));
   }
 
-  void _showRecordSheet({
-    TrainRecord? record,
-    MergedTrainRecord? mergedRecord,
-  }) {
-    final base = mergedRecord?.latestRecord ?? record!;
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      barrierColor: Colors.transparent,
-      isScrollControlled: true,
-      isDismissible: true,
-      enableDrag: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-      ),
-      builder: (sheetContext) {
-        final scheme = Theme.of(sheetContext).colorScheme;
-        return Stack(
-          children: [
-            Positioned.fill(
-              child: LiquidGlass(
-                style: glassMenuStyle(scheme),
-                clipper: const SuperellipseClipper(
-                  BorderRadius.vertical(top: Radius.circular(28)),
-                ),
-                child: const SizedBox.expand(),
-              ),
-            ),
-            ConstrainedBox(
-              constraints: BoxConstraints(
-                maxHeight: MediaQuery.of(sheetContext).size.height * 0.85,
-              ),
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    _sheetHeader(base),
-                    _sheetInfoList(base),
-                    if (mergedRecord != null) ...[
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-                        child: _buildExpandedMapForAll(
-                            mergedRecord.records, mergedRecord.groupKey),
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(20, 20, 20, 2),
-                        child: Text('子记录', style: flCaptionStyle(scheme)),
-                      ),
-                      for (var i = 0; i < mergedRecord.records.length; i++) ...[
-                        if (i > 0)
-                          Divider(
-                            height: 1,
-                            indent: 20,
-                            endIndent: 20,
-                            color:
-                                scheme.outlineVariant.withValues(alpha: 0.55),
-                          ),
-                        _sheetSubRow(mergedRecord.records[i],
-                            mergedRecord.latestRecord),
-                      ],
-                    ] else
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-                        child: _buildExpandedContent(base),
-                      ),
-                    const SizedBox(height: 16),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  Widget _sheetHeader(TrainRecord record) {
-    final scheme = Theme.of(context).colorScheme;
-    final timeText = (record.time == '<NUL>' || record.time.isEmpty)
-        ? record.receivedTimestamp.toString().split('.')[0]
-        : record.time.split('\n')[0];
-    final hasTrain = record.fullTrainNumber.isNotEmpty;
-    final hasDirection = record.direction == 1 || record.direction == 3;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 20, 20, 10),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Expanded(
-                child: Text(
-                  hasTrain ? record.fullTrainNumber : timeText,
-                  style: TextStyle(
-                    fontSize: hasTrain ? 22 : 15,
-                    fontWeight: FontWeight.bold,
-                    color: scheme.onSurface,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              if (hasDirection) ...[
-                const SizedBox(width: 8),
-                Container(
-                  width: 20,
-                  height: 20,
-                  decoration: BoxDecoration(
-                    color: scheme.onSurface,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                  child: Center(
-                    child: Text(
-                      record.direction == 1 ? '下' : '上',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                        color: scheme.surface,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-              if (record.trainType.isNotEmpty) ...[
-                const SizedBox(width: 8),
-                Text(
-                  record.trainType,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: scheme.onSurfaceVariant,
-                  ),
-                ),
-              ],
-            ],
-          ),
-          if (hasTrain) ...[
-            const SizedBox(height: 4),
-            Text(
-              timeText,
-              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _sheetInfoList(TrainRecord record) {
-    final scheme = Theme.of(context).colorScheme;
-    final pairs = <(String, String)>[];
-    final loco = _formatLocoInfo(record);
-    if (loco.isNotEmpty && loco != '<NUL>') pairs.add(('机车', loco));
-    final locoInfo = record.locoInfo;
-    if (locoInfo != null && locoInfo.isNotEmpty) {
-      pairs.add(('机车信息', locoInfo));
-    }
-    if (record.direction != 0) {
-      pairs.add(('方向', record.direction == 1 ? '下行' : '上行'));
-    }
-    final route = record.route.trim();
-    if (route.isNotEmpty && !route.runes.every((r) => r == '*'.runes.first)) {
-      pairs.add(('线路', route));
-    }
-    final position = record.position.trim();
-    if (position.isNotEmpty &&
-        position != '<NUL>' &&
-        !position.runes
-            .every((r) => r == '-'.runes.first || r == '.'.runes.first)) {
-      final clean = position.endsWith('.')
-          ? position.substring(0, position.length - 1)
-          : position;
-      pairs.add(('位置', '${clean}K'));
-    }
-    final speed = record.speed.trim();
-    if (speed.isNotEmpty &&
-        speed != 'NUL' &&
-        speed != '<NUL>' &&
-        !speed.runes
-            .every((r) => r == '*'.runes.first || r == '-'.runes.first)) {
-      pairs.add(('速度', '${speed.replaceAll(' ', '')} km/h'));
-    }
-    pairs.add(
-        ('接收时间', record.receivedTimestamp.toString().split('.')[0]));
+  Widget _buildMergedExpandedContent(MergedTrainRecord mergedRecord) {
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        for (var i = 0; i < pairs.length; i++) ...[
-          if (i > 0)
-            Divider(
-              height: 1,
-              indent: 20,
-              endIndent: 20,
-              color: scheme.outlineVariant.withValues(alpha: 0.55),
-            ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 11),
-            child: Row(
-              children: [
-                Text(
-                  pairs[i].$1,
-                  style:
-                      TextStyle(fontSize: 14, color: scheme.onSurfaceVariant),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Text(
-                    pairs[i].$2,
-                    textAlign: TextAlign.end,
-                    style: TextStyle(fontSize: 15, color: scheme.onSurface),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ],
+        RepaintBoundary(
+          key: _subKeyFor('map:${mergedRecord.groupKey}'),
+          child: _buildExpandedMapForAll(
+              mergedRecord.records, mergedRecord.groupKey),
+        ),
+        const SizedBox(height: 12),
+        ...mergedRecord.records.map(
+          (record) => RepaintBoundary(
+            key: _subKeyFor('sub:${record.uniqueId}'),
+            child: _buildSubRecordItem(
+              record,
+              mergedRecord.latestRecord,
+              _mergeSettings.groupBy,
             ),
           ),
-        ],
+        ),
       ],
     );
   }
 
-  Widget _sheetSubRow(TrainRecord record, TrainRecord latest) {
-    final scheme = Theme.of(context).colorScheme;
-    final differing =
-        _getDifferingInfo(record, latest, _mergeSettings.groupBy);
-    final location = _getLocationInfo(record);
+  Widget _buildSubRecordItem(
+      TrainRecord record, TrainRecord latest, GroupBy groupBy) {
+    String differingInfo = _getDifferingInfo(record, latest, groupBy);
+    String locationInfo = _getLocationInfo(record);
+
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+      padding: const EdgeInsets.only(bottom: 8.0, top: 4.0),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
                 record.receivedTimestamp.toString().split('.')[0],
-                style:
-                    TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                style: const TextStyle(color: Colors.grey, fontSize: 12),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  differing,
-                  textAlign: TextAlign.end,
-                  style:
-                      TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
-                  overflow: TextOverflow.ellipsis,
+              if (differingInfo.isNotEmpty)
+                Text(
+                  differingInfo,
+                  style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 12),
                 ),
-              ),
             ],
           ),
-          const SizedBox(height: 3),
+          const SizedBox(height: 4),
           Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Expanded(
+              Flexible(
                 child: Text(
-                  location,
-                  style: TextStyle(fontSize: 14, color: scheme.onSurface),
+                  locationInfo,
+                  style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 14),
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-              if (record.speed.isNotEmpty)
-                Text(
-                  '${record.speed} km/h',
-                  style: TextStyle(fontSize: 14, color: scheme.onSurface),
-                ),
+              Text(
+                record.speed.isNotEmpty ? "${record.speed} km/h" : "",
+                style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 14),
+              ),
             ],
           ),
         ],
@@ -1084,12 +959,15 @@ class HistoryScreenState extends State<HistoryScreen> {
     ]);
   }
 
-  Widget _buildRecordCard(TrainRecord record, {Key? key}) {
+  Widget _buildRecordCard(TrainRecord record,
+      {bool isSubCard = false, Key? key}) {
     final isSelected = _selectedRecords.contains(record.uniqueId);
+    final itemKey = _displayItemKey(record);
+    final isExpanded = _expandedStates[itemKey] ?? false;
 
     return GlassCard(
         key: key,
-        margin: const EdgeInsets.only(bottom: 8.0),
+        margin: EdgeInsets.only(bottom: isSubCard ? 4.0 : 8.0),
         radius: 16,
         selected: isSelected && _isEditMode,
         child: InkWell(
@@ -1105,7 +983,7 @@ class HistoryScreenState extends State<HistoryScreen> {
                   widget.onSelectionChanged();
                 });
               } else {
-                _showRecordSheet(record: record);
+                _setExpanded(itemKey, !isExpanded);
               }
             },
             onLongPress: () {
@@ -1125,6 +1003,7 @@ class HistoryScreenState extends State<HistoryScreen> {
                       _buildRecordHeader(record),
                       _buildPositionAndSpeed(record),
                       _buildLocoInfo(record),
+                      if (isExpanded) _buildExpandedContent(record),
                     ]))));
   }
 
@@ -1442,6 +1321,12 @@ class _RenderViewportAnchor {
   final Set<String> recordIds;
   final double dy;
 
+  // The finest box the pin applies to: null pins the item itself,
+  // a sub id pins a keyed box inside an expanded merged card (its
+  // map block or one of its sub-record rows), which is what makes
+  // growth inside the card above the reading point correctable.
+  final String? subId;
+
   // The item's index in the display list at capture time; the
   // neighbour fallback and the seek both work from it.
   final int index;
@@ -1450,6 +1335,7 @@ class _RenderViewportAnchor {
     required this.itemKey,
     required this.recordIds,
     required this.dy,
+    this.subId,
     this.index = 0,
   });
 }
@@ -1730,5 +1616,4 @@ class _DelayedMultiMarkerMapState extends State<_DelayedMultiMarkerMap> {
     );
   }
 }
-
 
