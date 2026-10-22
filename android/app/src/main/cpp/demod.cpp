@@ -1,41 +1,32 @@
 #include "demod.h"
 #include <android/log.h>
 
-bool is_message_ready = false;
+DemodState demodMic;
+DemodState demodRtl;
 
-PhaseDiscriminators phaseDiscri;
-Lowpass<double> lowpassBaud;
-MovingAverageUtil<double, double, 2048> preambleMovingAverage;
+void ensureDSPInitialized(DemodState &state) {
+    if (state.dsp_initialized) return;
 
-bool got_SC = false;
-double dc_offset = 0.0;
-bool prev_data, bit_inverted, data_bit;
-int sync_cnt, bit_cnt = 0, word_cnt = 0;
-uint32_t bits;
-uint32_t code_words[PAGERDEMOD_BATCH_WORDS];
-bool code_words_bch_error[PAGERDEMOD_BATCH_WORDS];
+    state.lowpassBaud.create(301, SAMPLE_RATE, BAUD_RATE * 5.0f);
+    state.decimationLowpassI.create(151, RTL_INPUT_RATE, 20000.0);
+    state.decimationLowpassQ.create(151, RTL_INPUT_RATE, 20000.0);
+    state.phaseDiscri.setFMScaling(SAMPLE_RATE / (2.0f * DEVIATION));
 
-static bool hysteresis_state = false;
-static bool dsp_initialized = false;
+    state.dsp_initialized = true;
+}
 
-std::string numeric_msg, alpha_msg;
-int function_bits;
-uint32_t address;
-uint32_t alpha_bit_buffer;
-int alpha_bit_buffer_bits;
-int parity_errors;
-int bch_errors;
-int batch_num;
+void resetDemod(DemodState &state) {
+    state = DemodState();
+    ensureDSPInitialized(state);
+}
 
-double magsqRaw;
-
-void ensureDSPInitialized() {
-    if (dsp_initialized) return;
-    
-    lowpassBaud.create(301, SAMPLE_RATE, BAUD_RATE * 5.0f);
-    phaseDiscri.setFMScaling(SAMPLE_RATE / (2.0f * DEVIATION));
-    
-    dsp_initialized = true;
+void resetFraming(DemodState &state) {
+    state.got_SC = false;
+    state.bit_inverted = false;
+    state.bits = 0;
+    state.bit_cnt = 0;
+    state.word_cnt = 0;
+    state.sync_cnt = 0;
 }
 
 int pop_cnt(uint32_t cw)
@@ -52,7 +43,7 @@ int pop_cnt(uint32_t cw)
 uint32_t bchEncode(const uint32_t cw)
 {
     uint32_t bit = 0;
-    uint32_t localCW = cw & 0xFFFFF800; 
+    uint32_t localCW = cw & 0xFFFFF800;
     uint32_t cwE = localCW;
 
     for (bit = 1; bit <= 21; bit++)
@@ -84,12 +75,12 @@ bool bchDecode(const uint32_t cw, uint32_t &correctedCW)
     for (uint32_t xbit = 0; xbit < 31; xbit++)
     {
         result <<= 1;
-        if ((syndrome == 0x3B4) || 
-            (syndrome == 0x26E) || 
-            (syndrome == 0x359) || 
-            (syndrome == 0x076) || 
-            (syndrome == 0x255) || 
-            (syndrome == 0x0F0) || 
+        if ((syndrome == 0x3B4) ||
+            (syndrome == 0x26E) ||
+            (syndrome == 0x359) ||
+            (syndrome == 0x076) ||
+            (syndrome == 0x255) ||
+            (syndrome == 0x0F0) ||
             (syndrome == 0x216) ||
             (syndrome == 0x365) ||
             (syndrome == 0x068) ||
@@ -128,7 +119,7 @@ bool bchDecode(const uint32_t cw, uint32_t &correctedCW)
         if (syndrome & 0x200)
         {
             syndrome <<= 1;
-            syndrome ^= 0x769; 
+            syndrome ^= 0x769;
         }
         else
         {
@@ -171,43 +162,43 @@ uint32_t reverse(uint32_t x)
     return ((x >> 16) | (x << 16));
 }
 
-void decodeBatch()
+void decodeBatch(DemodState &state)
 {
     int i = 1;
     for (int frame = 0; frame < PAGERDEMOD_FRAMES_PER_BATCH; frame++)
     {
         for (int word = 0; word < PAGERDEMOD_CODEWORDS_PER_FRAME; word++)
         {
-            bool addressCodeWord = ((code_words[i] >> 31) & 1) == 0;
-            bool parityError = !evenParity(code_words[i], 1, 31, code_words[i] & 0x1);
+            bool addressCodeWord = ((state.code_words[i] >> 31) & 1) == 0;
+            bool parityError = !evenParity(state.code_words[i], 1, 31, state.code_words[i] & 0x1);
 
-            if (code_words[i] == PAGERDEMOD_POCSAG_IDLECODE)
+            if (state.code_words[i] == PAGERDEMOD_POCSAG_IDLECODE)
             {
             }
             else if (addressCodeWord)
             {
-                function_bits = (code_words[i] >> 11) & 0x3;
-                int addressBits = (code_words[i] >> 13) & 0x3ffff;
-                address = (addressBits << 3) | frame;
-                
+                state.function_bits = (state.code_words[i] >> 11) & 0x3;
+                int addressBits = (state.code_words[i] >> 13) & 0x3ffff;
+                state.address = (addressBits << 3) | frame;
+
                 __android_log_print(ANDROID_LOG_DEBUG, "DEMOD", "addr_cw: raw=0x%08X addr=%u func=%d frame=%d bch_err=%d parity_err=%d",
-                    code_words[i], address, function_bits, frame, code_words_bch_error[i] ? 1 : 0, parityError ? 1 : 0);
-                
-                numeric_msg = "";
-                alpha_msg = "";
-                alpha_bit_buffer_bits = 0;
-                alpha_bit_buffer = 0;
-                parity_errors = parityError ? 1 : 0;
-                bch_errors = code_words_bch_error[i] ? 1 : 0;
+                    state.code_words[i], state.address, state.function_bits, frame, state.code_words_bch_error[i] ? 1 : 0, parityError ? 1 : 0);
+
+                state.numeric_msg = "";
+                state.alpha_msg = "";
+                state.alpha_bit_buffer_bits = 0;
+                state.alpha_bit_buffer = 0;
+                state.parity_errors = parityError ? 1 : 0;
+                state.bch_errors = state.code_words_bch_error[i] ? 1 : 0;
             }
             else
             {
-                int messageBits = (code_words[i] >> 11) & 0xfffff;
-                if (parityError) parity_errors++;
-                if (code_words_bch_error[i]) bch_errors++;
-                
+                int messageBits = (state.code_words[i] >> 11) & 0xfffff;
+                if (parityError) state.parity_errors++;
+                if (state.code_words_bch_error[i]) state.bch_errors++;
+
                 __android_log_print(ANDROID_LOG_DEBUG, "DEMOD", "msg_cw: raw=0x%08X msgbits=0x%05X bch_err=%d parity_err=%d",
-                    code_words[i], messageBits, code_words_bch_error[i] ? 1 : 0, parityError ? 1 : 0);
+                    state.code_words[i], messageBits, state.code_words_bch_error[i] ? 1 : 0, parityError ? 1 : 0);
 
                 for (int j = 16; j >= 0; j -= 4)
                 {
@@ -216,27 +207,27 @@ void decodeBatch()
                     const char numericChars[] = {
                         '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '.', 'U', ' ', '-', ')', '('};
                     char numericChar = numericChars[numericBits];
-                    numeric_msg.push_back(numericChar);
+                    state.numeric_msg.push_back(numericChar);
                 }
 
-                alpha_bit_buffer = (alpha_bit_buffer << 20) | messageBits;
-                alpha_bit_buffer_bits += 20;
-                while (alpha_bit_buffer_bits >= 8)
+                state.alpha_bit_buffer = (state.alpha_bit_buffer << 20) | messageBits;
+                state.alpha_bit_buffer_bits += 20;
+                while (state.alpha_bit_buffer_bits >= 8)
                 {
-                    unsigned char c = (alpha_bit_buffer >> (alpha_bit_buffer_bits - 8)) & 0xff;
+                    unsigned char c = (state.alpha_bit_buffer >> (state.alpha_bit_buffer_bits - 8)) & 0xff;
                     c = reverse(c) >> (32 - 8);
                     if (c != 0 && c != 0x3 && c != 0x4)
                     {
-                        alpha_msg.push_back(c);
+                        state.alpha_msg.push_back(c);
                     }
-                    alpha_bit_buffer_bits -= 8;
-                    if (alpha_bit_buffer_bits == 0)
+                    state.alpha_bit_buffer_bits -= 8;
+                    if (state.alpha_bit_buffer_bits == 0)
                     {
-                        alpha_bit_buffer = 0;
+                        state.alpha_bit_buffer = 0;
                     }
                     else
                     {
-                        alpha_bit_buffer &= (1 << alpha_bit_buffer_bits) - 1;
+                        state.alpha_bit_buffer &= (1 << state.alpha_bit_buffer_bits) - 1;
                     }
                 }
             }
@@ -245,235 +236,136 @@ void decodeBatch()
     }
 }
 
-void processBasebandSample(double sample)
+void feedBit(DemodState &state, bool rawData)
 {
-    ensureDSPInitialized();
+    state.data_bit = state.bit_inverted ? rawData : !rawData;
 
-    double filt = lowpassBaud.filter(sample);
+    state.bits = (state.bits << 1) | (state.data_bit ? 1 : 0);
+    state.bit_cnt++;
 
-    if (!got_SC)
+    if (state.bit_cnt > 32) state.bit_cnt = 32;
+
+    if (state.bit_cnt == 32 && !state.got_SC)
     {
-        preambleMovingAverage(filt);
-        dc_offset = preambleMovingAverage.asDouble();
-    }
-
-    double sample_val = filt - dc_offset;
-
-    static double peak_pos = 0.01;
-    static double peak_neg = -0.01;
-    
-    if (sample_val > peak_pos) peak_pos = sample_val;
-    else peak_pos *= 0.9999;
-    
-    if (sample_val < peak_neg) peak_neg = sample_val;
-    else peak_neg *= 0.9999;
-    
-    double threshold = (peak_pos - peak_neg) * 0.15;
-    if (threshold < 0.005) threshold = 0.005;
-    
-    if (sample_val > threshold) 
-    {
-        hysteresis_state = true;
-    }
-    else if (sample_val < -threshold) 
-    {
-        hysteresis_state = false;
-    }
-
-    bool data = hysteresis_state;
-
-    if (data != prev_data)
-    {
-        sync_cnt = SAMPLES_PER_SYMBOL / 2; 
-    }
-    else
-    {
-        sync_cnt--; 
-
-        if (sync_cnt <= 0)
+        if (state.bits == POCSAG_SYNCCODE)
         {
-            if (bit_inverted) data_bit = data;
-            else data_bit = !data;
-
-            bits = (bits << 1) | data_bit;
-            bit_cnt++;
-
-            if (bit_cnt > 32) bit_cnt = 32;
-
-            if (bit_cnt == 32 && !got_SC)
+            state.got_SC = true;
+            state.bit_inverted = false;
+        }
+        else if (state.bits == POCSAG_SYNCCODE_INV)
+        {
+            state.got_SC = true;
+            state.bit_inverted = true;
+        }
+        else if (pop_cnt(state.bits ^ POCSAG_SYNCCODE) <= 3)
+        {
+            uint32_t corrected_cw;
+            if (bchDecode(state.bits, corrected_cw) && corrected_cw == POCSAG_SYNCCODE)
             {
-                if (bits == POCSAG_SYNCCODE)
-                {
-                    got_SC = true;
-                    bit_inverted = false;
-                }
-                else if (bits == POCSAG_SYNCCODE_INV)
-                {
-                    got_SC = true;
-                    bit_inverted = true;
-                }
-                else if (pop_cnt(bits ^ POCSAG_SYNCCODE) <= 3)
-                {
-                    uint32_t corrected_cw;
-                    if (bchDecode(bits, corrected_cw) && corrected_cw == POCSAG_SYNCCODE)
-                    {
-                        got_SC = true;
-                        bit_inverted = false;
-                    }
-                }
-                else if (pop_cnt(bits ^ POCSAG_SYNCCODE_INV) <= 3)
-                {
-                    uint32_t corrected_cw;
-                    if (bchDecode(~bits, corrected_cw) && corrected_cw == POCSAG_SYNCCODE)
-                    {
-                        got_SC = true;
-                        bit_inverted = true;
-                    }
-                }
-
-                if (got_SC)
-                {
-                    __android_log_print(ANDROID_LOG_DEBUG, "DEMOD", "sync_found: inverted=%d bits=0x%08X", bit_inverted ? 1 : 0, bits);
-                    bits = 0;
-                    bit_cnt = 0;
-                    code_words[0] = POCSAG_SYNCCODE;
-                    word_cnt = 1;
-                }
+                state.got_SC = true;
+                state.bit_inverted = false;
             }
-            else if (bit_cnt == 32 && got_SC)
+        }
+        else if (pop_cnt(state.bits ^ POCSAG_SYNCCODE_INV) <= 3)
+        {
+            uint32_t corrected_cw;
+            if (bchDecode(~state.bits, corrected_cw) && corrected_cw == POCSAG_SYNCCODE)
             {
-                uint32_t corrected_cw;
-                code_words_bch_error[word_cnt] = !bchDecode(bits, corrected_cw);
-                code_words[word_cnt] = corrected_cw;
-                word_cnt++;
-
-                if (word_cnt == 1 && corrected_cw != POCSAG_SYNCCODE)
-                {
-                    got_SC = false;
-                    bit_inverted = false;
-                }
-
-                if (word_cnt == PAGERDEMOD_BATCH_WORDS)
-                {
-                    decodeBatch();
-                    batch_num++;
-                    word_cnt = 0;
-                }
-
-                bits = 0;
-                bit_cnt = 0;
-
-                if (address > 0 && !numeric_msg.empty())
-                {
-                    is_message_ready = true;
-                }
-                else
-                {
-                    is_message_ready = false;
-                }
+                state.got_SC = true;
+                state.bit_inverted = true;
             }
+        }
 
-            sync_cnt = SAMPLES_PER_SYMBOL;
+        if (state.got_SC)
+        {
+            __android_log_print(ANDROID_LOG_DEBUG, "DEMOD", "sync_found: inverted=%d bits=0x%08X", state.bit_inverted ? 1 : 0, state.bits);
+            state.bits = 0;
+            state.bit_cnt = 0;
+            state.code_words[0] = POCSAG_SYNCCODE;
+            state.word_cnt = 1;
         }
     }
+    else if (state.bit_cnt == 32 && state.got_SC)
+    {
+        uint32_t corrected_cw;
+        state.code_words_bch_error[state.word_cnt] = !bchDecode(state.bits, corrected_cw);
+        state.code_words[state.word_cnt] = corrected_cw;
+        state.word_cnt++;
 
-    prev_data = data;
+        if (state.word_cnt == 1 && corrected_cw != POCSAG_SYNCCODE)
+        {
+            state.got_SC = false;
+            state.bit_inverted = false;
+        }
+
+        if (state.word_cnt == PAGERDEMOD_BATCH_WORDS)
+        {
+            decodeBatch(state);
+            state.batch_num++;
+            state.word_cnt = 0;
+        }
+
+        state.bits = 0;
+        state.bit_cnt = 0;
+
+        if (state.address > 0 && !state.numeric_msg.empty())
+        {
+            state.is_message_ready = true;
+        }
+    }
 }
 
-void processOneSample(int8_t i, int8_t q)
+void processOneSample(DemodState &state, int8_t i, int8_t q)
 {
+    ensureDSPInitialized(state);
+
     float fi = ((float)i) / 128.0f;
     float fq = ((float)q) / 128.0f;
 
     std::complex<float> iq(fi, fq);
 
     float deviation;
-    double fmDemod = phaseDiscri.phaseDiscriminatorDelta(iq, magsqRaw, deviation);
-    
-    double filt = lowpassBaud.filter(fmDemod);
+    double fmDemod = state.phaseDiscri.phaseDiscriminatorDelta(iq, state.magsqRaw, deviation);
 
-    if (!got_SC) {
-        preambleMovingAverage(filt);
-        dc_offset = preambleMovingAverage.asDouble();
+    double filt = state.lowpassBaud.filter(fmDemod);
+
+    if (!state.got_SC) {
+        state.preambleMovingAverage(filt);
+        state.dc_offset = state.preambleMovingAverage.asDouble();
     }
 
-    bool data = (filt - dc_offset) >= 0.0;
+    double sample_val = filt - state.dc_offset;
 
-    if (data != prev_data) {
-        sync_cnt = SAMPLES_PER_SYMBOL / 2;
+    if (sample_val > state.peak_pos) state.peak_pos = sample_val;
+    else state.peak_pos *= 0.9999;
+
+    if (sample_val < state.peak_neg) state.peak_neg = sample_val;
+    else state.peak_neg *= 0.9999;
+
+    double threshold = (state.peak_pos - state.peak_neg) * 0.15;
+    if (threshold < 0.005) threshold = 0.005;
+
+    if (sample_val > threshold)
+    {
+        state.hysteresis_state = true;
+    }
+    else if (sample_val < -threshold)
+    {
+        state.hysteresis_state = false;
+    }
+
+    bool data = state.hysteresis_state;
+
+    if (data != state.prev_data) {
+        state.sync_cnt = SAMPLES_PER_SYMBOL / 2;
     } else {
-        sync_cnt--;
-        
-        if (sync_cnt <= 0) {
-            if (bit_inverted) {
-                data_bit = data;
-            } else {
-                data_bit = !data;
-            }
+        state.sync_cnt--;
 
-            bits = (bits << 1) | data_bit;
-            bit_cnt++;
-
-            if (bit_cnt > 32) {
-                bit_cnt = 32;
-            }
-
-            if (bit_cnt == 32 && !got_SC) {
-                if (bits == POCSAG_SYNCCODE) {
-                    got_SC = true;
-                    bit_inverted = false;
-                } else if (bits == POCSAG_SYNCCODE_INV) {
-                    got_SC = true;
-                    bit_inverted = true;
-                } else if (pop_cnt(bits ^ POCSAG_SYNCCODE) <= 3) {
-                    uint32_t corrected_cw;
-                    if (bchDecode(bits, corrected_cw) && corrected_cw == POCSAG_SYNCCODE) {
-                        got_SC = true;
-                        bit_inverted = false;
-                    }
-                } else if (pop_cnt(bits ^ POCSAG_SYNCCODE_INV) <= 3) {
-                    uint32_t corrected_cw;
-                    if (bchDecode(~bits, corrected_cw) && corrected_cw == POCSAG_SYNCCODE) {
-                        got_SC = true;
-                        bit_inverted = true;
-                    }
-                }
-
-                if (got_SC) {
-                    __android_log_print(ANDROID_LOG_DEBUG, "DEMOD", "sync_found: inverted=%d bits=0x%08X", bit_inverted ? 1 : 0, bits);
-                    bits = 0;
-                    bit_cnt = 0;
-                    code_words[0] = POCSAG_SYNCCODE;
-                    word_cnt = 1;
-                }
-            } else if (bit_cnt == 32 && got_SC) {
-                uint32_t corrected_cw;
-                code_words_bch_error[word_cnt] = !bchDecode(bits, corrected_cw);
-                code_words[word_cnt] = corrected_cw;
-                word_cnt++;
-
-                if (word_cnt == 1 && corrected_cw != POCSAG_SYNCCODE) {
-                    got_SC = false;
-                    bit_inverted = false;
-                }
-
-                if (word_cnt == PAGERDEMOD_BATCH_WORDS) {
-                    decodeBatch();
-                    batch_num++;
-                    word_cnt = 0;
-                }
-
-                bits = 0;
-                bit_cnt = 0;
-
-                if (address > 0 && !numeric_msg.empty()) {
-                    is_message_ready = true;
-                }
-            }
-
-            sync_cnt = SAMPLES_PER_SYMBOL;
+        if (state.sync_cnt <= 0) {
+            feedBit(state, data);
+            state.sync_cnt = SAMPLES_PER_SYMBOL;
         }
     }
 
-    prev_data = data;
+    state.prev_data = data;
 }

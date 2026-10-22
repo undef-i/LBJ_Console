@@ -164,7 +164,7 @@ class _LbJState {
   double _convertMagSqToRssi(double magsqRaw) {
     if (magsqRaw <= 0) return -120.0;
     double rssi = 10 * log(magsqRaw) / log(10);
-    return (rssi - 30.0).clamp(-120.0, -20.0);
+    return rssi.clamp(-120.0, 0.0);
   }
 
   Map<String, dynamic> toTrainRecordJson(double magsqRaw) {
@@ -237,6 +237,8 @@ class RtlTcpService {
   static const bool _logRaw = false;
   static const bool _logParsed = false;
   String _lastRawMessage = "";
+  DateTime? _lastRawMessageAt;
+  static const int _duplicateWindowMs = 10000;
 
   bool get isConnected => _isConnected;
   String get deviceStatus => _deviceStatus;
@@ -312,10 +314,15 @@ class RtlTcpService {
             final magsqRaw = (map['magsqRaw'] as num?)?.toDouble() ?? 0.0;
 
             final String currentRawMessage = "$addr|$func|$numeric";
-            if (currentRawMessage == _lastRawMessage) {
+            final now = DateTime.now();
+            if (currentRawMessage == _lastRawMessage &&
+                _lastRawMessageAt != null &&
+                now.difference(_lastRawMessageAt!).inMilliseconds <
+                    _duplicateWindowMs) {
               return;
             }
             _lastRawMessage = currentRawMessage;
+            _lastRawMessageAt = now;
 
             if (kDebugMode && _logRaw) {
               AppLog.info('rtl-tcp', 'raw $currentRawMessage');

@@ -14,13 +14,19 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.EventChannel
+import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import java.nio.charset.Charset
 
 class AudioInputHandler(private val context: Context) : MethodChannel.MethodCallHandler, EventChannel.StreamHandler {
     private var audioRecord: AudioRecord? = null
     private val isRecording = AtomicBoolean(false)
     private var recordingThread: Thread? = null
+    private var processThread: Thread? = null
+    private val chunkQueue = ArrayBlockingQueue<ShortArray>(16)
+    private val droppedChunks = AtomicLong(0)
     
     private val sampleRate = 48000
     private val bufferSize = AudioRecord.getMinBufferSize(
@@ -165,18 +171,44 @@ class AudioInputHandler(private val context: Context) : MethodChannel.MethodCall
 
             audioRecord?.startRecording()
             isRecording.set(true)
+            chunkQueue.clear()
+            droppedChunks.set(0)
 
             recordingThread = Thread {
                 val buffer = ShortArray(bufferSize)
                 while (isRecording.get()) {
-                    val readSize = audioRecord?.read(buffer, 0, buffer.size) ?: 0
-                    if (readSize > 0) {
-                        nativePushAudio(buffer, readSize)
+                    val readSize = audioRecord?.read(buffer, 0, buffer.size) ?: -1
+                    when {
+                        readSize > 0 -> {
+                            val chunk = buffer.copyOf(readSize)
+                            if (!chunkQueue.offer(chunk)) {
+                                val dropped = droppedChunks.incrementAndGet()
+                                if (dropped % 50L == 1L) {
+                                    Log.w(TAG, "audio queue full, dropped chunks: $dropped")
+                                }
+                            }
+                        }
+                        readSize < 0 -> {
+                            Log.e(TAG, "AudioRecord read error: $readSize")
+                            isRecording.set(false)
+                        }
                     }
                 }
             }
             recordingThread?.priority = Thread.MAX_PRIORITY
             recordingThread?.start()
+
+            processThread = Thread {
+                while (isRecording.get() || chunkQueue.isNotEmpty()) {
+                    val chunk = try {
+                        chunkQueue.poll(100, TimeUnit.MILLISECONDS)
+                    } catch (e: InterruptedException) {
+                        null
+                    } ?: continue
+                    nativePushAudio(chunk, chunk.size)
+                }
+            }
+            processThread?.start()
             return true
         } catch (e: Exception) {
             Log.e(TAG, "Start recording exception", e)
@@ -188,20 +220,27 @@ class AudioInputHandler(private val context: Context) : MethodChannel.MethodCall
     private fun stopRecording() {
         isRecording.set(false)
         try {
-            recordingThread?.join(1000)
-        } catch (e: InterruptedException) {
-            e.printStackTrace()
-        }
-        
-        try {
             if (audioRecord?.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
                 audioRecord?.stop()
             }
-            audioRecord?.release()
         } catch (e: Exception) {
             Log.e(TAG, "Stop recording exception", e)
         }
+        try {
+            recordingThread?.join(1000)
+            processThread?.join(1000)
+        } catch (e: InterruptedException) {
+            e.printStackTrace()
+        }
+
+        try {
+            audioRecord?.release()
+        } catch (e: Exception) {
+            Log.e(TAG, "Release recording exception", e)
+        }
         audioRecord = null
         recordingThread = null
+        processThread = null
+        chunkQueue.clear()
     }
 }

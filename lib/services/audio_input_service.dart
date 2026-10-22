@@ -224,6 +224,8 @@ class AudioInputService {
   StreamSubscription? _eventChannelSubscription;
   final _LbJState _state = _LbJState();
   String _lastRawMessage = "";
+  DateTime? _lastRawMessageAt;
+  static const int _duplicateWindowMs = 10000;
 
   bool get isListening => _isListening;
   DateTime? get lastReceivedTime => _lastReceivedTime;
@@ -270,10 +272,15 @@ class AudioInputService {
             final numeric = map['numeric'] as String;
 
             final String currentRawMessage = "$addr|$func|$numeric";
-            if (currentRawMessage == _lastRawMessage) {
+            final now = DateTime.now();
+            if (currentRawMessage == _lastRawMessage &&
+                _lastRawMessageAt != null &&
+                now.difference(_lastRawMessageAt!).inMilliseconds <
+                    _duplicateWindowMs) {
               return;
             }
             _lastRawMessage = currentRawMessage;
+            _lastRawMessageAt = now;
 
             if (kDebugMode) {
               AppLog.info('audio', 'raw $currentRawMessage');

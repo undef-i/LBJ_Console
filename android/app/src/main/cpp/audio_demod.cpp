@@ -1,106 +1,111 @@
 #include "audio_demod.h"
 #include "demod.h"
 #include <android/log.h>
-#include <cmath>
-#include <cstring>
 
 #define LOG_TAG "AudioDemod"
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
 
-#define FINE_CLKT_HI 1.90
-#define FINE_CLKT_LO 0.32
 #define SAMPLE_RATE 48000
 #define BAUD_RATE 1200
+#define PDW_REFERENCE_RATE 44100.0
+#define FINE_CLKT_HI 1.90
+#define FINE_CLKT_LO 0.32
+#define ATB_CENTER 0
+#define ATB_THRESHOLD 7
+#define ATB_SAMPLE_OFFSET 0
+#define PRE_THRESHOLD 7
+#define PREAMBLE_COUNT_REQUIRED 50
+#define POCBIT_BUDGET 1250
 
-static double watch_ctr = 0.0;
-static double atb_ctr = 0.0;
-static double clkt = (double)SAMPLE_RATE / BAUD_RATE;
-static int last_value = 0;
+static const double watch_step = (double)SAMPLE_RATE / BAUD_RATE;
+static const double preamble_window_lo = 28.0 * SAMPLE_RATE / PDW_REFERENCE_RATE;
+static const double preamble_window_hi = 44.0 * SAMPLE_RATE / PDW_REFERENCE_RATE;
+
+static double watch_ctr = -1;
+static long buffer_base = 0;
+static int sync_bit = 0;
+static int n_samples = 0;
 static int preamble_count = 0;
 static int pocbit = 0;
-static bool preamble_detected = false;
-static int crossing_count = 0;
-static int nSamples = 0;
-
-static const int AUDIO_THRESHOLD = 128;
+static int atb_bit = 0;
+static int atb_len = 0;
 
 void resetAudioDemod() {
-    watch_ctr = 0.0;
-    atb_ctr = 0.0;
-    clkt = (double)SAMPLE_RATE / BAUD_RATE;
-    last_value = 0;
+    watch_ctr = -1;
+    buffer_base = 0;
+    sync_bit = 0;
+    n_samples = 0;
     preamble_count = 0;
     pocbit = 0;
-    preamble_detected = false;
-    crossing_count = 0;
-    nSamples = 0;
+    atb_bit = 0;
+    atb_len = 0;
     LOGD("Audio demodulator reset");
 }
 
 void processAudioSamples(int16_t *samples, int size) {
     for (int i = 0; i < size; i++) {
-        int audio_value = (samples[i] + 32768) / 256;
-        
-        if (audio_value < 0) audio_value = 0;
-        if (audio_value > 255) audio_value = 255;
-        
-        int current_bit = (audio_value > AUDIO_THRESHOLD) ? 1 : 0;
-        
-        if (current_bit != last_value) {
-            crossing_count++;
-            
-            if ((nSamples > 28) && (nSamples < 44)) {
-                preamble_count++;
-                
-                if (preamble_count > 50 && !preamble_detected) {
-                    preamble_detected = true;
-                    pocbit = 0;
-                    LOGD("Preamble detected! crossings=%d samples=%d", preamble_count, nSamples);
-                }
-            }
-            
-            nSamples = 0;
+        long atb_ctr = buffer_base + i;
+        int val = samples[i] >> 8;
+
+        n_samples++;
+
+        bool crossing = false;
+        if (val < -PRE_THRESHOLD && sync_bit == 1) {
+            sync_bit = 0;
+            crossing = true;
+        } else if (val > PRE_THRESHOLD && sync_bit == 0) {
+            sync_bit = 1;
+            crossing = true;
         }
-        
-        nSamples++;
-        last_value = current_bit;
-        
-        watch_ctr += 1.0;
-        
-        if (watch_ctr - atb_ctr < 1.0) {
-            int bit = current_bit;
-            
-            if (preamble_detected) {
-                processBasebandSample(bit);
-                pocbit++;
-                
-                if (pocbit > 1250) {
-                    LOGD("POCSAG timeout - no sync after 1250 bits");
-                    preamble_detected = false;
+
+        bool locked = false;
+        if (crossing && pocbit == 0) {
+            if (n_samples > preamble_window_lo && n_samples < preamble_window_hi) {
+                preamble_count++;
+                if (preamble_count > PREAMBLE_COUNT_REQUIRED) {
                     preamble_count = 0;
-                    pocbit = 0;
+                    pocbit = POCBIT_BUDGET;
+                    locked = true;
+                    LOGD("Preamble detected! samples=%d", n_samples);
+                }
+            } else {
+                preamble_count = 0;
+            }
+            n_samples = 0;
+        }
+        if (locked) continue;
+
+        atb_len++;
+
+        if (val < ATB_CENTER - ATB_THRESHOLD && atb_bit == 1) {
+            atb_bit = 0;
+            if (atb_len < watch_step * 2 &&
+                atb_len / watch_step > FINE_CLKT_LO &&
+                atb_len / watch_step < FINE_CLKT_HI) {
+                watch_ctr = atb_ctr + watch_step / 2 + ATB_SAMPLE_OFFSET;
+            }
+            atb_len = 0;
+        } else if (val > ATB_CENTER + ATB_THRESHOLD && atb_bit == 0) {
+            atb_bit = 1;
+            if (atb_len < watch_step * 2 &&
+                atb_len / watch_step > FINE_CLKT_LO &&
+                atb_len / watch_step < FINE_CLKT_HI) {
+                watch_ctr = atb_ctr + watch_step / 2 + ATB_SAMPLE_OFFSET;
+            }
+            atb_len = 0;
+        }
+
+        if (watch_ctr - atb_ctr < 1 && watch_ctr != -1) {
+            if (pocbit > 0) {
+                feedBit(demodMic, atb_bit == 1);
+                pocbit--;
+                if (pocbit == 0) {
+                    LOGD("POCSAG timeout - no sync after %d bits", POCBIT_BUDGET);
+                    resetFraming(demodMic);
                 }
             }
-            
-            if (crossing_count > 0) {
-                double offset = watch_ctr - atb_ctr;
-                
-                if (offset > FINE_CLKT_HI) {
-                    clkt -= 0.01;
-                    if (clkt < (SAMPLE_RATE / BAUD_RATE) * 0.95) {
-                        clkt = (SAMPLE_RATE / BAUD_RATE) * 0.95;
-                    }
-                } else if (offset < FINE_CLKT_LO) {
-                    clkt += 0.01;
-                    if (clkt > (SAMPLE_RATE / BAUD_RATE) * 1.05) {
-                        clkt = (SAMPLE_RATE / BAUD_RATE) * 1.05;
-                    }
-                }
-                
-                crossing_count = 0;
-            }
-            
-            atb_ctr += clkt;
+            watch_ctr += watch_step;
         }
     }
+    buffer_base += size;
 }
