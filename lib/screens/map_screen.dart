@@ -1,11 +1,18 @@
 import 'dart:async';
 import 'dart:math' show sin, cos, sqrt, atan2;
 import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:lbjconsole/services/database_service.dart';
 import 'package:lbjconsole/models/train_record.dart';
+import 'package:lbjconsole/ui/web_map.dart';
+import 'package:lbjconsole/ui/glass_morph_menu.dart';
+import 'package:lbjconsole/models/merged_record.dart';
+import 'package:lbjconsole/services/merge_service.dart';
+import 'package:lbjconsole/ui/glass_styles.dart';
+import 'package:lbjconsole/ui/glass_buttons.dart';
+import 'package:lbjconsole/ui/glass_clipper.dart';
+import 'package:lbjconsole/ui/liquid_glass.dart';
 
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
@@ -15,9 +22,12 @@ class MapScreen extends StatefulWidget {
 }
 
 class _MapScreenState extends State<MapScreen> {
-  final MapController _mapController = MapController();
+  WebMapController _webMap = WebMapController();
+  int _mapGeneration = 0;
+  bool _mapReady = false;
+  bool _styleFailed = false;
+  bool _ormDark = false;
   final List<TrainRecord> _trainRecords = [];
-  final List<Marker> _trainMarkers = [];
   bool _isLoading = true;
   bool _railwayLayerVisible = true;
   LatLng? _currentLocation;
@@ -26,12 +36,13 @@ class _MapScreenState extends State<MapScreen> {
   double _currentZoom = 14.0;
   double _currentRotation = 0.0;
 
-  bool _isMapInitialized = false;
+  bool _positionReady = false;
   bool _isLocationPermissionGranted = false;
   Timer? _locationTimer;
   Timer? _settingsSaveTimer;
 
   String _selectedTimeFilter = 'unlimited';
+  MergeSettings _mergeSettings = MergeSettings();
   final Map<String, Duration> _timeFilterOptions = {
     'unlimited': Duration.zero,
     '1hour': const Duration(hours: 1),
@@ -43,6 +54,16 @@ class _MapScreenState extends State<MapScreen> {
   };
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    if (_ormDark != dark) {
+      _ormDark = dark;
+      _webMap.setTheme(dark);
+    }
+  }
+
+  @override
   void initState() {
     super.initState();
     _initializeMap();
@@ -52,20 +73,11 @@ class _MapScreenState extends State<MapScreen> {
     _loadSettings().then((_) {
       _loadTrainRecords().then((_) {
         _startLocationUpdates();
-        if (!_isMapInitialized &&
-            (_currentLocation != null ||
-                _lastTrainLocation != null ||
-                _userLocation != null)) {
-          _initializeMapPosition();
+        if (mounted) {
+          setState(() => _positionReady = true);
         }
       });
     });
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    _loadSettings();
   }
 
   Future<void> _checkDatabaseSettings() async {
@@ -163,10 +175,7 @@ class _MapScreenState extends State<MapScreen> {
       setState(() {
         _userLocation = newLocation;
       });
-
-      if (!_isMapInitialized) {
-        _initializeMapPosition();
-      }
+      _pushMapData();
     // ignore: empty_catches
     } catch (e) {}
   }
@@ -195,7 +204,8 @@ class _MapScreenState extends State<MapScreen> {
         _userLocation = newLocation;
       });
 
-      _mapController.move(newLocation, 15.0);
+      _pushMapData();
+      _webMap.moveTo(newLocation, 15.0);
     // ignore: empty_catches
     } catch (e) {}
   }
@@ -204,9 +214,10 @@ class _MapScreenState extends State<MapScreen> {
     try {
       final settings = await DatabaseService.instance.getAllSettings();
       if (settings != null) {
+        _mergeSettings = MergeSettings.fromMap(settings);
         setState(() {
           _railwayLayerVisible =
-              (settings['mapRailwayLayerVisible'] as int?) == 1;
+              (settings['mapRailwayLayerVisible'] as int?) != 0;
           _currentZoom = (settings['mapZoomLevel'] as num?)?.toDouble() ?? 10.0;
           _currentRotation =
               (settings['mapRotation'] as num?)?.toDouble() ?? 0.0;
@@ -220,9 +231,6 @@ class _MapScreenState extends State<MapScreen> {
             _currentLocation = LatLng(lat, lon);
           }
         });
-        if (!_isMapInitialized) {
-          _initializeMapPosition();
-        }
       }
     // ignore: empty_catches
     } catch (e) {}
@@ -230,7 +238,7 @@ class _MapScreenState extends State<MapScreen> {
 
   Future<void> _saveSettings() async {
     try {
-      final center = _mapController.camera.center;
+      final center = _currentLocation ?? const LatLng(39.9042, 116.4074);
 
       final isDefaultLocation =
           center.latitude == 39.9042 && center.longitude == 116.4074;
@@ -264,16 +272,14 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   Future<void> _loadTrainRecords() async {
-    setState(() => _isLoading = true);
+    if (_trainRecords.isEmpty) {
+      setState(() => _isLoading = true);
+    }
     try {
       final records = await _getFilteredRecords();
-      final trainMarkers = _buildTrainMarkers(records);
       setState(() {
         _trainRecords.clear();
         _trainRecords.addAll(records);
-        _trainMarkers
-          ..clear()
-          ..addAll(trainMarkers);
         _isLoading = false;
 
         if (_trainRecords.isNotEmpty) {
@@ -288,10 +294,8 @@ class _MapScreenState extends State<MapScreen> {
           }
         }
 
-        if (!_isMapInitialized) {
-          _initializeMapPosition();
-        }
       });
+      _pushMapData();
     } catch (e) {
       setState(() => _isLoading = false);
     }
@@ -310,28 +314,15 @@ class _MapScreenState extends State<MapScreen> {
     }
   }
 
-  void _initializeMapPosition() {
-    if (_isMapInitialized) return;
-
-    LatLng? targetLocation;
-
-    if (_currentLocation != null) {
-      targetLocation = _currentLocation;
-    } else if (_lastTrainLocation != null) {
-      targetLocation = _lastTrainLocation;
-    } else if (_userLocation != null) {
-      targetLocation = _userLocation;
-    } else {
-      targetLocation = const LatLng(39.9042, 116.4074);
-    }
-
-    _centerMap(targetLocation!, zoom: _currentZoom, rotation: _currentRotation);
-    _isMapInitialized = true;
-  }
-
   void _centerMap(LatLng location, {double? zoom, double? rotation}) {
-    _mapController.move(location, zoom ?? _currentZoom);
-    _mapController.rotate(rotation ?? _currentRotation);
+    _currentLocation = location;
+    if (zoom != null) _currentZoom = zoom;
+    if (rotation != null) _currentRotation = rotation;
+    _webMap.moveTo(
+      location,
+      zoom ?? _currentZoom,
+      bearing: rotation ?? _currentRotation,
+    );
   }
 
   LatLng? _parseDmsCoordinate(String? positionInfo) {
@@ -397,83 +388,78 @@ class _MapScreenState extends State<MapScreen> {
     return null;
   }
 
-  List<Marker> _buildTrainMarkers(List<TrainRecord> records) {
-    final markers = <Marker>[];
-    final seenRecordIds = <String>{};
+  String _chipLabel(TrainRecord record) =>
+      record.fullTrainNumber.isEmpty ? '未知列车' : record.fullTrainNumber;
 
-    for (final record in records) {
-      if (!seenRecordIds.add(record.uniqueId)) continue;
-
-      final position = _positionForRecord(record);
-
-      if (position != null) {
-        final trainDisplay =
-            record.fullTrainNumber.isEmpty ? "未知列车" : record.fullTrainNumber;
-
-        markers.add(
-          Marker(
-            point: position,
-            width: 80,
-            height: 16,
-            child: GestureDetector(
-              onTap: () => _showTrainDetailsDialog(record, position),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.8),
-                      borderRadius: BorderRadius.circular(3),
-                    ),
-                    child: Text(
-                      trainDisplay,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 8,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
+  // The map's data, grouped the way the monitoring map groups: a
+  // merged group's records draw as one black route line through
+  // their positions with the train chip at its end; a single record
+  // keeps its own chip. Every positioned record is also a tap
+  // target (nearest within 28 screen px, resolved in the page).
+  void _pushMapData() {
+    final lines = <List<LatLng>>[];
+    final chips = <WebMapChip>[];
+    final dots = <WebMapDot>[];
+    final hits = <WebMapHit>[];
+    final mixed = MergeService.getMixedList(_trainRecords, _mergeSettings);
+    for (final item in mixed) {
+      if (item is TrainRecord) {
+        final position = _positionForRecord(item);
+        if (position == null) continue;
+        chips.add(
+          WebMapChip(id: item.uniqueId, position: position, label: _chipLabel(item)),
         );
+      } else if (item is MergedTrainRecord) {
+        final entries = <MapEntry<TrainRecord, LatLng>>[];
+        for (final record in item.records) {
+          final position = _positionForRecord(record);
+          if (position != null) entries.add(MapEntry(record, position));
+        }
+        if (entries.length >= 2) {
+          lines.add(
+            entries.map((entry) => entry.value).toList().reversed.toList(),
+          );
+        }
+        if (entries.isNotEmpty) {
+          chips.add(
+            WebMapChip(
+              id: entries.first.key.uniqueId,
+              position: entries.first.value,
+              label: _chipLabel(entries.first.key),
+            ),
+          );
+        }
       }
     }
-
-    return markers;
+    for (final record in _trainRecords) {
+      final position = _positionForRecord(record);
+      if (position != null) {
+        hits.add(WebMapHit(id: record.uniqueId, position: position));
+      }
+    }
+    final location = _userLocation;
+    if (location != null) {
+      dots.add(WebMapDot(position: location, location: true));
+    }
+    _webMap.setData(lines: lines, chips: chips, dots: dots, hits: hits);
   }
 
-  void _showTimeFilterDialog() {
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return RadioGroup<String>(
-          groupValue: _selectedTimeFilter,
-          onChanged: (value) {
-            if (value == null) return;
-            setState(() {
-              _selectedTimeFilter = value;
-            });
-            _loadTrainRecords();
-            Navigator.pop(context);
-          },
-          child: SimpleDialog(
-            title: const Text('时间筛选'),
-            children: _timeFilterOptions.keys.map((key) {
-              return RadioListTile<String>(
-                value: key,
-                title: Text(_getTimeFilterLabel(key)),
-              );
-            }).toList(),
-          ),
-        );
-      },
-    );
+  void _onChipTap(String id) {
+    for (final record in _trainRecords) {
+      if (record.uniqueId != id) continue;
+      final position = _positionForRecord(record);
+      if (position != null && mounted) {
+        _showTrainDetailsDialog(record, position);
+      }
+      return;
+    }
+  }
+
+  void _onCameraIdle(LatLng center, double zoom, double bearing) {
+    _currentLocation = center;
+    _currentZoom = zoom;
+    _currentRotation = bearing;
+    _scheduleSettingsSave();
   }
 
   String _getTimeFilterLabel(String key) {
@@ -508,13 +494,20 @@ class _MapScreenState extends State<MapScreen> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
       builder: (context) {
-        return Container(
-          width: double.infinity,
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surface,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
-          ),
-          child: Padding(
+        return Stack(
+          children: [
+            Positioned.fill(
+              child: LiquidGlass(
+                style: glassMenuStyle(Theme.of(context).colorScheme),
+                clipper: const SuperellipseClipper(
+                  BorderRadius.vertical(top: Radius.circular(28)),
+                ),
+                child: const SizedBox.expand(),
+              ),
+            ),
+            Container(
+              width: double.infinity,
+              child: Padding(
             padding: const EdgeInsets.all(24),
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -550,9 +543,9 @@ class _MapScreenState extends State<MapScreen> {
                   decoration: BoxDecoration(
                     color: Theme.of(context)
                         .colorScheme
-                        .surfaceContainerHighest
-                        .withValues(alpha: 0.3),
-                    borderRadius: BorderRadius.circular(16),
+                        .onSurface
+                        .withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(20),
                   ),
                   child: Padding(
                     padding: const EdgeInsets.all(16),
@@ -591,8 +584,16 @@ class _MapScreenState extends State<MapScreen> {
                 Row(
                   children: [
                     Expanded(
-                      child: FilledButton.tonal(
+                      child: FilledButton(
                         onPressed: () => Navigator.pop(context),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: Theme.of(context)
+                              .colorScheme
+                              .onSurface
+                              .withValues(alpha: 0.08),
+                          foregroundColor:
+                              Theme.of(context).colorScheme.onSurface,
+                        ),
                         child: const Text('关闭'),
                       ),
                     ),
@@ -619,6 +620,8 @@ class _MapScreenState extends State<MapScreen> {
               ],
             ),
           ),
+          ),
+          ],
         );
       },
     );
@@ -676,76 +679,81 @@ class _MapScreenState extends State<MapScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final markers = List<Marker>.of(_trainMarkers, growable: true);
-
-    if (_userLocation != null) {
-      markers.add(
-        Marker(
-          point: _userLocation!,
-          width: 24,
-          height: 24,
-          child: Container(
-            decoration: BoxDecoration(
-              color: Colors.black,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.white, width: 1),
-            ),
-            child: const Icon(
-              Icons.my_location,
-              color: Colors.white,
-              size: 12,
-            ),
-          ),
-        ),
-      );
-    }
-
-    final bool isDefaultLocation = _currentLocation == null &&
-        _lastTrainLocation == null &&
-        _userLocation == null;
+    final bool isDefaultLocation = !_positionReady;
 
     return Scaffold(
-      backgroundColor: const Color(0xFF121212),
       floatingActionButtonLocation: FloatingActionButtonLocation.endTop,
-      floatingActionButton: SafeArea(
-        minimum: const EdgeInsets.only(top: 16),
+      floatingActionButton: Padding(
+        padding: EdgeInsets.only(
+            top: MediaQuery.paddingOf(context).top + 88),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            FloatingActionButton.small(
-              heroTag: 'timeFilter',
-              backgroundColor: const Color(0xFF1E1E1E),
-              foregroundColor: Colors.white,
-              onPressed: _showTimeFilterDialog,
-              child: const Icon(Icons.filter_list),
+            GlassMorphMenu(
+              menuWidth: 200,
+              triggerBuilder: (context, toggle) => GlassIconButton(
+                icon: Icons.filter_list,
+                onPressed: toggle,
+              ),
+              menuBuilder: (context, close) => Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    for (final key in _timeFilterOptions.keys)
+                      GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () {
+                          setState(() {
+                            _selectedTimeFilter = key;
+                          });
+                          _loadTrainRecords();
+                          close();
+                        },
+                        child: SizedBox(
+                          height: 44,
+                          child: Padding(
+                            padding:
+                                const EdgeInsets.symmetric(horizontal: 16),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                    child: Text(_getTimeFilterLabel(key))),
+                                if (_selectedTimeFilter == key)
+                                  Icon(Icons.check,
+                                      size: 24,
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .onSurface),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
             ),
             const SizedBox(height: 8),
-            FloatingActionButton.small(
-              heroTag: 'railwayLayer',
-              backgroundColor: const Color(0xFF1E1E1E),
-              foregroundColor: Colors.white,
+            GlassIconButton(
+              icon: _railwayLayerVisible
+                  ? Icons.layers
+                  : Icons.layers_outlined,
               onPressed: () {
                 setState(() {
                   _railwayLayerVisible = !_railwayLayerVisible;
                 });
+                _webMap.setOrm(_railwayLayerVisible);
                 _settingsSaveTimer?.cancel();
                 _saveSettings();
               },
-              child: Icon(
-                _railwayLayerVisible
-                    ? Icons.layers
-                    : Icons.layers_outlined,
-              ),
             ),
             const SizedBox(height: 8),
-            FloatingActionButton.small(
-              heroTag: 'myLocation',
-              backgroundColor: const Color(0xFF1E1E1E),
-              foregroundColor: Colors.white,
+            GlassIconButton(
+              icon: Icons.my_location,
               onPressed: () {
                 _forceUpdateLocation();
               },
-              child: const Icon(Icons.my_location),
             ),
           ],
         ),
@@ -753,63 +761,78 @@ class _MapScreenState extends State<MapScreen> {
       body: Stack(
         children: [
           if (isDefaultLocation)
-            const Center(
+            Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   CircularProgressIndicator(
                     valueColor:
-                        AlwaysStoppedAnimation<Color>(Color(0xFF007ACC)),
+                        AlwaysStoppedAnimation<Color>(Theme.of(context).colorScheme.onSurface),
                   ),
                   SizedBox(height: 16),
                   Text(
                     '正在加载地图位置...',
-                    style: TextStyle(color: Colors.white, fontSize: 16),
+                    style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 16),
                   ),
                 ],
               ),
             )
-          else
-            FlutterMap(
-              mapController: _mapController,
-              options: MapOptions(
-                initialCenter: _currentLocation ??
-                    _lastTrainLocation ??
-                    _userLocation ??
-                    const LatLng(39.9042, 116.4074),
-                initialZoom: _currentZoom,
-                initialRotation: _currentRotation,
-                minZoom: 2.0,
-                maxZoom: 18.0,
-                onPositionChanged: (MapCamera camera, bool hasGesture) {
-                  _currentLocation = camera.center;
-                  _currentZoom = camera.zoom;
-                  _currentRotation = camera.rotation;
-
-                  _scheduleSettingsSave();
+          else if (_styleFailed)
+            Center(
+              child: GestureDetector(
+                onTap: () {
+                  setState(() {
+                    _styleFailed = false;
+                    _mapReady = false;
+                    _mapGeneration++;
+                    _webMap = WebMapController();
+                  });
                 },
+                child: Text(
+                  '地图样式加载失败，点按重试',
+                  style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurface,
+                      fontSize: 16),
+                ),
               ),
-              children: [
-                TileLayer(
-                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                  userAgentPackageName: 'org.noxylva.lbjconsole',
-                ),
-                if (_railwayLayerVisible)
-                  TileLayer(
-                    urlTemplate:
-                        'https://{s}.tiles.openrailwaymap.org/standard/{z}/{x}/{y}.png',
-                    subdomains: const ['a', 'b', 'c'],
-                    userAgentPackageName: 'org.noxylva.lbjconsole.flutter',
-                  ),
-                MarkerLayer(
-                  markers: markers,
-                ),
-              ],
+            )
+          else ...[
+            WebMapView(
+              key: ValueKey(_mapGeneration),
+              controller: _webMap,
+              initialCenter: _currentLocation ??
+                  _lastTrainLocation ??
+                  _userLocation ??
+                  const LatLng(39.9042, 116.4074),
+              initialZoom: _currentZoom,
+              initialBearing: _currentRotation,
+              minZoom: 2,
+              maxZoom: 18,
+              interactive: true,
+              orm: true,
+              ormVisible: _railwayLayerVisible,
+              dark: Theme.of(context).brightness == Brightness.dark,
+              onReady: () {
+                if (mounted) setState(() => _mapReady = true);
+              },
+              onError: () {
+                if (mounted) setState(() => _styleFailed = true);
+              },
+              onCameraIdle: _onCameraIdle,
+              onChipTap: _onChipTap,
             ),
+            if (!_mapReady)
+              Center(
+                child: CircularProgressIndicator(
+                  valueColor: AlwaysStoppedAnimation<Color>(
+                      Theme.of(context).colorScheme.onSurface),
+                ),
+              ),
+          ],
           if (_isLoading)
-            const Center(
+            Center(
               child: CircularProgressIndicator(
-                valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF007ACC)),
+                valueColor: AlwaysStoppedAnimation<Color>(Theme.of(context).colorScheme.onSurface),
               ),
             ),
         ],

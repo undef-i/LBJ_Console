@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:lbjconsole/screens/main_screen.dart';
+import 'package:lbjconsole/themes/app_theme.dart';
+import 'package:lbjconsole/ui/liquid_glass.dart';
 import 'package:lbjconsole/util/train_type_util.dart';
 import 'package:lbjconsole/util/loco_info_util.dart';
 import 'package:lbjconsole/services/loco_type_service.dart';
@@ -43,9 +45,13 @@ class LBJReceiverApp extends StatelessWidget {
     return MaterialApp(
       title: 'LBJ Console',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData.light(),
-      darkTheme: ThemeData.dark(),
-      themeMode: ThemeMode.dark,
+      theme: AppTheme.lightTheme,
+      darkTheme: AppTheme.darkTheme,
+      themeMode: ThemeMode.system,
+      builder: (context, child) => LiquidGlassScope(
+        enabled: true,
+        child: LiquidGlassHost(enabled: true, child: child!),
+      ),
       home: const MainScreen(),
     );
   }

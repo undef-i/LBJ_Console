@@ -13,6 +13,13 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:lbjconsole/ui/fl_list.dart';
+import 'package:lbjconsole/ui/glass_dialog.dart';
+import 'package:lbjconsole/ui/glass_styles.dart';
+import 'package:lbjconsole/ui/glass_select.dart';
+import 'package:lbjconsole/ui/glass_switch.dart';
+import 'package:lbjconsole/ui/glass_clipper.dart';
+import 'package:lbjconsole/ui/liquid_glass.dart';
 
 class SettingsScreen extends StatefulWidget {
   final VoidCallback? onSettingsChanged;
@@ -31,6 +38,8 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
+
+
   late DatabaseService _databaseService;
   late TextEditingController _deviceNameController;
   late TextEditingController _rtlTcpHostController;
@@ -53,10 +62,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String _rtlTcpPort = '14423';
   int _aboutIconTapCount = 0;
   Timer? _aboutIconTapTimer;
+  late final Future<String> _appVersion;
 
   @override
   void initState() {
     super.initState();
+    _appVersion = _getAppVersion();
     _databaseService = DatabaseService.instance;
     _deviceNameController = TextEditingController();
     _rtlTcpHostController = TextEditingController();
@@ -145,590 +156,321 @@ class _SettingsScreenState extends State<SettingsScreen> {
     super.dispose();
   }
 
-  Widget _buildInputSourceSettings() {
-    return Card(
-      color: AppTheme.tertiaryBlack,
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16.0),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(20.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.input, color: Theme.of(context).colorScheme.primary),
-                const SizedBox(width: 12),
-                const Text('信号源设置', style: AppTheme.titleMedium),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text('信号源', style: AppTheme.bodyLarge),
-                DropdownButton<InputSource>(
-                  value: _inputSource,
-                  items: const [
-                    DropdownMenuItem(
-                      value: InputSource.bluetooth,
-                      child: Text('蓝牙设备', style: AppTheme.bodyMedium),
-                    ),
-                    DropdownMenuItem(
-                      value: InputSource.rtlTcp,
-                      child: Text('RTL-TCP', style: AppTheme.bodyMedium),
-                    ),
-                    DropdownMenuItem(
-                      value: InputSource.audioInput,
-                      child: Text('音频输入', style: AppTheme.bodyMedium),
-                    ),
-                  ],
-                  onChanged: (value) {
-                    if (value != null) {
-                      _switchInputSource(value);
-                    }
-                  },
-                  dropdownColor: AppTheme.secondaryBlack,
-                  style: AppTheme.bodyMedium,
-                  underline: Container(height: 0),
-                ),
-              ],
-            ),
-            if (_inputSource == InputSource.bluetooth) ...[
-              const SizedBox(height: 16),
-              TextField(
-                controller: _deviceNameController,
-                decoration: InputDecoration(
-                  labelText: '蓝牙设备名称',
-                  hintText: '输入设备名称',
-                  labelStyle: const TextStyle(color: Colors.white70),
-                  hintStyle: const TextStyle(color: Colors.white54),
-                  border: OutlineInputBorder(
-                    borderSide: const BorderSide(color: Colors.white54),
-                    borderRadius: BorderRadius.circular(12.0),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderSide: const BorderSide(color: Colors.white54),
-                    borderRadius: BorderRadius.circular(12.0),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderSide: BorderSide(
-                        color: Theme.of(context).colorScheme.primary),
-                    borderRadius: BorderRadius.circular(12.0),
-                  ),
-                ),
-                style: const TextStyle(color: Colors.white),
-                onChanged: (value) {
-                  setState(() {
-                    _deviceName = value;
-                  });
-                  _saveSettings();
-                },
-              ),
-            ],
-            if (_inputSource == InputSource.rtlTcp) ...[
-              const SizedBox(height: 16),
-              TextField(
-                decoration: InputDecoration(
-                  labelText: '服务器地址',
-                  hintText: '127.0.0.1',
-                  labelStyle: const TextStyle(color: Colors.white70),
-                  hintStyle: const TextStyle(color: Colors.white54),
-                  border: OutlineInputBorder(
-                    borderSide: const BorderSide(color: Colors.white54),
-                    borderRadius: BorderRadius.circular(12.0),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderSide: const BorderSide(color: Colors.white54),
-                    borderRadius: BorderRadius.circular(12.0),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderSide: BorderSide(
-                        color: Theme.of(context).colorScheme.primary),
-                    borderRadius: BorderRadius.circular(12.0),
-                  ),
-                ),
-                style: const TextStyle(color: Colors.white),
-                controller: _rtlTcpHostController,
-                onChanged: (value) {
-                  setState(() {
-                    _rtlTcpHost = value;
-                  });
-                  _saveSettings();
-                },
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                decoration: InputDecoration(
-                  labelText: '服务器端口',
-                  hintText: '14423',
-                  labelStyle: const TextStyle(color: Colors.white70),
-                  hintStyle: const TextStyle(color: Colors.white54),
-                  border: OutlineInputBorder(
-                    borderSide: const BorderSide(color: Colors.white54),
-                    borderRadius: BorderRadius.circular(12.0),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderSide: const BorderSide(color: Colors.white54),
-                    borderRadius: BorderRadius.circular(12.0),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderSide: BorderSide(
-                        color: Theme.of(context).colorScheme.primary),
-                    borderRadius: BorderRadius.circular(12.0),
-                  ),
-                ),
-                style: const TextStyle(color: Colors.white),
-                controller: _rtlTcpPortController,
-                keyboardType: TextInputType.number,
-                onChanged: (value) {
-                  setState(() {
-                    _rtlTcpPort = value;
-                  });
-                  _saveSettings();
-                },
-              ),
-              const SizedBox(height: 16),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  onPressed: () {
-                    RtlTcpService()
-                        .connect(host: _rtlTcpHost, port: _rtlTcpPort);
-                  },
-                  icon: const Icon(Icons.refresh),
-                  label: const Text("重新连接 RTL-TCP"),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.secondaryBlack,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                ),
-              )
-            ],
-            if (_inputSource == InputSource.audioInput) ...[
-              const SizedBox(height: 16),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.blue.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.blue.withValues(alpha: 0.3)),
-                ),
-                child: const Row(
-                  children: [
-                    Icon(Icons.mic, color: Colors.blue),
-                    SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        '音频解调已启用。请通过音频线 (Line-in) 或麦克风输入信号。',
-                        style: TextStyle(color: Colors.white70, fontSize: 13),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(20.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+  Widget _formRow({
+    required String title,
+    required TextEditingController controller,
+    String? hint,
+    TextInputType? keyboardType,
+    required ValueChanged<String> onChanged,
+  }) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      constraints: const BoxConstraints(minHeight: 56),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      child: Row(
         children: [
-          _buildInputSourceSettings(),
-          const SizedBox(height: 20),
-          _buildAppSettings(),
-          const SizedBox(height: 20),
-          _buildMergeSettings(),
-          const SizedBox(height: 20),
-          _buildDataManagement(),
-          const SizedBox(height: 20),
-          _buildAboutSection(),
+          Flexible(
+            child: Text(title, style: flListTitleStyle(scheme)),
+          ),
+          const SizedBox(width: 16),
+          Flexible(
+            child: Transform.translate(
+              offset: const Offset(3, 0),
+              child: TextField(
+                controller: controller,
+                keyboardType: keyboardType,
+                textAlign: TextAlign.end,
+                cursorWidth: 2,
+                onTapOutside: (_) =>
+                    FocusManager.instance.primaryFocus?.unfocus(),
+                decoration: InputDecoration.collapsed(
+                  hintText: hint,
+                  hintStyle: TextStyle(
+                    fontSize: 17,
+                    height: 22 / 17,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+                style: TextStyle(
+                  fontSize: 17,
+                  height: 22 / 17,
+                  color: scheme.onSurface,
+                ),
+                onChanged: onChanged,
+              ),
+            ),
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildAppSettings() {
-    return Card(
-      color: AppTheme.tertiaryBlack,
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16.0),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(20.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.settings,
-                    color: Theme.of(context).colorScheme.primary),
-                const SizedBox(width: 12),
-                const Text('应用设置', style: AppTheme.titleMedium),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('后台保活服务', style: AppTheme.bodyLarge),
-                  ],
-                ),
-                Switch(
-                  value: _backgroundServiceEnabled,
-                  onChanged: (value) async {
-                    setState(() {
-                      _backgroundServiceEnabled = value;
-                    });
-                    await _saveSettings();
+  Widget _toggleRow(
+    String title,
+    bool value,
+    ValueChanged<bool> onChanged,
+  ) {
+    return FlRow(
+      title: Text(title),
+      trailing: GlassSwitch(value: value, onChanged: onChanged),
+      onTap: () => onChanged(!value),
+    );
+  }
 
-                    if (value) {
-                      await BackgroundService.startService();
-                    } else {
-                      await BackgroundService.stopService();
-                    }
-                  },
-                  activeThumbColor: Theme.of(context).colorScheme.primary,
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('通知服务', style: AppTheme.bodyLarge),
-                  ],
-                ),
-                Switch(
-                  value: _notificationsEnabled,
-                  onChanged: (value) {
-                    setState(() {
-                      _notificationsEnabled = value;
-                    });
-                    _saveSettings();
-                  },
-                  activeThumbColor: Theme.of(context).colorScheme.primary,
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('隐藏只有时间有效的记录', style: AppTheme.bodyLarge),
-                  ],
-                ),
-                Switch(
-                  value: _hideTimeOnlyRecords,
-                  onChanged: (value) {
-                    setState(() {
-                      _hideTimeOnlyRecords = value;
-                    });
-                    _saveSettings();
-                  },
-                  activeThumbColor: Theme.of(context).colorScheme.primary,
-                ),
-              ],
-            ),
-          ],
+  Widget _buildInputSourceSettings() {
+    final scheme = Theme.of(context).colorScheme;
+    return FlSection(
+      title: '信号源设置',
+      rows: [
+        FlRow(
+          title: const Text('信号源'),
+          trailing: GlassSelect<InputSource>(
+            value: _inputSource,
+            items: const [
+              DropdownMenuItem(
+                value: InputSource.bluetooth,
+                child: Text('蓝牙设备'),
+              ),
+              DropdownMenuItem(
+                value: InputSource.rtlTcp,
+                child: Text('RTL-TCP'),
+              ),
+              DropdownMenuItem(
+                value: InputSource.audioInput,
+                child: Text('音频输入'),
+              ),
+            ],
+            onChanged: (value) {
+              if (value != null) {
+                _switchInputSource(value);
+              }
+            },
+          ),
         ),
-      ),
+        if (_inputSource == InputSource.bluetooth)
+          _formRow(
+            title: '蓝牙设备名称',
+            controller: _deviceNameController,
+            hint: '输入设备名称',
+            onChanged: (value) {
+              setState(() {
+                _deviceName = value;
+              });
+              _saveSettings();
+            },
+          ),
+        if (_inputSource == InputSource.rtlTcp) ...[
+          _formRow(
+            title: '服务器地址',
+            controller: _rtlTcpHostController,
+            hint: '127.0.0.1',
+            onChanged: (value) {
+              setState(() {
+                _rtlTcpHost = value;
+              });
+              _saveSettings();
+            },
+          ),
+          _formRow(
+            title: '服务器端口',
+            controller: _rtlTcpPortController,
+            hint: '14423',
+            keyboardType: TextInputType.number,
+            onChanged: (value) {
+              setState(() {
+                _rtlTcpPort = value;
+              });
+              _saveSettings();
+            },
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+            child: FlTonalButton(
+              label: '重新连接 RTL-TCP',
+              icon: Icons.refresh,
+              height: 44,
+              onPressed: () {
+                RtlTcpService().connect(host: _rtlTcpHost, port: _rtlTcpPort);
+              },
+            ),
+          ),
+        ],
+        if (_inputSource == InputSource.audioInput)
+          FlRow(
+            leading: Icon(Icons.mic, color: scheme.onSurfaceVariant),
+            title: const Text('音频解调已启用。请通过音频线 (Line-in) 或麦克风输入信号。'),
+            titleStyle: TextStyle(
+              fontSize: 13,
+              height: 18 / 13,
+              color: scheme.onSurfaceVariant,
+            ),
+          ),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: EdgeInsets.fromLTRB(
+          16, MediaQuery.paddingOf(context).top + 80, 16, 118),
+      children: [
+        _buildInputSourceSettings(),
+        _buildAppSettings(),
+        _buildMergeSettings(),
+        _buildDataManagement(),
+        _buildAboutSection(),
+      ],
+    );
+  }
+
+  Widget _buildAppSettings() {
+    return FlSection(
+      title: '应用设置',
+      rows: [
+        _toggleRow('后台保活服务', _backgroundServiceEnabled, (value) async {
+          setState(() {
+            _backgroundServiceEnabled = value;
+          });
+          await _saveSettings();
+          if (value) {
+            await BackgroundService.startService();
+          } else {
+            await BackgroundService.stopService();
+          }
+        }),
+        _toggleRow('通知服务', _notificationsEnabled, (value) {
+          setState(() {
+            _notificationsEnabled = value;
+          });
+          _saveSettings();
+        }),
+        _toggleRow('隐藏只有时间有效的记录', _hideTimeOnlyRecords, (value) {
+          setState(() {
+            _hideTimeOnlyRecords = value;
+          });
+          _saveSettings();
+        }),
+      ],
     );
   }
 
   Widget _buildMergeSettings() {
-    return Card(
-      color: AppTheme.tertiaryBlack,
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16.0),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(20.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.merge_type,
-                    color: Theme.of(context).colorScheme.primary),
-                const SizedBox(width: 12),
-                const Text('记录合并', style: AppTheme.titleMedium),
+    return FlSection(
+      title: '记录合并',
+      rows: [
+        _toggleRow('启用记录合并', _mergeRecordsEnabled, (value) {
+          setState(() {
+            _mergeRecordsEnabled = value;
+          });
+          _saveSettings();
+        }),
+        if (_mergeRecordsEnabled) ...[
+          FlRow(
+            title: const Text('分组方式'),
+            trailing: GlassSelect<GroupBy>(
+              value: _groupBy,
+              items: const [
+                DropdownMenuItem(
+                    value: GroupBy.trainOnly, child: Text('仅车次号')),
+                DropdownMenuItem(
+                    value: GroupBy.locoOnly, child: Text('仅机车号')),
+                DropdownMenuItem(
+                    value: GroupBy.trainOrLoco, child: Text('车次号或机车号')),
+                DropdownMenuItem(
+                    value: GroupBy.trainAndLoco, child: Text('车次号与机车号')),
               ],
+              onChanged: (value) {
+                if (value != null) {
+                  setState(() {
+                    _groupBy = value;
+                  });
+                  _saveSettings();
+                }
+              },
             ),
-            const SizedBox(height: 16),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('启用记录合并', style: AppTheme.bodyLarge),
-                  ],
-                ),
-                Switch(
-                  value: _mergeRecordsEnabled,
-                  onChanged: (value) {
-                    setState(() {
-                      _mergeRecordsEnabled = value;
-                    });
-                    _saveSettings();
-                  },
-                  activeThumbColor: Theme.of(context).colorScheme.primary,
-                ),
+          ),
+          FlRow(
+            title: const Text('时间窗口'),
+            trailing: GlassSelect<TimeWindow>(
+              value: _timeWindow,
+              items: const [
+                DropdownMenuItem(
+                    value: TimeWindow.oneHour, child: Text('1小时内')),
+                DropdownMenuItem(
+                    value: TimeWindow.twoHours, child: Text('2小时内')),
+                DropdownMenuItem(
+                    value: TimeWindow.sixHours, child: Text('6小时内')),
+                DropdownMenuItem(
+                    value: TimeWindow.twelveHours, child: Text('12小时内')),
+                DropdownMenuItem(
+                    value: TimeWindow.oneDay, child: Text('24小时内')),
+                DropdownMenuItem(
+                    value: TimeWindow.unlimited, child: Text('不限时间')),
               ],
+              onChanged: (value) {
+                if (value != null) {
+                  setState(() {
+                    _timeWindow = value;
+                  });
+                  _saveSettings();
+                }
+              },
             ),
-            Visibility(
-              visible: _mergeRecordsEnabled,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const SizedBox(height: 16),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text('分组方式', style: AppTheme.bodyLarge),
-                      DropdownButton<GroupBy>(
-                        value: _groupBy,
-                        items: const [
-                          DropdownMenuItem(
-                              value: GroupBy.trainOnly,
-                              child: Text('仅车次号', style: AppTheme.bodyMedium)),
-                          DropdownMenuItem(
-                              value: GroupBy.locoOnly,
-                              child: Text('仅机车号', style: AppTheme.bodyMedium)),
-                          DropdownMenuItem(
-                              value: GroupBy.trainOrLoco,
-                              child:
-                                  Text('车次号或机车号', style: AppTheme.bodyMedium)),
-                          DropdownMenuItem(
-                              value: GroupBy.trainAndLoco,
-                              child:
-                                  Text('车次号与机车号', style: AppTheme.bodyMedium)),
-                        ],
-                        onChanged: (value) {
-                          if (value != null) {
-                            setState(() {
-                              _groupBy = value;
-                            });
-                            _saveSettings();
-                          }
-                        },
-                        dropdownColor: AppTheme.secondaryBlack,
-                        style: AppTheme.bodyMedium,
-                        underline: Container(height: 0),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text('时间窗口', style: AppTheme.bodyLarge),
-                      DropdownButton<TimeWindow>(
-                        value: _timeWindow,
-                        items: const [
-                          DropdownMenuItem(
-                              value: TimeWindow.oneHour,
-                              child: Text('1小时内', style: AppTheme.bodyMedium)),
-                          DropdownMenuItem(
-                              value: TimeWindow.twoHours,
-                              child: Text('2小时内', style: AppTheme.bodyMedium)),
-                          DropdownMenuItem(
-                              value: TimeWindow.sixHours,
-                              child: Text('6小时内', style: AppTheme.bodyMedium)),
-                          DropdownMenuItem(
-                              value: TimeWindow.twelveHours,
-                              child: Text('12小时内', style: AppTheme.bodyMedium)),
-                          DropdownMenuItem(
-                              value: TimeWindow.oneDay,
-                              child: Text('24小时内', style: AppTheme.bodyMedium)),
-                          DropdownMenuItem(
-                              value: TimeWindow.unlimited,
-                              child: Text('不限时间', style: AppTheme.bodyMedium)),
-                        ],
-                        onChanged: (value) {
-                          if (value != null) {
-                            setState(() {
-                              _timeWindow = value;
-                            });
-                            _saveSettings();
-                          }
-                        },
-                        dropdownColor: AppTheme.secondaryBlack,
-                        style: AppTheme.bodyMedium,
-                        underline: Container(height: 0),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('隐藏不可分组记录', style: AppTheme.bodyLarge),
-                        ],
-                      ),
-                      Switch(
-                        value: _hideUngroupableRecords,
-                        onChanged: (value) {
-                          setState(() {
-                            _hideUngroupableRecords = value;
-                          });
-                          _saveSettings();
-                        },
-                        activeThumbColor: Theme.of(context).colorScheme.primary,
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
+          ),
+          _toggleRow('隐藏不可分组记录', _hideUngroupableRecords, (value) {
+            setState(() {
+              _hideUngroupableRecords = value;
+            });
+            _saveSettings();
+          }),
+        ],
+      ],
     );
   }
 
   Widget _buildDataManagement() {
-    return Card(
-      color: AppTheme.tertiaryBlack,
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16.0),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(20.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.storage,
-                    color: Theme.of(context).colorScheme.primary),
-                const SizedBox(width: 12),
-                const Text('数据管理', style: AppTheme.titleMedium),
-              ],
-            ),
-            const SizedBox(height: 16),
-            _buildActionButton(
-              icon: Icons.share,
-              title: '分享数据',
-              subtitle: '将记录分享为 JSON 文件',
-              onTap: _shareData,
-            ),
-            const SizedBox(height: 12),
-            _buildActionButton(
-              icon: Icons.file_download,
-              title: '导入数据',
-              subtitle: '从 JSON 文件导入记录和设置',
-              onTap: _importData,
-            ),
-            const SizedBox(height: 12),
-            _buildActionButton(
-              icon: Icons.clear_all,
-              title: '清空数据',
-              subtitle: '删除所有记录和设置',
-              onTap: _clearAllData,
-              isDestructive: true,
-            ),
-          ],
+    final scheme = Theme.of(context).colorScheme;
+    final destructive = scheme.brightness == Brightness.dark
+        ? const Color(0xFFFF4245)
+        : const Color(0xFFFF383C);
+    Widget chevron() => Icon(
+          Icons.arrow_forward_ios,
+          size: 18,
+          color: scheme.onSurfaceVariant,
+        );
+    return FlSection(
+      title: '数据管理',
+      rows: [
+        FlRow(
+          leading: Icon(Icons.share, color: scheme.primary),
+          title: const Text('分享数据'),
+          subtitle: const Text('将记录分享为 JSON 文件'),
+          trailing: chevron(),
+          onTap: _shareData,
         ),
-      ),
-    );
-  }
-
-  Widget _buildActionButton({
-    required IconData icon,
-    required String title,
-    required String subtitle,
-    required VoidCallback onTap,
-    bool isDestructive = false,
-  }) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(12.0),
-      child: Container(
-        padding: const EdgeInsets.all(12.0),
-        decoration: BoxDecoration(
-          color: isDestructive
-              ? Colors.red.withValues(alpha: 0.1)
-              : AppTheme.secondaryBlack,
-          borderRadius: BorderRadius.circular(12.0),
-          border: Border.all(
-            color: isDestructive
-                ? Colors.red.withValues(alpha: 0.3)
-                : Colors.transparent,
-            width: 1,
-          ),
+        FlRow(
+          leading: Icon(Icons.file_download, color: scheme.primary),
+          title: const Text('导入数据'),
+          subtitle: const Text('从 JSON 文件导入记录和设置'),
+          trailing: chevron(),
+          onTap: _importData,
         ),
-        child: Row(
-          children: [
-            Icon(
-              icon,
-              color: isDestructive
-                  ? Colors.red
-                  : Theme.of(context).colorScheme.primary,
-              size: 24,
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: AppTheme.bodyLarge.copyWith(
-                      color: isDestructive ? Colors.red : Colors.white,
-                    ),
-                  ),
-                  Text(
-                    subtitle,
-                    style: AppTheme.caption,
-                  ),
-                ],
-              ),
-            ),
-            const Icon(
-              Icons.chevron_right,
-              color: Colors.white54,
-              size: 20,
-            ),
-          ],
+        FlRow(
+          leading: Icon(Icons.clear_all, color: destructive),
+          title: Text('清空数据', style: TextStyle(color: destructive)),
+          subtitle: const Text('删除所有记录和设置'),
+          trailing: chevron(),
+          onTap: _clearAllData,
         ),
-      ),
+      ],
     );
   }
 
   Future<String> _getAppVersion() async {
     try {
       final packageInfo = await PackageInfo.fromPlatform();
-      return 'v${packageInfo.version}';
+      return 'v${packageInfo.version}+${packageInfo.buildNumber}';
     } catch (e) {
       return '';
     }
@@ -751,6 +493,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void _showTemporaryRecordsPanel() {
     showModalBottomSheet(
       context: context,
+      backgroundColor: Colors.transparent,
       isScrollControlled: true,
       enableDrag: true,
       isDismissible: true,
@@ -759,8 +502,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
         return StatefulBuilder(
           builder: (context, setSheetState) {
-            return SafeArea(
-              child: Padding(
+            return Stack(
+              children: [
+                Positioned.fill(
+                  child: LiquidGlass(
+                    style: glassMenuStyle(Theme.of(context).colorScheme),
+                    clipper: const SuperellipseClipper(
+                      BorderRadius.vertical(top: Radius.circular(24)),
+                    ),
+                    child: const SizedBox.expand(),
+                  ),
+                ),
+                SafeArea(
+                  child: Padding(
                 padding: const EdgeInsets.all(20.0),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -775,17 +529,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ],
                     ),
                     const SizedBox(height: 16),
-                    SwitchListTile(
-                      value: enabled,
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text('生成临时列车记录'),
-                      subtitle: const Text('每 5 秒新增一条真实记录，包含随机移动坐标'),
-                      onChanged: (value) {
-                        setSheetState(() {
-                          enabled = value;
-                        });
-                        widget.onTemporaryRecordsChanged?.call(value);
-                      },
+                    Row(
+                      children: [
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('生成临时列车记录', style: AppTheme.bodyLarge),
+                              SizedBox(height: 2),
+                              Text('每 5 秒新增一条真实记录，包含随机移动坐标',
+                                  style: AppTheme.caption),
+                            ],
+                          ),
+                        ),
+                        GlassSwitch(
+                          value: enabled,
+                          onChanged: (value) {
+                            setSheetState(() {
+                              enabled = value;
+                            });
+                            widget.onTemporaryRecordsChanged?.call(value);
+                          },
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 8),
                     Align(
@@ -798,6 +564,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ],
                 ),
               ),
+            ),
+              ],
             );
           },
         );
@@ -809,10 +577,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final scaffoldMessenger = ScaffoldMessenger.of(context);
 
     try {
-      showDialog(
+      showGlassDialog(
         context: context,
         barrierDismissible: false,
-        builder: (context) => const AlertDialog(
+        builder: (context) => const GlassDialog(
           content: Row(
             children: [
               CircularProgressIndicator(),
@@ -864,9 +632,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _importData() async {
     final scaffoldMessenger = ScaffoldMessenger.of(context);
 
-    final result = await showDialog<bool>(
+    final result = await showGlassDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (context) => GlassDialog(
         title: const Text('导入数据'),
         content: const Text('导入将替换所有现有数据，是否继续？'),
         actions: [
@@ -894,10 +662,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (selectedFile == null) return;
     if (!mounted) return;
 
-    showDialog(
+    showGlassDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => const AlertDialog(
+      builder: (context) => const GlassDialog(
         content: Row(
           children: [
             CircularProgressIndicator(),
@@ -943,11 +711,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _clearAllData() async {
     final scaffoldMessenger = ScaffoldMessenger.of(context);
 
-    final result = await showDialog<bool>(
+    final result = await showGlassDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (context) => GlassDialog(
         title: const Text('清空数据'),
         content: const Text('此操作将删除所有记录和设置，无法撤销。是否继续？'),
+        destructive: true,
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -955,7 +724,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
             child: const Text('确认清空'),
           ),
         ],
@@ -965,10 +733,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (result != true) return;
     if (!mounted) return;
 
-    showDialog(
+    showGlassDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => const AlertDialog(
+      builder: (context) => const GlassDialog(
         content: Row(
           children: [
             CircularProgressIndicator(),
@@ -1014,62 +782,66 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Widget _buildAboutSection() {
-    return Card(
-      color: AppTheme.tertiaryBlack,
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16.0),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(20.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: _handleAboutIconTap,
-                  child: Padding(
-                    padding: const EdgeInsets.all(4.0),
-                    child: Icon(Icons.info,
-                        color: Theme.of(context).colorScheme.primary),
-                  ),
+    final scheme = Theme.of(context).colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 24, 16, 8),
+          child: Row(
+            children: [
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: _handleAboutIconTap,
+                child: Padding(
+                  padding: const EdgeInsets.all(4.0),
+                  child: Icon(Icons.info, color: scheme.primary, size: 20),
                 ),
-                const SizedBox(width: 12),
-                const Text('关于', style: AppTheme.titleMedium),
-              ],
+              ),
+              const SizedBox(width: 8),
+              Text('关于', style: flCaptionStyle(scheme)),
+            ],
+          ),
+        ),
+        FlSection(
+          rows: [
+            FlRow(
+              title: const Text('LBJ Console'),
+              titleStyle: TextStyle(
+                fontSize: 22,
+                height: 28 / 22,
+                fontWeight: FontWeight.w600,
+                color: scheme.onSurface,
+              ),
+              subtitle: FutureBuilder<String>(
+                future: _appVersion,
+                builder: (context, snapshot) {
+                  return Text(snapshot.data ?? '');
+                },
+              ),
             ),
-            const SizedBox(height: 16),
-            const Text('LBJ Console', style: AppTheme.titleMedium),
-            const SizedBox(height: 8),
-            FutureBuilder<String>(
-              future: _getAppVersion(),
-              builder: (context, snapshot) {
-                if (snapshot.hasData) {
-                  return Text(snapshot.data!, style: AppTheme.bodyMedium);
-                } else {
-                  return const Text('v0.1.3-flutter',
-                      style: AppTheme.bodyMedium);
-                }
-              },
-            ),
-            const SizedBox(height: 16),
-            GestureDetector(
+            FlRow(
+              title: const Text('项目仓库'),
+              subtitle: Text(
+                'github.com/undef-i/LBJConsole',
+                style: flCaptionStyle(scheme),
+              ),
+              trailing: Icon(
+                Icons.arrow_forward_ios,
+                size: 18,
+                color: scheme.onSurfaceVariant,
+              ),
               onTap: () async {
-                final url = Uri.parse('https://github.com/undef-i/LBJConsole');
+                final url =
+                    Uri.parse('https://github.com/undef-i/LBJConsole');
                 if (await canLaunchUrl(url)) {
                   await launchUrl(url);
                 }
               },
-              child: const Text(
-                'https://github.com/undef-i/LBJConsole',
-                style: AppTheme.caption,
-              ),
             ),
           ],
         ),
-      ),
+      ],
     );
   }
 }

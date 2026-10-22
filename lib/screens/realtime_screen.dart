@@ -1,12 +1,14 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
-import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import '../models/merged_record.dart';
 import '../services/database_service.dart';
 import '../models/train_record.dart';
 import '../services/merge_service.dart';
+import 'package:lbjconsole/ui/web_map.dart';
+import 'package:lbjconsole/ui/glass_card.dart';
+import 'package:lbjconsole/ui/glass_dialog.dart';
 
 class RealtimeScreen extends StatefulWidget {
   const RealtimeScreen({
@@ -18,6 +20,7 @@ class RealtimeScreen extends StatefulWidget {
 }
 
 class RealtimeScreenState extends State<RealtimeScreen> {
+
   final List<Object> _displayItems = [];
   bool _isLoading = true;
   final ScrollController _scrollController = ScrollController();
@@ -29,7 +32,9 @@ class RealtimeScreenState extends State<RealtimeScreen> {
   StreamSubscription? _recordDeleteSubscription;
   StreamSubscription? _settingsSubscription;
 
-  final MapController _mapController = MapController();
+  final WebMapController _webMap = WebMapController();
+  bool _mapReady = false;
+  bool _railwayLayerVisible = true;
   bool _showMap = true;
   final Set<String> _selectedGroupKeys = {};
   final Map<String, LatLng?> _positionCache = {};
@@ -156,9 +161,12 @@ class RealtimeScreenState extends State<RealtimeScreen> {
     return true;
   }
 
-  List<PolylineLayer> _buildSelectedGroupPolylines() {
-    final polylineLayers = <PolylineLayer>[];
-
+  // The selected groups drawn on the map: a black route line per
+  // merged group and the train chip at its end, over the shared
+  // basemap.
+  void _pushSelectionData() {
+    final lines = <List<LatLng>>[];
+    final chips = <WebMapChip>[];
     for (final groupKey in _selectedGroupKeys.toList()) {
       try {
         if (groupKey.startsWith('single:')) {
@@ -166,18 +174,13 @@ class RealtimeScreenState extends State<RealtimeScreen> {
           final singleRecord = _displayItems
               .whereType<TrainRecord>()
               .firstWhere((record) => record.uniqueId == uniqueId);
-
           final position = _getCachedPosition(singleRecord);
           if (position != null) {
-            polylineLayers.add(
-              PolylineLayer(
-                polylines: [
-                  Polyline(
-                    points: [position],
-                    strokeWidth: 4.0,
-                    color: Colors.black,
-                  ),
-                ],
+            chips.add(
+              WebMapChip(
+                id: singleRecord.uniqueId,
+                position: position,
+                label: _getTrainDisplayName(singleRecord),
               ),
             );
           }
@@ -185,87 +188,6 @@ class RealtimeScreenState extends State<RealtimeScreen> {
           final mergedRecord = _displayItems
               .whereType<MergedTrainRecord>()
               .firstWhere((item) => item.groupKey == groupKey);
-
-          final routePoints = _validPositionsForRecords(mergedRecord.records)
-              .map((entry) => entry.value)
-              .toList()
-              .reversed
-              .toList();
-
-          if (routePoints.isNotEmpty) {
-            polylineLayers.add(
-              PolylineLayer(
-                polylines: [
-                  Polyline(
-                    points: routePoints,
-                    strokeWidth: 4.0,
-                    color: Colors.black,
-                  ),
-                ],
-              ),
-            );
-          }
-        }
-      } catch (e) {
-        _selectedGroupKeys.remove(groupKey);
-      }
-    }
-
-    return polylineLayers;
-  }
-
-  List<MarkerLayer> _buildSelectedGroupEndMarkers() {
-    final markerLayers = <MarkerLayer>[];
-
-    for (final groupKey in _selectedGroupKeys.toList()) {
-      try {
-        if (groupKey.startsWith('single:')) {
-          final uniqueId = groupKey.substring(7);
-          final singleRecord = _displayItems
-              .whereType<TrainRecord>()
-              .firstWhere((record) => record.uniqueId == uniqueId);
-
-          final position = _getCachedPosition(singleRecord);
-          if (position != null) {
-            markerLayers.add(
-              MarkerLayer(
-                markers: [
-                  Marker(
-                    point: position,
-                    width: 80,
-                    height: 16,
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: 0.8),
-                            borderRadius: BorderRadius.circular(3),
-                          ),
-                          child: Text(
-                            _getTrainDisplayName(singleRecord),
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 8,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            );
-          }
-        } else {
-          final mergedRecord = _displayItems
-              .whereType<MergedTrainRecord>()
-              .firstWhere((item) => item.groupKey == groupKey);
-
           final routeEntries =
               _validPositionsForRecords(mergedRecord.records).toList();
           final routePoints = routeEntries
@@ -273,40 +195,15 @@ class RealtimeScreenState extends State<RealtimeScreen> {
               .toList()
               .reversed
               .toList();
-
+          if (routePoints.length >= 2) {
+            lines.add(routePoints);
+          }
           if (routePoints.isNotEmpty) {
-            final markerRecord = routeEntries.first.key;
-            markerLayers.add(
-              MarkerLayer(
-                markers: [
-                  Marker(
-                    point: routePoints.last,
-                    width: 80,
-                    height: 16,
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: 0.8),
-                            borderRadius: BorderRadius.circular(3),
-                          ),
-                          child: Text(
-                            _getTrainDisplayName(markerRecord),
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 8,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
+            chips.add(
+              WebMapChip(
+                id: routeEntries.first.key.uniqueId,
+                position: routePoints.last,
+                label: _getTrainDisplayName(routeEntries.first.key),
               ),
             );
           }
@@ -315,16 +212,14 @@ class RealtimeScreenState extends State<RealtimeScreen> {
         _selectedGroupKeys.remove(groupKey);
       }
     }
-
-    return markerLayers;
+    _webMap.setData(lines: lines, chips: chips);
   }
 
   void _adjustMapViewToSelectedGroups() {
+    _pushSelectionData();
     if (_selectedGroupKeys.isEmpty) {
       if (mounted) {
-        if (mounted) {
-          _mapController.move(const LatLng(35.8617, 104.1954), 2.0);
-        }
+        _webMap.moveTo(const LatLng(35.8617, 104.1954), 2.0);
       }
       return;
     }
@@ -362,19 +257,20 @@ class RealtimeScreenState extends State<RealtimeScreen> {
     }
 
     if (allSelectedPoints.isNotEmpty) {
-      if (mounted) {
-        if (allSelectedPoints.length > 1) {
-          final bounds = LatLngBounds.fromPoints(allSelectedPoints);
-          _mapController.fitCamera(
-            CameraFit.bounds(
-              bounds: bounds,
-              padding: const EdgeInsets.all(50),
-              maxZoom: 16,
-            ),
-          );
-        } else if (allSelectedPoints.length == 1) {
-          _mapController.move(allSelectedPoints.first, 14);
+      if (allSelectedPoints.length > 1) {
+        var south = allSelectedPoints.first.latitude;
+        var north = south;
+        var west = allSelectedPoints.first.longitude;
+        var east = west;
+        for (final point in allSelectedPoints) {
+          if (point.latitude < south) south = point.latitude;
+          if (point.latitude > north) north = point.latitude;
+          if (point.longitude < west) west = point.longitude;
+          if (point.longitude > east) east = point.longitude;
         }
+        _webMap.fitBounds(allSelectedPoints, padding: 50, maxZoom: 16);
+      } else {
+        _webMap.moveTo(allSelectedPoints.first, 14);
       }
     }
   }
@@ -562,6 +458,16 @@ class RealtimeScreenState extends State<RealtimeScreen> {
       final allRecords = await DatabaseService.instance.getAllRecords();
       final settingsMap = await DatabaseService.instance.getAllSettings() ?? {};
       _mergeSettings = MergeSettings.fromMap(settingsMap);
+      // The railway overlay follows the same persisted switch as
+      // the position map; its FAB writes the setting, the settings
+      // listener reloads records, and this keeps the monitor map
+      // in step.
+      final railwayVisible =
+          (settingsMap['mapRailwayLayerVisible'] as int?) != 0;
+      if (railwayVisible != _railwayLayerVisible) {
+        _railwayLayerVisible = railwayVisible;
+        _webMap.setOrm(railwayVisible);
+      }
 
       List<TrainRecord> filteredRecords = allRecords;
 
@@ -692,6 +598,7 @@ class RealtimeScreenState extends State<RealtimeScreen> {
         setState(() => _isLoading = false);
       }
     }
+    _pushSelectionData();
   }
 
   Future<void> addNewRecord(TrainRecord newRecord) async {
@@ -805,11 +712,11 @@ class RealtimeScreenState extends State<RealtimeScreen> {
       return const Center(child: CircularProgressIndicator());
     }
     if (_displayItems.isEmpty) {
-      return const Center(
+      return Center(
           child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
         Icon(Icons.history, size: 64, color: Colors.grey),
         SizedBox(height: 16),
-        Text('暂无记录', style: TextStyle(color: Colors.white, fontSize: 18))
+        Text('暂无记录', style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 18))
       ]));
     }
 
@@ -818,27 +725,32 @@ class RealtimeScreenState extends State<RealtimeScreen> {
         if (_showMap)
           Expanded(
             flex: 1,
-            child: FlutterMap(
-              mapController: _mapController,
-              options: const MapOptions(
-                initialCenter: LatLng(35.8617, 104.1954),
-                initialZoom: 2.0,
-              ),
+            child: Stack(
               children: [
-                TileLayer(
-                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                  userAgentPackageName: 'org.noxylva.lbjconsole',
+                WebMapView(
+                  controller: _webMap,
+                  initialCenter: const LatLng(35.8617, 104.1954),
+                  initialZoom: 2,
+                  minZoom: 2,
+                  maxZoom: 18,
+                  interactive: true,
+                  orm: true,
+                  ormVisible: _railwayLayerVisible,
+                  dark: Theme.of(context).brightness == Brightness.dark,
+                  onReady: () {
+                    if (mounted) setState(() => _mapReady = true);
+                    _pushSelectionData();
+                  },
                 ),
-                if (_selectedGroupKeys.isNotEmpty)
-                  ..._buildSelectedGroupPolylines(),
-                if (_selectedGroupKeys.isNotEmpty)
-                  ..._buildSelectedGroupEndMarkers(),
+                if (!_mapReady)
+                  const Center(child: CircularProgressIndicator()),
               ],
             ),
           ),
         if (!_showMap)
           Padding(
-            padding: const EdgeInsets.all(16.0),
+            padding: EdgeInsets.fromLTRB(
+                16.0, MediaQuery.paddingOf(context).top + 80, 16.0, 16.0),
             child: ElevatedButton.icon(
               onPressed: () {
                 setState(() {
@@ -848,8 +760,8 @@ class RealtimeScreenState extends State<RealtimeScreen> {
               icon: const Icon(Icons.map, size: 16),
               label: const Text('显示地图'),
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.blue[800],
-                foregroundColor: Colors.white,
+                backgroundColor: Theme.of(context).colorScheme.primary,
+                foregroundColor: Theme.of(context).colorScheme.onPrimary,
               ),
             ),
           ),
@@ -864,7 +776,7 @@ class RealtimeScreenState extends State<RealtimeScreen> {
                 child: ListView.builder(
                   key: _listViewportKey,
                   controller: _scrollController,
-                  padding: const EdgeInsets.fromLTRB(16.0, 16.0, 16.0, 0),
+                  padding: const EdgeInsets.fromLTRB(16.0, 16.0, 16.0, 118.0),
                   cacheExtent: 800,
                   itemCount: _displayItems.length,
                   itemBuilder: (context, index) {
@@ -898,16 +810,11 @@ class RealtimeScreenState extends State<RealtimeScreen> {
     final isSelected = _selectedGroupKeys.contains(mergedRecord.groupKey);
     return GestureDetector(
       onTap: () => _onGroupSelected(mergedRecord),
-      child: Card(
+      child: GlassCard(
           key: ValueKey(mergedRecord.groupKey),
-          color: const Color(0xFF1E1E1E),
-          elevation: 1,
           margin: const EdgeInsets.only(bottom: 8.0),
-          shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8.0),
-              side: BorderSide(
-                  color: isSelected ? Colors.white : Colors.transparent,
-                  width: 2.0)),
+          radius: 16,
+          selected: isSelected,
           child: Padding(
               padding: const EdgeInsets.all(16.0),
               child: Column(
@@ -927,16 +834,11 @@ class RealtimeScreenState extends State<RealtimeScreen> {
 
     return GestureDetector(
       onTap: () => _onSingleRecordSelected(record),
-      child: Card(
+      child: GlassCard(
           key: key,
-          color: const Color(0xFF1E1E1E),
-          elevation: isSubCard ? 0 : 1,
           margin: EdgeInsets.only(bottom: isSubCard ? 4.0 : 8.0),
-          shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8.0),
-              side: BorderSide(
-                  color: isSelected ? Colors.white : Colors.transparent,
-                  width: 2.0)),
+          radius: 16,
+          selected: isSelected,
           child: Padding(
               padding: const EdgeInsets.all(16.0),
               child: Column(
@@ -1007,10 +909,7 @@ class RealtimeScreenState extends State<RealtimeScreen> {
                     if (hasTrainNumber)
                       Flexible(
                           child: Text(record.fullTrainNumber,
-                              style: const TextStyle(
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.white),
+                              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.onSurface),
                               overflow: TextOverflow.ellipsis)),
                     if (hasTrainNumber && hasDirection)
                       const SizedBox(width: 6),
@@ -1030,7 +929,7 @@ class RealtimeScreenState extends State<RealtimeScreen> {
                   ])),
               if (hasLocoInfo)
                 Text(formattedLocoInfo,
-                    style: const TextStyle(fontSize: 14, color: Colors.white70))
+                    style: TextStyle(fontSize: 14, color: Theme.of(context).colorScheme.onSurfaceVariant))
             ]),
         const SizedBox(height: 2)
       ]
@@ -1045,7 +944,7 @@ class RealtimeScreenState extends State<RealtimeScreen> {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       const SizedBox(height: 4),
       Text(locoInfo,
-          style: const TextStyle(fontSize: 14, color: Colors.white),
+          style: TextStyle(fontSize: 14, color: Theme.of(context).colorScheme.onSurface),
           maxLines: 1,
           overflow: TextOverflow.ellipsis)
     ]);
@@ -1080,7 +979,7 @@ class RealtimeScreenState extends State<RealtimeScreen> {
                 Flexible(
                     child: Text(routeStr,
                         style:
-                            const TextStyle(fontSize: 16, color: Colors.white),
+                            TextStyle(fontSize: 16, color: Theme.of(context).colorScheme.onSurface),
                         overflow: TextOverflow.ellipsis)),
               if (isValidRoute && isValidPosition) const SizedBox(width: 4),
               if (isValidPosition)
@@ -1088,12 +987,12 @@ class RealtimeScreenState extends State<RealtimeScreen> {
                     child: Text(
                         "${position.trim().endsWith('.') ? position.trim().substring(0, position.trim().length - 1) : position.trim()}K",
                         style:
-                            const TextStyle(fontSize: 16, color: Colors.white),
+                            TextStyle(fontSize: 16, color: Theme.of(context).colorScheme.onSurface),
                         overflow: TextOverflow.ellipsis))
             ])),
           if (isValidSpeed)
             Text("${speed.replaceAll(' ', '')} km/h",
-                style: const TextStyle(fontSize: 16, color: Colors.white),
+                style: TextStyle(fontSize: 16, color: Theme.of(context).colorScheme.onSurface),
                 textAlign: TextAlign.right)
         ]));
   }
@@ -1164,20 +1063,16 @@ class RealtimeScreenState extends State<RealtimeScreen> {
                   if (needsSpecialDisplay) ...[
                     Flexible(
                         child: Text(displayRoute,
-                            style: const TextStyle(
-                              fontSize: 16,
-                              color: Colors.white,
-                            ),
+                            style: TextStyle(fontSize: 16, color: Theme.of(context).colorScheme.onSurface),
                             overflow: TextOverflow.ellipsis)),
                     const SizedBox(width: 4),
                     GestureDetector(
                       onTap: () {
-                        showDialog(
+                        showGlassDialog(
                           context: context,
-                          builder: (context) => AlertDialog(
-                            backgroundColor: const Color(0xFF1E1E1E),
-                            title: const Text("路线信息",
-                                style: TextStyle(color: Colors.white)),
+                          builder: (context) => GlassDialog(
+                            title: Text("路线信息",
+                                style: TextStyle(color: Theme.of(context).colorScheme.onSurface)),
                             content: Column(
                               mainAxisSize: MainAxisSize.min,
                               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1185,14 +1080,14 @@ class RealtimeScreenState extends State<RealtimeScreen> {
                                 if (!isDisplayingLatestNormal) ...[
                                   Text("显示路线: $displayRoute",
                                       style:
-                                          const TextStyle(color: Colors.white)),
+                                          TextStyle(color: Theme.of(context).colorScheme.onSurface)),
                                   const SizedBox(height: 8),
                                 ],
                                 Text(
                                     "最新路线: ${latestRoute.isNotEmpty ? latestRoute : '无效路线'}",
                                     style: TextStyle(
                                       color: latestRoute.isNotEmpty
-                                          ? Colors.grey
+                                          ? Theme.of(context).colorScheme.onSurfaceVariant
                                           : Colors.red,
                                     )),
                               ],
@@ -1224,8 +1119,7 @@ class RealtimeScreenState extends State<RealtimeScreen> {
                   ] else
                     Flexible(
                         child: Text(displayRoute,
-                            style: const TextStyle(
-                                fontSize: 16, color: Colors.white),
+                            style: TextStyle(fontSize: 16, color: Theme.of(context).colorScheme.onSurface),
                             overflow: TextOverflow.ellipsis)),
                 ],
                 if (latestRoute.isNotEmpty && isValidPosition)
@@ -1234,14 +1128,13 @@ class RealtimeScreenState extends State<RealtimeScreen> {
                   Flexible(
                       child: Text(
                           "${position.trim().endsWith('.') ? position.trim().substring(0, position.trim().length - 1) : position.trim()}K",
-                          style: const TextStyle(
-                              fontSize: 16, color: Colors.white),
+                          style: TextStyle(fontSize: 16, color: Theme.of(context).colorScheme.onSurface),
                           overflow: TextOverflow.ellipsis))
               ],
             )),
           if (isValidSpeed)
             Text("${speed.replaceAll(' ', '')} km/h",
-                style: const TextStyle(fontSize: 16, color: Colors.white),
+                style: TextStyle(fontSize: 16, color: Theme.of(context).colorScheme.onSurface),
                 textAlign: TextAlign.right)
         ]));
   }

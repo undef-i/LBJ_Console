@@ -15,8 +15,18 @@ import 'package:lbjconsole/services/background_service.dart';
 import 'package:lbjconsole/services/rtl_tcp_service.dart';
 import 'package:lbjconsole/services/audio_input_service.dart';
 import 'package:lbjconsole/themes/app_theme.dart';
+import 'package:lbjconsole/ui/glass_dock.dart';
+import 'package:lbjconsole/ui/glass_styles.dart';
+import 'package:lbjconsole/ui/liquid_glass.dart';
+import 'package:lbjconsole/ui/shape.dart';
 import 'package:lbjconsole/util/app_log.dart';
 import 'package:lbjconsole/widgets/audio_waterfall_widget.dart';
+import 'package:lbjconsole/ui/glass_card.dart';
+import 'package:lbjconsole/ui/glass_dialog.dart';
+import 'package:flutter/physics.dart';
+import 'package:lbjconsole/ui/motion.dart';
+import 'package:lbjconsole/ui/glass_morph_menu.dart';
+import 'package:lbjconsole/ui/scroll_edge_fade.dart';
 
 class _ConnectionStatusWidget extends StatefulWidget {
   final BLEService bleService;
@@ -103,23 +113,13 @@ class _ConnectionStatusWidgetState extends State<_ConnectionStatusWidget> {
         break;
     }
 
+    // One line, fixed text slot: the relative time changes width as
+    // it ticks ("9秒前" to "10秒前"), and a capsule that breathes
+    // every second reads as a defect, so the slot's width is fixed
+    // to the longest label and the pill never resizes.
     return Row(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (displayTime == null || !isConnected) ...[
-              Text(statusText,
-                  style: const TextStyle(color: Colors.white70, fontSize: 12)),
-            ],
-            _LastReceivedTimeWidget(
-              lastReceivedTime: displayTime,
-              isConnected: isConnected,
-            ),
-          ],
-        ),
-        const SizedBox(width: 8),
         Container(
           width: 8,
           height: 8,
@@ -127,6 +127,23 @@ class _ConnectionStatusWidgetState extends State<_ConnectionStatusWidget> {
             color: statusColor,
             shape: BoxShape.circle,
           ),
+        ),
+        const SizedBox(width: 7),
+        SizedBox(
+          width: 56,
+          child: displayTime != null && isConnected
+              ? _LastReceivedTimeWidget(
+                  lastReceivedTime: displayTime,
+                  isConnected: isConnected,
+                )
+              : Text(
+                  statusText,
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
         ),
       ],
     );
@@ -207,7 +224,11 @@ class _LastReceivedTimeWidgetState extends State<_LastReceivedTimeWidget> {
 
     return Text(
       _formatTime(),
-      style: const TextStyle(color: Colors.white70, fontSize: 12),
+      style: TextStyle(
+        color: Theme.of(context).colorScheme.onSurfaceVariant,
+        fontSize: 13,
+        fontWeight: FontWeight.w500,
+      ),
     );
   }
 }
@@ -572,83 +593,147 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     _realtimeScreenKey.currentState?.addNewRecord(record);
   }
 
-  void _showConnectionDialog() {
+  void _handleConnectionMenuOpen() {
     _bleService.setAutoConnectBlocked(true);
-    showDialog(
-      context: context,
-      barrierDismissible: true,
-      builder: (context) => _PixelPerfectBluetoothDialog(
-          bleService: _bleService, inputSource: _inputSource),
-    ).then((_) {
-      _bleService.setAutoConnectBlocked(false);
-      if (_inputSource == InputSource.bluetooth &&
-          !_bleService.isManualDisconnect) {
-        _bleService.ensureConnection();
-      }
-    });
   }
 
-  AppBar _buildAppBar(BuildContext context) {
+  void _handleConnectionMenuClosed() {
+    _bleService.setAutoConnectBlocked(false);
+    if (_inputSource == InputSource.bluetooth &&
+        !_bleService.isManualDisconnect) {
+      _bleService.ensureConnection();
+    }
+  }
+
+  // The header floats over the full-bleed page: at the left the
+  // page's title, plain fixed text in the manner of iOS 26's bar
+  // titles (glass is for controls, not titles); at the right the
+  // connection status on its liquid-glass capsule.
+  Widget _buildTopBar(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     final historyState = _historyScreenKey.currentState;
     final selectedCount = historyState?.getSelectedCount() ?? 0;
+    final editing = _currentIndex == 0 && _isHistoryEditMode;
+    final titleStyle = TextStyle(
+      fontSize: 17,
+      height: 22 / 17,
+      fontWeight: FontWeight.w600,
+      color: colorScheme.onSurface,
+    );
 
-    if (_currentIndex == 0 && _isHistoryEditMode) {
-      return AppBar(
-        backgroundColor: Theme.of(context).primaryColor,
-        leading: IconButton(
-          icon: const Icon(Icons.close, color: Colors.white),
-          onPressed: _handleHistoryCancelSelection,
-        ),
-        title: Text(
-          '已选择 $selectedCount 项',
-          style: const TextStyle(color: Colors.white, fontSize: 18),
-        ),
-        actions: [
+    final Widget leading;
+    final Widget trailing;
+    if (editing) {
+      leading = Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
           IconButton(
-            icon: const Icon(Icons.delete, color: Colors.white),
-            onPressed: selectedCount > 0 ? _handleHistoryDeleteSelected : null,
+            icon: Icon(Icons.close, color: colorScheme.onSurface),
+            style: IconButton.styleFrom(
+              minimumSize: const Size(40, 40),
+              maximumSize: const Size(40, 40),
+              padding: EdgeInsets.zero,
+            ),
+            onPressed: _handleHistoryCancelSelection,
           ),
+          const SizedBox(width: 4),
+          Text('已选择 $selectedCount 项', style: titleStyle),
         ],
+      );
+      trailing = _glassPill([
+        IconButton(
+          icon: const Icon(Icons.delete, size: 24),
+          color: colorScheme.onSurface,
+          style: IconButton.styleFrom(
+            minimumSize: const Size(40, 40),
+            maximumSize: const Size(40, 40),
+            padding: EdgeInsets.zero,
+          ),
+          onPressed: selectedCount > 0 ? _handleHistoryDeleteSelected : null,
+        ),
+      ]);
+    } else {
+      final IconData statusIcon = switch (_inputSource) {
+        InputSource.rtlTcp => Icons.wifi,
+        InputSource.audioInput => Icons.mic,
+        InputSource.bluetooth => Icons.bluetooth,
+      };
+      leading = Padding(
+        padding: const EdgeInsets.only(left: 4),
+        child: Text(
+          ['列车记录', '数据监控', '位置地图', '设置'][_currentIndex],
+          style: titleStyle,
+        ),
+      );
+      trailing = GlassMorphMenu(
+        menuWidth: 320,
+        onOpen: _handleConnectionMenuOpen,
+        onClosed: _handleConnectionMenuClosed,
+        triggerBuilder: (context, toggle) => _glassPill([
+          _ConnectionStatusWidget(
+            bleService: _bleService,
+            rtlTcpService: _rtlTcpService,
+            lastReceivedTime: _lastReceivedTime,
+            rtlTcpLastReceivedTime: _rtlTcpLastReceivedTime,
+            audioLastReceivedTime: _audioLastReceivedTime,
+            inputSource: _inputSource,
+            rtlTcpConnected: _rtlTcpConnected,
+          ),
+          Container(
+            width: 1,
+            height: 18,
+            margin: const EdgeInsets.symmetric(horizontal: 2),
+            color: colorScheme.onSurface.withValues(alpha: 0.15),
+          ),
+          IconButton(
+            icon: Icon(statusIcon, size: 24),
+            color: colorScheme.onSurface,
+            style: IconButton.styleFrom(
+              minimumSize: const Size(40, 40),
+              maximumSize: const Size(40, 40),
+              padding: EdgeInsets.zero,
+            ),
+            onPressed: toggle,
+          ),
+        ]),
+        menuBuilder: (context, close) => _PixelPerfectBluetoothDialog(
+          bleService: _bleService,
+          inputSource: _inputSource,
+          onClose: close,
+        ),
       );
     }
 
-    final IconData statusIcon = switch (_inputSource) {
-      InputSource.rtlTcp => Icons.wifi,
-      InputSource.audioInput => Icons.mic,
-      InputSource.bluetooth => Icons.bluetooth,
-    };
-
-    return AppBar(
-      backgroundColor: AppTheme.primaryBlack,
-      elevation: 0,
-      title: Text(
-        ['列车记录', '数据监控', '位置地图', '设置'][_currentIndex],
-        style: const TextStyle(
-            color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Row(
+        children: [
+          leading,
+          const Spacer(),
+          trailing,
+        ],
       ),
-      centerTitle: false,
-      actions: [
-        Row(
-          children: [
-            _ConnectionStatusWidget(
-              bleService: _bleService,
-              rtlTcpService: _rtlTcpService,
-              lastReceivedTime: _lastReceivedTime,
-              rtlTcpLastReceivedTime: _rtlTcpLastReceivedTime,
-              audioLastReceivedTime: _audioLastReceivedTime,
-              inputSource: _inputSource,
-              rtlTcpConnected: _rtlTcpConnected,
-            ),
-            IconButton(
-              icon: Icon(
-                statusIcon,
-                color: Colors.white,
-              ),
-              onPressed: _showConnectionDialog,
-            ),
-          ],
-        ),
-      ],
+    );
+  }
+
+  Widget _glassPill(List<Widget> children) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final clipper = ShapeBorderClipper(shape: AppShape.full);
+    final inner = ClipPath(
+      clipper: clipper,
+      child: Padding(
+        padding: const EdgeInsets.only(left: 12, right: 4),
+        child: Row(mainAxisSize: MainAxisSize.min, children: children),
+      ),
+    );
+    return SizedBox(
+      height: 44,
+      child: LiquidGlass(
+        style: glassRegularStyle(colorScheme),
+        shadows: glassMenuShadowsOf(colorScheme),
+        clipper: clipper,
+        child: inner,
+      ),
     );
   }
 
@@ -678,19 +763,18 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     final historyState = _historyScreenKey.currentState;
     if (historyState == null || historyState.getSelectedCount() == 0) return;
 
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showGlassDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (context) => GlassDialog(
         title: const Text('确认删除'),
         content: Text('确定要删除选中的 ${historyState.getSelectedCount()} 条记录吗？'),
+        destructive: true,
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
               child: const Text('取消')),
-          ElevatedButton(
+          TextButton(
             onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red, foregroundColor: Colors.white),
             child: const Text('删除'),
           ),
         ],
@@ -709,11 +793,16 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+    final brightness = Theme.of(context).brightness;
+    SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
-      systemNavigationBarColor: AppTheme.primaryBlack,
-      statusBarIconBrightness: Brightness.light,
-      systemNavigationBarIconBrightness: Brightness.light,
+      systemNavigationBarColor: Theme.of(context).scaffoldBackgroundColor,
+      statusBarIconBrightness: brightness == Brightness.dark
+          ? Brightness.light
+          : Brightness.dark,
+      systemNavigationBarIconBrightness: brightness == Brightness.dark
+          ? Brightness.light
+          : Brightness.dark,
     ));
 
     final pages = [
@@ -733,31 +822,44 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     ];
 
     return Scaffold(
-      backgroundColor: AppTheme.primaryBlack,
-      appBar: _buildAppBar(context),
-      body: IndexedStack(
-        index: _currentIndex,
-        children: pages,
-      ),
-      bottomNavigationBar: NavigationBar(
-        backgroundColor: AppTheme.secondaryBlack,
-        indicatorColor: AppTheme.accentBlue.withValues(alpha: 0.2),
-        selectedIndex: _currentIndex,
-        onDestinationSelected: (index) {
-          if (index == 0) {
-            _historyScreenKey.currentState?.reloadRecords();
-          }
-          setState(() {
-            if (_isHistoryEditMode) _isHistoryEditMode = false;
-            _currentIndex = index;
-          });
-        },
-        destinations: const [
-          NavigationDestination(
-              icon: Icon(Icons.directions_railway), label: '列车记录'),
-          NavigationDestination(icon: Icon(Icons.speed), label: '数据监控'),
-          NavigationDestination(icon: Icon(Icons.location_on), label: '位置地图'),
-          NavigationDestination(icon: Icon(Icons.settings), label: '设置'),
+      extendBody: true,
+      body: Stack(
+        children: [
+          IndexedStack(
+            index: _currentIndex,
+            children: pages,
+          ),
+          const ScrollEdgeFade(),
+          Positioned(
+            top: MediaQuery.paddingOf(context).top,
+            left: 0,
+            right: 0,
+            height: 72,
+            child: _buildTopBar(context),
+          ),
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: GlassDock(
+              currentIndex: _currentIndex,
+              onSelected: (index) {
+                if (index == 0) {
+                  _historyScreenKey.currentState?.reloadRecords();
+                }
+                setState(() {
+                  if (_isHistoryEditMode) _isHistoryEditMode = false;
+                  _currentIndex = index;
+                });
+              },
+              items: const [
+                GlassDockItem(icon: Icons.directions_railway, label: '列车记录'),
+                GlassDockItem(icon: Icons.speed, label: '数据监控'),
+                GlassDockItem(icon: Icons.location_on, label: '位置地图'),
+                GlassDockItem(icon: Icons.settings, label: '设置'),
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -769,8 +871,11 @@ enum _ScanState { initial, scanning, finished }
 class _PixelPerfectBluetoothDialog extends StatefulWidget {
   final BLEService bleService;
   final InputSource inputSource;
+  final VoidCallback onClose;
   const _PixelPerfectBluetoothDialog(
-      {required this.bleService, required this.inputSource});
+      {required this.bleService,
+      required this.inputSource,
+      required this.onClose});
   @override
   State<_PixelPerfectBluetoothDialog> createState() =>
       _PixelPerfectBluetoothDialogState();
@@ -836,12 +941,12 @@ class _PixelPerfectBluetoothDialogState
   }
 
   Future<void> _connectToDevice(BluetoothDevice device) async {
-    Navigator.pop(context);
+    widget.onClose();
     await widget.bleService.connectManually(device);
   }
 
   Future<void> _disconnect() async {
-    Navigator.pop(context);
+    widget.onClose();
     await widget.bleService.disconnect();
   }
 
@@ -858,18 +963,47 @@ class _PixelPerfectBluetoothDialogState
         ),
     };
 
-    return AlertDialog(
-      title: Text(title),
-      content: SizedBox(
-        width: double.maxFinite,
-        child: SingleChildScrollView(child: content),
+    final colorScheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 17,
+                    height: 22 / 17,
+                    fontWeight: FontWeight.w600,
+                    color: colorScheme.onSurface,
+                  ),
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.close, size: 20),
+                color: colorScheme.onSurface,
+                style: IconButton.styleFrom(
+                  minimumSize: const Size(32, 32),
+                  maximumSize: const Size(32, 32),
+                  padding: EdgeInsets.zero,
+                ),
+                onPressed: widget.onClose,
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.sizeOf(context).height * 0.55,
+            ),
+            child: SingleChildScrollView(child: content),
+          ),
+        ],
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('关闭'),
-        ),
-      ],
     );
   }
 
@@ -902,11 +1036,11 @@ class _PixelPerfectBluetoothDialogState
       ElevatedButton.icon(
           onPressed: _scanState == _ScanState.scanning ? null : _startScan,
           icon: _scanState == _ScanState.scanning
-              ? const SizedBox(
+              ? SizedBox(
                   width: 16,
                   height: 16,
                   child: CircularProgressIndicator(
-                      strokeWidth: 2, color: Colors.white))
+                      strokeWidth: 2, color: Theme.of(context).colorScheme.onSurface))
               : const Icon(Icons.search),
           label: Text(_scanState == _ScanState.scanning ? '扫描中...' : '扫描设备'),
           style: ElevatedButton.styleFrom(
@@ -952,8 +1086,9 @@ class _PixelPerfectBluetoothDialogState
         itemCount: _devices.length,
         itemBuilder: (context, index) {
           final device = _devices[index];
-          return Card(
+          return GlassCard(
             margin: const EdgeInsets.symmetric(vertical: 4),
+            radius: 16,
             child: ListTile(
               leading: const Icon(Icons.bluetooth),
               title: Text(device.platformName.isNotEmpty
@@ -968,3 +1103,10 @@ class _PixelPerfectBluetoothDialogState
     );
   }
 }
+
+
+/// The connection panel as a morph popup growing out of the status
+/// capsule's source button, on the same choreography as the glass
+/// select menus: the pane springs from the anchor rect to its final
+/// rect under the top-right corner while its style morphs regular ->
+/// menu and the content fades in over the first half.

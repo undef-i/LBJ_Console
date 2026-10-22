@@ -3,7 +3,6 @@ import 'dart:isolate';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
-import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import '../models/merged_record.dart';
 import '../services/database_service.dart';
@@ -11,6 +10,9 @@ import '../models/train_record.dart';
 import '../services/merge_service.dart';
 import '../models/map_state.dart';
 import '../services/map_state_service.dart';
+import 'package:lbjconsole/ui/web_map.dart';
+import 'package:lbjconsole/ui/glass_card.dart';
+import 'package:lbjconsole/ui/shape.dart';
 
 class HistoryScreen extends StatefulWidget {
   final Function(bool isEditing) onEditModeChanged;
@@ -26,7 +28,9 @@ class HistoryScreen extends StatefulWidget {
   HistoryScreenState createState() => HistoryScreenState();
 }
 
-class HistoryScreenState extends State<HistoryScreen> {
+class HistoryScreenState extends State<HistoryScreen>
+    with TickerProviderStateMixin {
+
   static const double _smallMapMinZoom = 2.0;
   static const double _smallMapMaxZoom = 18.0;
   static const double _singlePointMapZoom = 17.0;
@@ -36,11 +40,30 @@ class HistoryScreenState extends State<HistoryScreen> {
   bool _isEditMode = false;
   final Set<String> _selectedRecords = {};
   final Map<String, bool> _expandedStates = {};
+  // Reveal animations are owned here, keyed by display item, not
+  // by the list item's element: list items are destroyed and
+  // recreated as they scroll out and back in, and an animation
+  // controller living in the item restarted settled every time,
+  // so the same tap animated or snapped depending on whether the
+  // element happened to have survived. Owned here, a controller
+  // keeps its value across item recreation and the reveal behaves
+  // the same on every tap.
+  final Map<String, AnimationController> _revealControllers = {};
+  final Map<String, Animation<double>> _revealAnimations = {};
+  final Set<String> _revealMounted = {};
   late final ScrollController _scrollController;
   bool _isAtTop = true;
   final GlobalKey _listViewportKey = GlobalKey();
   final Map<String, GlobalKey> _itemKeys = {};
   _RenderViewportAnchor? _pendingRenderViewportAnchor;
+  int _pendingAnchorPasses = 0;
+  // Anchor support state: keyed boxes inside expanded merged
+  // cards, and the last measured height of every display item.
+  // The height registry is what lets a restore seek toward an
+  // anchor item that a large data change pushed out of the laid
+  // out window, instead of giving up on it.
+  final Map<String, GlobalKey> _subKeys = {};
+  final Map<String, double> _itemHeights = {};
   MergeSettings _mergeSettings = MergeSettings();
 
   final Map<String, double> _mapOptimalZoom = {};
@@ -107,6 +130,19 @@ class HistoryScreenState extends State<HistoryScreen> {
       }
     }
 
+    // A restore is data bookkeeping, not a gesture: any reveal it
+    // changes is snapped to its restored value, never animated.
+    for (final item in _displayItems) {
+      final key = _displayItemKey(item);
+      final was = _expandedStates[key] ?? false;
+      final will = nextStates[key] ?? false;
+      if (was != will) {
+        if (will) _revealMounted.add(key);
+        final controller = _revealControllers[key];
+        if (controller != null) controller.value = will ? 1 : 0;
+      }
+    }
+
     _expandedStates
       ..clear()
       ..addAll(nextStates);
@@ -115,6 +151,18 @@ class HistoryScreenState extends State<HistoryScreen> {
   GlobalKey _keyForDisplayItem(Object item) {
     final key = _displayItemKey(item);
     return _itemKeys.putIfAbsent(key, GlobalKey.new);
+  }
+
+  GlobalKey _subKeyFor(String subId) {
+    return _subKeys.putIfAbsent(subId, GlobalKey.new);
+  }
+
+  RenderBox? _liveBox(GlobalKey? key) {
+    final context = key?.currentContext;
+    if (context == null) return null;
+    final box = context.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize) return null;
+    return box;
   }
 
   _RenderViewportAnchor? _currentRenderViewportAnchor() {
@@ -128,33 +176,56 @@ class HistoryScreenState extends State<HistoryScreen> {
       return null;
     }
     final viewportTop = viewportBox.localToGlobal(Offset.zero).dy;
+    final viewportHeight = viewportBox.size.height;
 
-    _RenderViewportAnchor? firstVisible;
-    for (final item in _displayItems) {
+    for (var index = 0; index < _displayItems.length; index++) {
+      final item = _displayItems[index];
       final itemKey = _displayItemKey(item);
-      final context = _itemKeys[itemKey]?.currentContext;
-      if (context == null) continue;
-
-      final box = context.findRenderObject() as RenderBox?;
-      if (box == null || !box.hasSize) continue;
+      final box = _liveBox(_itemKeys[itemKey]);
+      if (box == null) continue;
 
       final dy = box.localToGlobal(Offset.zero).dy - viewportTop;
       final bottom = dy + box.size.height;
-      if (bottom <= 0 || dy >= viewportBox.size.height) continue;
+      if (bottom <= 0 || dy >= viewportHeight) continue;
 
-      final anchor = _RenderViewportAnchor(
+      // The first item intersecting the viewport is the anchor.
+      // Inside an expanded merged card, refine the pin to the
+      // first intersecting sub-box: growth inside the card above
+      // that box (a new sub-record at the head of the list, a
+      // taller header) then moves the box, and the restore can
+      // correct for it, where an item-level pin sees a top edge
+      // that never moved and corrects nothing.
+      if (item is MergedTrainRecord &&
+          (_expandedStates[itemKey] ?? false)) {
+        final subIds = <String>[
+          'map:${item.groupKey}',
+          for (final record in item.records) 'sub:${record.uniqueId}',
+        ];
+        for (final subId in subIds) {
+          final subBox = _liveBox(_subKeys[subId]);
+          if (subBox == null) continue;
+          final subDy = subBox.localToGlobal(Offset.zero).dy - viewportTop;
+          final subBottom = subDy + subBox.size.height;
+          if (subBottom <= 0 || subDy >= viewportHeight) continue;
+          return _RenderViewportAnchor(
+            itemKey: itemKey,
+            recordIds: _displayItemRecordIds(item),
+            dy: subDy,
+            subId: subId,
+            index: index,
+          );
+        }
+      }
+
+      return _RenderViewportAnchor(
         itemKey: itemKey,
         recordIds: _displayItemRecordIds(item),
         dy: dy,
+        index: index,
       );
-
-      if (dy <= 0 && bottom > 0) {
-        return anchor;
-      }
-      firstVisible ??= anchor;
     }
 
-    return firstVisible;
+    return null;
   }
 
   String? _fallbackItemKeyForAnchor(_RenderViewportAnchor anchor) {
@@ -170,11 +241,43 @@ class HistoryScreenState extends State<HistoryScreen> {
   void _queueRenderViewportAnchorRestore(_RenderViewportAnchor? anchor) {
     if (anchor == null) return;
     _pendingRenderViewportAnchor = anchor;
+    _pendingAnchorPasses = 0;
+  }
+
+  void _sweepItemHeights() {
+    for (final item in _displayItems) {
+      final itemKey = _displayItemKey(item);
+      final box = _liveBox(_itemKeys[itemKey]);
+      if (box != null) _itemHeights[itemKey] = box.size.height;
+    }
+  }
+
+  double _estimatedItemHeight(String itemKey) {
+    final known = _itemHeights[itemKey];
+    if (known != null) return known;
+    if (_itemHeights.isEmpty) return 120;
+    var sum = 0.0;
+    for (final height in _itemHeights.values) {
+      sum += height;
+    }
+    return sum / _itemHeights.length;
+  }
+
+  bool _correctScrollBy(double delta) {
+    final position = _scrollController.position;
+    final targetPixels = (position.pixels + delta).clamp(
+      position.minScrollExtent,
+      position.maxScrollExtent,
+    );
+    final correction = targetPixels - position.pixels;
+    if (correction.abs() <= 0.5) return false;
+    position.correctBy(correction);
+    return true;
   }
 
   bool _applyPendingRenderViewportAnchorCorrection() {
+    _sweepItemHeights();
     final anchor = _pendingRenderViewportAnchor;
-    _pendingRenderViewportAnchor = null;
     if (anchor == null || !mounted || !_scrollController.hasClients) {
       return false;
     }
@@ -184,29 +287,100 @@ class HistoryScreenState extends State<HistoryScreen> {
     if (viewportBox == null || !viewportBox.hasSize) return false;
     final viewportTop = viewportBox.localToGlobal(Offset.zero).dy;
 
-    final itemKey = _itemKeys[anchor.itemKey]?.currentContext == null
-        ? _fallbackItemKeyForAnchor(anchor)
-        : anchor.itemKey;
-    if (itemKey == null) return false;
+    // Follow the anchor item through the data change: by its own
+    // key, else by any item now holding one of its records (the
+    // single that became a group, the group that absorbed it),
+    // else by the item that took its place in the list.
+    var itemKey = anchor.itemKey;
+    var subId = anchor.subId;
+    final itemSurvives =
+        _displayItems.any((item) => _displayItemKey(item) == itemKey);
+    if (!itemSurvives) {
+      final fallback = _fallbackItemKeyForAnchor(anchor);
+      if (fallback != null) {
+        itemKey = fallback;
+        subId = null;
+      } else if (_displayItems.isNotEmpty) {
+        final clamped = anchor.index.clamp(0, _displayItems.length - 1);
+        itemKey = _displayItemKey(_displayItems[clamped]);
+        subId = null;
+      } else {
+        _pendingRenderViewportAnchor = null;
+        return false;
+      }
+    }
 
-    final itemContext = _itemKeys[itemKey]?.currentContext;
-    final itemBox = itemContext?.findRenderObject() as RenderBox?;
-    if (itemBox == null || !itemBox.hasSize) return false;
+    RenderBox? targetBox;
+    if (subId != null) targetBox = _liveBox(_subKeys[subId]);
+    targetBox ??= _liveBox(_itemKeys[itemKey]);
 
-    final newDy = itemBox.localToGlobal(Offset.zero).dy - viewportTop;
-    final delta = newDy - anchor.dy;
-    if (delta.abs() <= 0.5) return false;
+    if (targetBox != null) {
+      final newDy = targetBox.localToGlobal(Offset.zero).dy - viewportTop;
+      final delta = newDy - anchor.dy;
+      _pendingRenderViewportAnchor = null;
+      _pendingAnchorPasses = 0;
+      if (delta.abs() <= 0.5) return false;
+      return _correctScrollBy(delta);
+    }
 
-    final position = _scrollController.position;
-    final targetPixels = (position.pixels + delta).clamp(
-      position.minScrollExtent,
-      position.maxScrollExtent,
-    );
-    final correction = targetPixels - position.pixels;
-    if (correction.abs() <= 0.5) return false;
+    // The item exists but is not laid out: a large data change
+    // pushed it out of the build window, where the old one-shot
+    // restore simply gave up. Seek toward it by the registered
+    // heights of the items in between, one pass per layout, and
+    // pin it exactly once it enters the window. The pending
+    // anchor is only consumed by pinning it, by the user taking
+    // over the scroll, or by the pass budget running out.
+    _pendingAnchorPasses++;
+    if (_pendingAnchorPasses > 15) {
+      _pendingRenderViewportAnchor = null;
+      _pendingAnchorPasses = 0;
+      return false;
+    }
+    final seek = _seekCorrection(itemKey, anchor.dy, viewportTop);
+    if (seek == null || seek.abs() <= 0.5) return false;
+    return _correctScrollBy(seek);
+  }
 
-    position.correctBy(correction);
-    return true;
+  double? _seekCorrection(
+    String targetItemKey,
+    double targetDy,
+    double viewportTop,
+  ) {
+    int? targetIndex;
+    for (var i = 0; i < _displayItems.length; i++) {
+      if (_displayItemKey(_displayItems[i]) == targetItemKey) {
+        targetIndex = i;
+        break;
+      }
+    }
+    if (targetIndex == null) return null;
+
+    int? refIndex;
+    var refDy = 0.0;
+    for (var i = 0; i < _displayItems.length; i++) {
+      final box = _liveBox(_itemKeys[_displayItemKey(_displayItems[i])]);
+      if (box == null) continue;
+      if (refIndex == null ||
+          (i - targetIndex).abs() < (refIndex - targetIndex).abs()) {
+        refIndex = i;
+        refDy = box.localToGlobal(Offset.zero).dy - viewportTop;
+      }
+    }
+    if (refIndex == null) return null;
+
+    var estimatedDy = refDy;
+    if (targetIndex > refIndex) {
+      for (var i = refIndex; i < targetIndex; i++) {
+        estimatedDy +=
+            _estimatedItemHeight(_displayItemKey(_displayItems[i]));
+      }
+    } else if (targetIndex < refIndex) {
+      for (var i = targetIndex; i < refIndex; i++) {
+        estimatedDy -=
+            _estimatedItemHeight(_displayItemKey(_displayItems[i]));
+      }
+    }
+    return estimatedDy - targetDy;
   }
 
   @override
@@ -240,8 +414,46 @@ class HistoryScreenState extends State<HistoryScreen> {
 
   @override
   void dispose() {
+    for (final controller in _revealControllers.values) {
+      controller.dispose();
+    }
     _scrollController.dispose();
     super.dispose();
+  }
+
+  Animation<double> _revealAnimationFor(String itemKey, bool expanded) {
+    return _revealAnimations.putIfAbsent(itemKey, () {
+      final controller = AnimationController(
+        vsync: this,
+        duration: const Duration(milliseconds: 280),
+        reverseDuration: const Duration(milliseconds: 220),
+        value: expanded ? 1 : 0,
+      );
+      _revealControllers[itemKey] = controller;
+      return CurvedAnimation(
+        parent: controller,
+        curve: Curves.easeOutCubic,
+        reverseCurve: Curves.easeInCubic,
+      );
+    });
+  }
+
+  void _setExpanded(String itemKey, bool value, {required bool animate}) {
+    setState(() {
+      _expandedStates[itemKey] = value;
+      if (value) _revealMounted.add(itemKey);
+    });
+    final controller = _revealControllers[itemKey];
+    if (controller == null) return;
+    if (animate) {
+      if (value) {
+        controller.forward();
+      } else {
+        controller.reverse();
+      }
+    } else {
+      controller.value = value ? 1 : 0;
+    }
   }
 
   Future<void> loadRecords({bool scrollToTop = true}) async {
@@ -458,11 +670,11 @@ class HistoryScreenState extends State<HistoryScreen> {
     }
 
     if (_displayItems.isEmpty) {
-      return const Center(
+      return Center(
           child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
         Icon(Icons.history, size: 64, color: Colors.grey),
         SizedBox(height: 16),
-        Text('暂无记录', style: TextStyle(color: Colors.white, fontSize: 18))
+        Text('暂无记录', style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 18))
       ]));
     }
     return Stack(
@@ -481,12 +693,24 @@ class HistoryScreenState extends State<HistoryScreen> {
   }
 
   Widget _buildHistoryListView() {
-    return _ViewportAnchorRestorer(
-      onAfterLayout: _applyPendingRenderViewportAnchorCorrection,
-      child: ListView.builder(
+    return NotificationListener<ScrollNotification>(
+      onNotification: (notification) {
+        // A user grab takes the scroll over: a pending restore
+        // must not fight their hand for the position.
+        if (notification is ScrollStartNotification &&
+            notification.dragDetails != null) {
+          _pendingRenderViewportAnchor = null;
+          _pendingAnchorPasses = 0;
+        }
+        return false;
+      },
+      child: _ViewportAnchorRestorer(
+        onAfterLayout: _applyPendingRenderViewportAnchorCorrection,
+        child: ListView.builder(
         key: _listViewportKey,
         controller: _scrollController,
-        padding: const EdgeInsets.all(16.0),
+        padding: EdgeInsets.fromLTRB(
+            16.0, MediaQuery.paddingOf(context).top + 80, 16.0, 118.0),
         cacheExtent: 800,
         itemCount: _displayItems.length,
         itemBuilder: (context, index) {
@@ -504,6 +728,7 @@ class HistoryScreenState extends State<HistoryScreen> {
           }
           return const SizedBox.shrink();
         },
+        ),
       ),
     );
   }
@@ -513,22 +738,13 @@ class HistoryScreenState extends State<HistoryScreen> {
         mergedRecord.records.any((r) => _selectedRecords.contains(r.uniqueId));
     final itemKey = _displayItemKey(mergedRecord);
     final isExpanded = _expandedStates[itemKey] ?? false;
-    return Card(
+    return GlassCard(
         key: ValueKey(mergedRecord.groupKey),
-        color: isSelected && _isEditMode
-            ? const Color(0xFF2E2E2E)
-            : const Color(0xFF1E1E1E),
-        elevation: 1,
         margin: const EdgeInsets.only(bottom: 8.0),
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8.0),
-            side: BorderSide(
-                color: isSelected && _isEditMode
-                    ? Colors.white
-                    : Colors.transparent,
-                width: 2.0)),
+        radius: 16,
+        selected: isSelected && _isEditMode,
         child: InkWell(
-            borderRadius: BorderRadius.circular(8.0),
+            customBorder: AppShape.all(16),
             onTap: () {
               if (_isEditMode) {
                 setState(() {
@@ -542,9 +758,7 @@ class HistoryScreenState extends State<HistoryScreen> {
                   widget.onSelectionChanged();
                 });
               } else {
-                setState(() {
-                  _expandedStates[itemKey] = !isExpanded;
-                });
+                _setExpanded(itemKey, !isExpanded, animate: true);
               }
             },
             onLongPress: () {
@@ -567,7 +781,13 @@ class HistoryScreenState extends State<HistoryScreen> {
                           isMerged: true),
                       _buildPositionAndSpeed(mergedRecord.latestRecord),
                       _buildLocoInfo(mergedRecord.latestRecord),
-                      if (isExpanded) _buildMergedExpandedContent(mergedRecord),
+                      _Reveal(
+                          animation:
+                              _revealAnimationFor(itemKey, isExpanded),
+                          mounted: _revealMounted.contains(itemKey) ||
+                              isExpanded,
+                          child:
+                              _buildMergedExpandedContent(mergedRecord)),
                     ]))));
   }
 
@@ -575,13 +795,20 @@ class HistoryScreenState extends State<HistoryScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _buildExpandedMapForAll(mergedRecord.records, mergedRecord.groupKey),
+        RepaintBoundary(
+          key: _subKeyFor('map:${mergedRecord.groupKey}'),
+          child: _buildExpandedMapForAll(
+              mergedRecord.records, mergedRecord.groupKey),
+        ),
         const SizedBox(height: 12),
         ...mergedRecord.records.map(
-          (record) => _buildSubRecordItem(
-            record,
-            mergedRecord.latestRecord,
-            _mergeSettings.groupBy,
+          (record) => RepaintBoundary(
+            key: _subKeyFor('sub:${record.uniqueId}'),
+            child: _buildSubRecordItem(
+              record,
+              mergedRecord.latestRecord,
+              _mergeSettings.groupBy,
+            ),
           ),
         ),
       ],
@@ -607,7 +834,7 @@ class HistoryScreenState extends State<HistoryScreen> {
               if (differingInfo.isNotEmpty)
                 Text(
                   differingInfo,
-                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                  style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 12),
                 ),
             ],
           ),
@@ -618,13 +845,13 @@ class HistoryScreenState extends State<HistoryScreen> {
               Flexible(
                 child: Text(
                   locationInfo,
-                  style: const TextStyle(color: Colors.white70, fontSize: 14),
+                  style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 14),
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
               Text(
                 record.speed.isNotEmpty ? "${record.speed} km/h" : "",
-                style: const TextStyle(color: Colors.white70, fontSize: 14),
+                style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 14),
               ),
             ],
           ),
@@ -721,7 +948,18 @@ class HistoryScreenState extends State<HistoryScreen> {
     }
 
     final mapId = records.map((r) => r.uniqueId).join('_');
-    final bounds = LatLngBounds.fromPoints(positions);
+    var minLat = positions.first.latitude;
+    var maxLat = minLat;
+    var minLng = positions.first.longitude;
+    var maxLng = minLng;
+    for (final position in positions) {
+      if (position.latitude < minLat) minLat = position.latitude;
+      if (position.latitude > maxLat) maxLat = position.latitude;
+      if (position.longitude < minLng) minLng = position.longitude;
+      if (position.longitude > maxLng) maxLng = position.longitude;
+    }
+    final boundsCenter =
+        LatLng((minLat + maxLat) / 2, (minLng + maxLng) / 2);
 
     if (!_mapOptimalZoom.containsKey(mapId) &&
         !(_mapCalculating[mapId] ?? false)) {
@@ -748,14 +986,14 @@ class HistoryScreenState extends State<HistoryScreen> {
     }
 
     if (!_mapOptimalZoom.containsKey(mapId)) {
-      return const Column(
+      return Column(
         children: [
           SizedBox(height: 8),
           SizedBox(
             height: 228,
             child: Center(
               child: CircularProgressIndicator(
-                color: Colors.white,
+                color: Theme.of(context).colorScheme.onSurface,
                 strokeWidth: 2,
               ),
             ),
@@ -776,7 +1014,7 @@ class HistoryScreenState extends State<HistoryScreen> {
           child: _DelayedMultiMarkerMap(
             key: ValueKey('multi_map_${mapId}_$zoomLevel'),
             positions: positions,
-            center: bounds.center,
+            center: boundsCenter,
             zoom: zoomLevel,
             groupKey: groupKey,
           ))
@@ -789,22 +1027,13 @@ class HistoryScreenState extends State<HistoryScreen> {
     final itemKey = _displayItemKey(record);
     final isExpanded = _expandedStates[itemKey] ?? false;
 
-    return Card(
+    return GlassCard(
         key: key,
-        color: isSelected && _isEditMode
-            ? const Color(0xFF2E2E2E)
-            : const Color(0xFF1E1E1E),
-        elevation: isSubCard ? 0 : 1,
         margin: EdgeInsets.only(bottom: isSubCard ? 4.0 : 8.0),
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8.0),
-            side: BorderSide(
-                color: isSelected && _isEditMode
-                    ? Colors.white
-                    : Colors.transparent,
-                width: 2.0)),
+        radius: 16,
+        selected: isSelected && _isEditMode,
         child: InkWell(
-            borderRadius: BorderRadius.circular(8.0),
+            customBorder: AppShape.all(16),
             onTap: () {
               if (_isEditMode) {
                 setState(() {
@@ -816,9 +1045,7 @@ class HistoryScreenState extends State<HistoryScreen> {
                   widget.onSelectionChanged();
                 });
               } else {
-                setState(() {
-                  _expandedStates[itemKey] = !isExpanded;
-                });
+                _setExpanded(itemKey, !isExpanded, animate: true);
               }
             },
             onLongPress: () {
@@ -838,7 +1065,12 @@ class HistoryScreenState extends State<HistoryScreen> {
                       _buildRecordHeader(record),
                       _buildPositionAndSpeed(record),
                       _buildLocoInfo(record),
-                      if (isExpanded) _buildExpandedContent(record),
+                      _Reveal(
+                          animation:
+                              _revealAnimationFor(itemKey, isExpanded),
+                          mounted: _revealMounted.contains(itemKey) ||
+                              isExpanded,
+                          child: _buildExpandedContent(record)),
                     ]))));
   }
 
@@ -899,10 +1131,7 @@ class HistoryScreenState extends State<HistoryScreen> {
                     if (hasTrainNumber)
                       Flexible(
                           child: Text(record.fullTrainNumber,
-                              style: const TextStyle(
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.white),
+                              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.onSurface),
                               overflow: TextOverflow.ellipsis)),
                     if (hasTrainNumber && hasDirection)
                       const SizedBox(width: 6),
@@ -923,7 +1152,7 @@ class HistoryScreenState extends State<HistoryScreen> {
               if (hasLocoInfo)
                 Text(formattedLocoInfo,
                     style:
-                        const TextStyle(fontSize: 14, color: Colors.white70)),
+                        TextStyle(fontSize: 14, color: Theme.of(context).colorScheme.onSurfaceVariant)),
             ]),
         const SizedBox(height: 2)
       ]
@@ -938,7 +1167,7 @@ class HistoryScreenState extends State<HistoryScreen> {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       const SizedBox(height: 4),
       Text(locoInfo,
-          style: const TextStyle(fontSize: 14, color: Colors.white),
+          style: TextStyle(fontSize: 14, color: Theme.of(context).colorScheme.onSurface),
           maxLines: 1,
           overflow: TextOverflow.ellipsis)
     ]);
@@ -973,7 +1202,7 @@ class HistoryScreenState extends State<HistoryScreen> {
                 Flexible(
                     child: Text(routeStr,
                         style:
-                            const TextStyle(fontSize: 16, color: Colors.white),
+                            TextStyle(fontSize: 16, color: Theme.of(context).colorScheme.onSurface),
                         overflow: TextOverflow.ellipsis)),
               if (isValidRoute && isValidPosition) const SizedBox(width: 4),
               if (isValidPosition)
@@ -981,12 +1210,12 @@ class HistoryScreenState extends State<HistoryScreen> {
                     child: Text(
                         "${position.trim().endsWith('.') ? position.trim().substring(0, position.trim().length - 1) : position.trim()}K",
                         style:
-                            const TextStyle(fontSize: 16, color: Colors.white),
+                            TextStyle(fontSize: 16, color: Theme.of(context).colorScheme.onSurface),
                         overflow: TextOverflow.ellipsis))
             ])),
           if (isValidSpeed)
             Text("${speed.replaceAll(' ', '')} km/h",
-                style: const TextStyle(fontSize: 16, color: Colors.white),
+                style: TextStyle(fontSize: 16, color: Theme.of(context).colorScheme.onSurface),
                 textAlign: TextAlign.right)
         ]));
   }
@@ -1156,10 +1385,22 @@ class _RenderViewportAnchor {
   final Set<String> recordIds;
   final double dy;
 
+  // The finest box the pin applies to: null pins the item itself,
+  // a sub id pins a keyed box inside an expanded merged card (its
+  // map block or one of its sub-record rows), which is what makes
+  // growth inside the card above the reading point correctable.
+  final String? subId;
+
+  // The item's index in the display list at capture time; the
+  // neighbour fallback and the seek both work from it.
+  final int index;
+
   const _RenderViewportAnchor({
     required this.itemKey,
     required this.recordIds,
     required this.dy,
+    this.subId,
+    this.index = 0,
   });
 }
 
@@ -1255,118 +1496,85 @@ class _DelayedMapWithMarker extends StatefulWidget {
 }
 
 class _DelayedMapWithMarkerState extends State<_DelayedMapWithMarker> {
-  late final MapController _mapController;
+  final WebMapController _webMap = WebMapController();
   late final String _mapKey;
   Timer? _mapStateSaveTimer;
-  bool _isInitializing = true;
+  ({LatLng center, double zoom, double bearing})? _initialCamera;
+  bool _ready = false;
 
   @override
   void initState() {
     super.initState();
-    _mapController = MapController();
     _mapKey = MapStateService.instance.getSingleRecordMapKey(widget.recordId);
-    _initializeMapState();
+    _initialize();
   }
 
-  Future<void> _initializeMapState() async {
-    final savedState = await MapStateService.instance.getMapState(_mapKey);
-    if (savedState != null && mounted) {
-      _mapController.move(
-        LatLng(savedState.centerLat, savedState.centerLng),
-        savedState.zoom
-            .clamp(
-              HistoryScreenState._smallMapMinZoom,
-              HistoryScreenState._smallMapMaxZoom,
-            )
-            .toDouble(),
-      );
-      if (savedState.bearing != 0.0) {
-        _mapController.rotate(savedState.bearing);
-      }
-    }
-    if (mounted) {
-      setState(() {
-        _isInitializing = false;
-      });
-    }
-  }
-
-  void _onCameraMove() {
-    if (_isInitializing) {
-      return;
-    }
-
-    final camera = _mapController.camera;
+  void _onCameraIdle(LatLng center, double zoom, double bearing) {
     final state = MapState(
-      zoom: camera.zoom,
-      centerLat: camera.center.latitude,
-      centerLng: camera.center.longitude,
-      bearing: camera.rotation,
+      zoom: zoom,
+      centerLat: center.latitude,
+      centerLng: center.longitude,
+      bearing: bearing,
     );
-
     _mapStateSaveTimer?.cancel();
     _mapStateSaveTimer = Timer(const Duration(milliseconds: 600), () {
       MapStateService.instance.saveMapState(_mapKey, state);
     });
   }
 
+  Future<void> _initialize() async {
+    final savedState = await MapStateService.instance.getMapState(_mapKey);
+    if (!mounted) return;
+    if (savedState != null) {
+      _initialCamera = (
+        center: LatLng(savedState.centerLat, savedState.centerLng),
+        zoom: savedState.zoom
+            .clamp(
+              HistoryScreenState._smallMapMinZoom,
+              HistoryScreenState._smallMapMaxZoom,
+            )
+            .toDouble(),
+        bearing: savedState.bearing,
+      );
+    } else {
+      _initialCamera = (
+        center: widget.position,
+        zoom: widget.zoom,
+        bearing: 0.0,
+      );
+    }
+    setState(() {
+      _ready = true;
+    });
+  }
+
+
+
   @override
   void dispose() {
     _mapStateSaveTimer?.cancel();
-    _mapController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_isInitializing) {
-      return FlutterMap(
-        options: MapOptions(
-          initialCenter: widget.position,
-          initialZoom: widget.zoom,
-          minZoom: HistoryScreenState._smallMapMinZoom,
-          maxZoom: HistoryScreenState._smallMapMaxZoom,
-          onPositionChanged: (position, hasGesture) => _onCameraMove(),
-        ),
-        mapController: _mapController,
-        children: [
-          TileLayer(
-              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-              userAgentPackageName: 'org.noxylva.lbjconsole'),
-          MarkerLayer(markers: [_buildTrainMarker(widget.position)]),
-        ],
-      );
+    if (!_ready || _initialCamera == null) {
+      return const SizedBox.expand();
     }
-
-    return FlutterMap(
-      options: MapOptions(
-        minZoom: HistoryScreenState._smallMapMinZoom,
-        maxZoom: HistoryScreenState._smallMapMaxZoom,
-        onPositionChanged: (position, hasGesture) => _onCameraMove(),
-      ),
-      mapController: _mapController,
-      children: [
-        TileLayer(
-            urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-            userAgentPackageName: 'org.noxylva.lbjconsole'),
-        MarkerLayer(markers: [_buildTrainMarker(widget.position)]),
-      ],
-    );
-  }
-
-  Marker _buildTrainMarker(LatLng position) {
-    return Marker(
-      point: position,
-      width: 24,
-      height: 24,
-      child: Container(
-        decoration: BoxDecoration(
-          color: Colors.black,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.white, width: 1.5),
-        ),
-        child: const Icon(Icons.train, color: Colors.white, size: 12),
-      ),
+    return WebMapView(
+      controller: _webMap,
+      initialCenter: _initialCamera!.center,
+      initialZoom: _initialCamera!.zoom,
+      initialBearing: _initialCamera!.bearing,
+      minZoom: HistoryScreenState._smallMapMinZoom,
+      maxZoom: HistoryScreenState._smallMapMaxZoom,
+      interactive: true,
+      orm: true,
+      dark: Theme.of(context).brightness == Brightness.dark,
+      onReady: () {
+        _webMap.setData(dots: [WebMapDot(position: widget.position)]);
+      },
+      onCameraIdle: _onCameraIdle,
     );
   }
 }
@@ -1390,94 +1598,121 @@ class _DelayedMultiMarkerMap extends StatefulWidget {
 }
 
 class _DelayedMultiMarkerMapState extends State<_DelayedMultiMarkerMap> {
-  late final MapController _mapController;
+  final WebMapController _webMap = WebMapController();
   late final String _mapKey;
   Timer? _mapStateSaveTimer;
-  bool _isInitializing = true;
+  ({LatLng center, double zoom, double bearing})? _initialCamera;
+  bool _ready = false;
 
   @override
   void initState() {
     super.initState();
-    _mapController = MapController();
     _mapKey = MapStateService.instance.getMergedRecordMapKey(widget.groupKey);
-    _initializeMapState();
+    _initialize();
   }
 
-  Future<void> _initializeMapState() async {
-    final savedState = await MapStateService.instance.getMapState(_mapKey);
-    if (savedState != null && mounted) {
-      _mapController.move(
-        LatLng(savedState.centerLat, savedState.centerLng),
-        savedState.zoom
-            .clamp(
-              HistoryScreenState._smallMapMinZoom,
-              HistoryScreenState._smallMapMaxZoom,
-            )
-            .toDouble(),
-      );
-      if (savedState.bearing != 0.0) {
-        _mapController.rotate(savedState.bearing);
-      }
-    } else if (mounted) {
-      _mapController.move(widget.center, widget.zoom);
-    }
-    if (mounted) {
-      setState(() {
-        _isInitializing = false;
-      });
-    }
-  }
-
-  void _onCameraMove() {
-    if (_isInitializing) {
-      return;
-    }
-
-    final camera = _mapController.camera;
+  void _onCameraIdle(LatLng center, double zoom, double bearing) {
     final state = MapState(
-      zoom: camera.zoom,
-      centerLat: camera.center.latitude,
-      centerLng: camera.center.longitude,
-      bearing: camera.rotation,
+      zoom: zoom,
+      centerLat: center.latitude,
+      centerLng: center.longitude,
+      bearing: bearing,
     );
-
     _mapStateSaveTimer?.cancel();
     _mapStateSaveTimer = Timer(const Duration(milliseconds: 600), () {
       MapStateService.instance.saveMapState(_mapKey, state);
     });
   }
 
+  Future<void> _initialize() async {
+    final savedState = await MapStateService.instance.getMapState(_mapKey);
+    if (!mounted) return;
+    if (savedState != null) {
+      _initialCamera = (
+        center: LatLng(savedState.centerLat, savedState.centerLng),
+        zoom: savedState.zoom
+            .clamp(
+              HistoryScreenState._smallMapMinZoom,
+              HistoryScreenState._smallMapMaxZoom,
+            )
+            .toDouble(),
+        bearing: savedState.bearing,
+      );
+    } else {
+      _initialCamera = (
+        center: widget.center,
+        zoom: widget.zoom,
+        bearing: 0.0,
+      );
+    }
+    setState(() {
+      _ready = true;
+    });
+  }
+
+
+
   @override
   void dispose() {
     _mapStateSaveTimer?.cancel();
-    _mapController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return FlutterMap(
-      options: MapOptions(
-        onPositionChanged: (position, hasGesture) => _onCameraMove(),
-        minZoom: HistoryScreenState._smallMapMinZoom,
-        maxZoom: HistoryScreenState._smallMapMaxZoom,
+    if (!_ready || _initialCamera == null) {
+      return const SizedBox.expand();
+    }
+    return WebMapView(
+      controller: _webMap,
+      initialCenter: _initialCamera!.center,
+      initialZoom: _initialCamera!.zoom,
+      initialBearing: _initialCamera!.bearing,
+      minZoom: HistoryScreenState._smallMapMinZoom,
+      maxZoom: HistoryScreenState._smallMapMaxZoom,
+      interactive: true,
+      orm: true,
+      dark: Theme.of(context).brightness == Brightness.dark,
+      onReady: () {
+        _webMap.setData(lines: [widget.positions]);
+      },
+      onCameraIdle: _onCameraIdle,
+    );
+  }
+}
+
+/// Expand/collapse as a reveal: the content is laid out once at
+/// its natural height and the animation only moves a clip window
+/// over it, so the embedded map's surface is created at its final
+/// size and is never resized by the animation. The animation and
+/// the mounted latch live in the screen's state, keyed by item
+/// (see _revealAnimationFor), so they survive the list item being
+/// destroyed and recreated by scrolling; this widget only paints
+/// the current frame of an animation it is handed.
+class _Reveal extends StatelessWidget {
+  const _Reveal({
+    required this.animation,
+    required this.mounted,
+    required this.child,
+  });
+
+  final Animation<double> animation;
+  final bool mounted;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!mounted) return const SizedBox.shrink();
+    return AnimatedBuilder(
+      animation: animation,
+      builder: (context, child) => ClipRect(
+        child: Align(
+          alignment: Alignment.topCenter,
+          heightFactor: animation.value,
+          child: child,
+        ),
       ),
-      mapController: _mapController,
-      children: [
-        TileLayer(
-          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-          userAgentPackageName: 'org.noxylva.lbjconsole',
-        ),
-        PolylineLayer(
-          polylines: [
-            Polyline(
-              points: widget.positions,
-              strokeWidth: 4,
-              color: Colors.black,
-            ),
-          ],
-        ),
-      ],
+      child: child,
     );
   }
 }
