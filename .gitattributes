@@ -1,1 +1,5 @@
-assets/* linguist-vendored
+assets/** linguist-vendored
+web/index.html linguist-vendored
+android/app/src/main/cpp/dsp/** linguist-vendored
+android/app/src/main/cpp/util/** linguist-vendored
+android/app/src/main/cpp/fcdlib/** linguist-vendored
