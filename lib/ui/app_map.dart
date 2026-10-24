@@ -4,9 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 
+import 'native_map.dart';
 import 'web_map.dart';
 
-enum MapEngine { vector, raster }
+enum MapEngine { vector, raster, native }
 
 class MapEngineStore extends ValueNotifier<MapEngine> {
   MapEngineStore._() : super(MapEngine.vector);
@@ -35,6 +36,8 @@ class _RasterState {
 
 class AppMapController {
   final WebMapController web = WebMapController();
+  final NativeMapController native = NativeMapController();
+  final NativeMapState nativeState = NativeMapState();
   final _RasterState raster = _RasterState();
 
   MapController? _rasterMap;
@@ -83,6 +86,12 @@ class AppMapController {
     List<WebMapHit> hits = const [],
   }) {
     web.setData(lines: lines, chips: chips, dots: dots, hits: hits);
+    native.setLines(lines);
+    nativeState.lines = lines;
+    nativeState.chips = chips;
+    nativeState.dots = dots;
+    nativeState.hits = hits;
+    nativeState.bump();
     raster.lines = lines;
     raster.chips = chips;
     raster.dots = dots;
@@ -92,6 +101,7 @@ class AppMapController {
 
   void moveTo(LatLng center, double zoom, {double? bearing}) {
     web.moveTo(center, zoom, bearing: bearing);
+    native.moveTo(center, zoom, bearing: bearing);
     _rasterRun((map) {
       map.move(center, zoom);
       if (bearing != null) {
@@ -106,6 +116,7 @@ class AppMapController {
     required double maxZoom,
   }) {
     web.fitBounds(points, padding: padding, maxZoom: maxZoom);
+    native.fitBounds(points, padding: padding, maxZoom: maxZoom);
     if (points.isEmpty) {
       return;
     }
@@ -122,12 +133,16 @@ class AppMapController {
 
   void setOrm(bool visible) {
     web.setOrm(visible);
+    nativeState.ormVisible = visible;
+    nativeState.bump();
     raster.ormVisible = visible;
     raster.bump();
   }
 
   void setTheme(bool dark) {
     web.setTheme(dark);
+    nativeState.dark = dark;
+    nativeState.bump();
   }
 }
 
@@ -175,6 +190,26 @@ class AppMapView extends StatelessWidget {
     return ValueListenableBuilder<MapEngine>(
       valueListenable: MapEngineStore.instance,
       builder: (context, engine, _) {
+        if (engine == MapEngine.native) {
+          return NativeMapView(
+            controller: controller.native,
+            state: controller.nativeState,
+            initialCenter: initialCenter,
+            initialZoom: initialZoom,
+            initialBearing: initialBearing,
+            minZoom: minZoom,
+            maxZoom: maxZoom,
+            interactive: interactive,
+            orm: orm,
+            ormVisible: ormVisible,
+            dark: dark,
+            onReady: onReady,
+            onError: onError,
+            onCameraIdle: onCameraIdle,
+            onChipTap: onChipTap,
+            onTap: onTap,
+          );
+        }
         if (engine == MapEngine.raster) {
           return RasterMapView(
             controller: controller,

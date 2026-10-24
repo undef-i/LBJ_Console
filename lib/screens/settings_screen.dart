@@ -362,8 +362,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
           trailing: GlassSelect<MapEngine>(
             value: _mapEngine,
             items: const [
-              DropdownMenuItem(value: MapEngine.vector, child: Text('矢量')),
-              DropdownMenuItem(value: MapEngine.raster, child: Text('位图')),
+              DropdownMenuItem(value: MapEngine.vector, child: Text('MapLibre GL JS')),
+              DropdownMenuItem(value: MapEngine.raster, child: Text('flutter_map')),
+              DropdownMenuItem(value: MapEngine.native, child: Text('MapLibre Native')),
             ],
             onChanged: (value) {
               if (value != null) {

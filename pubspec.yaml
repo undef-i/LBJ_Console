@@ -43,6 +43,7 @@ dependencies:
   flutter_local_notifications: ^17.2.2
   latlong2: ^0.9.1
   flutter_map: ^8.2.1
+  maplibre: ^0.3.7
   geolocator: ^13.0.4
   geolocator_android: 4.6.1
   
