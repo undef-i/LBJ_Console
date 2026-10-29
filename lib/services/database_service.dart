@@ -130,7 +130,7 @@ class DatabaseService {
     }
     if (oldVersion < 11) {
       await db.execute(
-          'ALTER TABLE $appSettingsTable ADD COLUMN mapEngine TEXT NOT NULL DEFAULT "vector"');
+          'ALTER TABLE $appSettingsTable ADD COLUMN mapEngine TEXT NOT NULL DEFAULT "native"');
     }
   }
 
@@ -194,7 +194,7 @@ class DatabaseService {
         rtlTcpHost TEXT NOT NULL DEFAULT '127.0.0.1',
         rtlTcpPort TEXT NOT NULL DEFAULT '14423',
         inputSource TEXT NOT NULL DEFAULT 'bluetooth',
-        mapEngine TEXT NOT NULL DEFAULT 'vector'
+        mapEngine TEXT NOT NULL DEFAULT 'native'
       )
     ''');
 

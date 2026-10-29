@@ -8,13 +8,38 @@ import 'package:latlong2/latlong.dart';
 import 'package:maplibre/maplibre.dart' as ml;
 
 import 'native_style.dart';
-import 'web_map.dart';
+
+class MapChip {
+  final String id;
+  final LatLng position;
+  final String label;
+
+  const MapChip({
+    required this.id,
+    required this.position,
+    required this.label,
+  });
+}
+
+class MapDot {
+  final LatLng position;
+  final bool location;
+
+  const MapDot({required this.position, this.location = false});
+}
+
+class MapHit {
+  final String id;
+  final LatLng position;
+
+  const MapHit({required this.id, required this.position});
+}
 
 class NativeMapState {
   List<List<LatLng>> lines = const [];
-  List<WebMapChip> chips = const [];
-  List<WebMapDot> dots = const [];
-  List<WebMapHit> hits = const [];
+  List<MapChip> chips = const [];
+  List<MapDot> dots = const [];
+  List<MapHit> hits = const [];
   bool ormVisible = true;
   bool dark = false;
   final ValueNotifier<int> change = ValueNotifier(0);

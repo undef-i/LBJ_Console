@@ -5,12 +5,11 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 
 import 'native_map.dart';
-import 'web_map.dart';
 
-enum MapEngine { vector, raster, native }
+enum MapEngine { raster, native }
 
 class MapEngineStore extends ValueNotifier<MapEngine> {
-  MapEngineStore._() : super(MapEngine.vector);
+  MapEngineStore._() : super(MapEngine.native);
 
   static final MapEngineStore instance = MapEngineStore._();
 
@@ -18,16 +17,16 @@ class MapEngineStore extends ValueNotifier<MapEngine> {
     final name = settings?['mapEngine'] as String?;
     value = MapEngine.values.firstWhere(
       (e) => e.name == name,
-      orElse: () => MapEngine.vector,
+      orElse: () => MapEngine.native,
     );
   }
 }
 
 class _RasterState {
   List<List<LatLng>> lines = const [];
-  List<WebMapChip> chips = const [];
-  List<WebMapDot> dots = const [];
-  List<WebMapHit> hits = const [];
+  List<MapChip> chips = const [];
+  List<MapDot> dots = const [];
+  List<MapHit> hits = const [];
   bool ormVisible = true;
   final ValueNotifier<int> change = ValueNotifier(0);
 
@@ -35,7 +34,6 @@ class _RasterState {
 }
 
 class AppMapController {
-  final WebMapController web = WebMapController();
   final NativeMapController native = NativeMapController();
   final NativeMapState nativeState = NativeMapState();
   final _RasterState raster = _RasterState();
@@ -81,11 +79,10 @@ class AppMapController {
 
   void setData({
     List<List<LatLng>> lines = const [],
-    List<WebMapChip> chips = const [],
-    List<WebMapDot> dots = const [],
-    List<WebMapHit> hits = const [],
+    List<MapChip> chips = const [],
+    List<MapDot> dots = const [],
+    List<MapHit> hits = const [],
   }) {
-    web.setData(lines: lines, chips: chips, dots: dots, hits: hits);
     native.setLines(lines);
     nativeState.lines = lines;
     nativeState.chips = chips;
@@ -100,7 +97,6 @@ class AppMapController {
   }
 
   void moveTo(LatLng center, double zoom, {double? bearing}) {
-    web.moveTo(center, zoom, bearing: bearing);
     native.moveTo(center, zoom, bearing: bearing);
     _rasterRun((map) {
       map.move(center, zoom);
@@ -115,7 +111,6 @@ class AppMapController {
     required double padding,
     required double maxZoom,
   }) {
-    web.fitBounds(points, padding: padding, maxZoom: maxZoom);
     native.fitBounds(points, padding: padding, maxZoom: maxZoom);
     if (points.isEmpty) {
       return;
@@ -132,7 +127,6 @@ class AppMapController {
   }
 
   void setOrm(bool visible) {
-    web.setOrm(visible);
     nativeState.ormVisible = visible;
     nativeState.bump();
     raster.ormVisible = visible;
@@ -140,7 +134,6 @@ class AppMapController {
   }
 
   void setTheme(bool dark) {
-    web.setTheme(dark);
     nativeState.dark = dark;
     nativeState.bump();
   }
@@ -154,7 +147,6 @@ class AppMapView extends StatelessWidget {
   final double minZoom;
   final double maxZoom;
   final bool interactive;
-  final bool hybridComposition;
   final bool orm;
   final bool ormVisible;
   final bool dark;
@@ -174,7 +166,6 @@ class AppMapView extends StatelessWidget {
     this.minZoom = 2,
     this.maxZoom = 18,
     this.interactive = true,
-    this.hybridComposition = false,
     this.orm = false,
     this.ormVisible = true,
     this.dark = false,
@@ -210,37 +201,17 @@ class AppMapView extends StatelessWidget {
             onTap: onTap,
           );
         }
-        if (engine == MapEngine.raster) {
-          return RasterMapView(
-            controller: controller,
-            initialCenter: initialCenter,
-            initialZoom: initialZoom,
-            initialBearing: initialBearing,
-            minZoom: minZoom,
-            maxZoom: maxZoom,
-            interactive: interactive,
-            orm: orm,
-            ormVisible: ormVisible,
-            onReady: onReady,
-            onCameraIdle: onCameraIdle,
-            onChipTap: onChipTap,
-            onTap: onTap,
-          );
-        }
-        return WebMapView(
-          controller: controller.web,
+        return RasterMapView(
+          controller: controller,
           initialCenter: initialCenter,
           initialZoom: initialZoom,
           initialBearing: initialBearing,
           minZoom: minZoom,
           maxZoom: maxZoom,
           interactive: interactive,
-          hybridComposition: hybridComposition,
           orm: orm,
           ormVisible: ormVisible,
-          dark: dark,
           onReady: onReady,
-          onError: onError,
           onCameraIdle: onCameraIdle,
           onChipTap: onChipTap,
           onTap: onTap,

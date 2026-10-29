@@ -6,7 +6,7 @@ import '../models/merged_record.dart';
 import '../services/database_service.dart';
 import '../models/train_record.dart';
 import '../services/merge_service.dart';
-import 'package:lbjconsole/ui/web_map.dart';
+import 'package:lbjconsole/ui/native_map.dart';
 import 'package:lbjconsole/ui/app_map.dart';
 import 'package:lbjconsole/ui/glass_card.dart';
 import 'package:lbjconsole/ui/glass_dialog.dart';
@@ -167,7 +167,7 @@ class RealtimeScreenState extends State<RealtimeScreen> {
   // basemap.
   void _pushSelectionData() {
     final lines = <List<LatLng>>[];
-    final chips = <WebMapChip>[];
+    final chips = <MapChip>[];
     for (final groupKey in _selectedGroupKeys.toList()) {
       try {
         if (groupKey.startsWith('single:')) {
@@ -178,7 +178,7 @@ class RealtimeScreenState extends State<RealtimeScreen> {
           final position = _getCachedPosition(singleRecord);
           if (position != null) {
             chips.add(
-              WebMapChip(
+              MapChip(
                 id: singleRecord.uniqueId,
                 position: position,
                 label: _getTrainDisplayName(singleRecord),
@@ -201,7 +201,7 @@ class RealtimeScreenState extends State<RealtimeScreen> {
           }
           if (routePoints.isNotEmpty) {
             chips.add(
-              WebMapChip(
+              MapChip(
                 id: routeEntries.first.key.uniqueId,
                 position: routePoints.last,
                 label: _getTrainDisplayName(routeEntries.first.key),
@@ -735,8 +735,7 @@ class RealtimeScreenState extends State<RealtimeScreen> {
                   minZoom: 2,
                   maxZoom: 18,
                   interactive: true,
-                  hybridComposition: true,
-                  orm: true,
+                      orm: true,
                   ormVisible: _railwayLayerVisible,
                   dark: Theme.of(context).brightness == Brightness.dark,
                   onReady: () {

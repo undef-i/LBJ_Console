@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'dart:async';
 import 'dart:io';
 
@@ -14,6 +15,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:lbjconsole/ui/app_map.dart';
+import 'package:lbjconsole/ui/pmtiles_local.dart';
 import 'package:lbjconsole/ui/fl_list.dart';
 import 'package:lbjconsole/ui/glass_dialog.dart';
 import 'package:lbjconsole/ui/glass_styles.dart';
@@ -58,7 +60,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   TimeWindow _timeWindow = TimeWindow.unlimited;
 
   InputSource _inputSource = InputSource.bluetooth;
-  MapEngine _mapEngine = MapEngine.vector;
+  MapEngine _mapEngine = MapEngine.native;
 
   String _rtlTcpHost = '127.0.0.1';
   String _rtlTcpPort = '14423';
@@ -107,7 +109,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         final engineStr = settingsMap['mapEngine'] as String? ?? 'vector';
         _mapEngine = MapEngine.values.firstWhere(
           (e) => e.name == engineStr,
-          orElse: () => MapEngine.vector,
+          orElse: () => MapEngine.native,
         );
 
         _settingsLoaded = true;
@@ -175,12 +177,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final scheme = Theme.of(context).colorScheme;
     return Container(
       constraints: const BoxConstraints(minHeight: 56),
-      padding: const EdgeInsets.fromLTRB(16, 10, 2, 10),
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
       child: Row(
         children: [
-          Flexible(
-            child: Text(title, style: flListTitleStyle(scheme)),
-          ),
+          Text(title, style: flListTitleStyle(scheme)),
           const SizedBox(width: 16),
           Expanded(
             child: TextField(
@@ -362,7 +362,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
           trailing: GlassSelect<MapEngine>(
             value: _mapEngine,
             items: const [
-              DropdownMenuItem(value: MapEngine.vector, child: Text('MapLibre GL JS')),
               DropdownMenuItem(value: MapEngine.raster, child: Text('flutter_map')),
               DropdownMenuItem(value: MapEngine.native, child: Text('MapLibre Native')),
             ],
@@ -516,7 +515,37 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _showTemporaryRecordsPanel();
   }
 
+  static const _debugChannel = MethodChannel('lbj/debug');
+
+  Future<String> _lastExitText() async {
+    try {
+      final info =
+          await _debugChannel.invokeMapMethod<String, dynamic>('lastExitInfo');
+      if (info == null) return '无记录';
+      final reason = switch (info['reason'] as int? ?? 0) {
+        2 => '被信号杀死',
+        3 => '内存不足被杀',
+        4 => '崩溃',
+        5 => '原生崩溃',
+        6 => '无响应 (ANR)',
+        9 => '资源占用过高被杀',
+        10 => '用户主动退出',
+        11 => '被系统停止',
+        _ => '其他 (代码 ${info['reason']})',
+      };
+      final ts = info['timestamp'] as int? ?? 0;
+      final when = ts > 0
+          ? DateTime.fromMillisecondsSinceEpoch(ts).toString().substring(0, 19)
+          : '';
+      final desc = (info['description'] as String? ?? '').trim();
+      return [reason, when, if (desc.isNotEmpty) desc].join('\n');
+    } catch (_) {
+      return '读取失败';
+    }
+  }
+
   void _showTemporaryRecordsPanel() {
+    final exitFuture = _lastExitText();
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
@@ -551,7 +580,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         Icon(Icons.science,
                             color: Theme.of(context).colorScheme.primary),
                         const SizedBox(width: 12),
-                        const Text('临时测试', style: AppTheme.titleMedium),
+                        const Text('调试', style: AppTheme.titleMedium),
                       ],
                     ),
                     const SizedBox(height: 16),
@@ -578,6 +607,40 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           },
                         ),
                       ],
+                    ),
+                    const SizedBox(height: 16),
+                    GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () {
+                        Navigator.pop(context);
+                        _showTileLog();
+                      },
+                      child: const Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('瓦片请求日志', style: AppTheme.bodyLarge),
+                                SizedBox(height: 2),
+                                Text('本地瓦片服务的请求记录',
+                                    style: AppTheme.caption),
+                              ],
+                            ),
+                          ),
+                          Icon(Icons.arrow_forward_ios, size: 18),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    const Text('上次退出', style: AppTheme.bodyLarge),
+                    const SizedBox(height: 2),
+                    FutureBuilder<String>(
+                      future: exitFuture,
+                      builder: (context, snapshot) => Text(
+                        snapshot.data ?? '读取中',
+                        style: AppTheme.caption,
+                      ),
                     ),
                     const SizedBox(height: 8),
                     Align(
@@ -805,6 +868,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
       );
     }
+  }
+
+  void _showTileLog() {
+    final lines = PmtilesTileServer.requestLog;
+    showGlassDialog(
+      context: context,
+      builder: (context) => GlassDialog(
+        title: const Text('瓦片请求日志'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(
+            child: SelectableText(
+              lines.isEmpty ? '暂无记录' : lines.join('\n'),
+              style: const TextStyle(fontSize: 11, height: 1.5),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('关闭'),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildAboutSection() {

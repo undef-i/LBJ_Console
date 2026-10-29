@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'orm_style.dart';
+import 'pmtiles_local.dart';
 
 const _libertyStyleUrl = 'https://tiles.openfreemap.org/styles/liberty';
 const _ormStyleUrl = 'https://openrailwaymap.app/style.json';
@@ -44,7 +45,56 @@ Future<String?> _build({required bool orm, required bool dark}) async {
   }
   final combined = _combineStyles(base, style, rewrite.spriteUpstreams);
   combined.remove('state');
+  await _mergePmtilesSources(combined);
+  _registerLayerKeepSets(combined);
   return jsonEncode(combined);
+}
+
+void _registerLayerKeepSets(Map<String, dynamic> style) {
+  final layers = style['layers'];
+  if (layers is! List) return;
+  final keepSets = <int, Set<String>>{
+    for (var z = 0; z <= 22; z++) z: <String>{},
+  };
+  for (final raw in layers) {
+    if (raw is! Map) continue;
+    if (raw['source'] != 'orm') continue;
+    final sourceLayer = raw['source-layer'];
+    if (sourceLayer is! String) continue;
+    final layout = raw['layout'];
+    if (layout is Map && layout['visibility'] == 'none') continue;
+    final minZoom = (raw['minzoom'] as num?)?.toDouble() ?? 0;
+    final maxZoom = (raw['maxzoom'] as num?)?.toDouble() ?? 24;
+    for (var z = 0; z <= 22; z++) {
+      if (minZoom < z + 1 && maxZoom > z) keepSets[z]!.add(sourceLayer);
+    }
+  }
+  PmtilesArchive.layerKeepSets = keepSets;
+}
+
+Future<void> _mergePmtilesSources(Map<String, dynamic> style) async {
+  final sources = style['sources'];
+  if (sources is! Map<String, dynamic>) return;
+  final merged = <String>[
+    for (final entry in sources.entries)
+      if (entry.value is Map &&
+          (entry.value as Map)['url'] == ormPMTilesURL)
+        entry.key,
+  ];
+  if (merged.isEmpty) return;
+  final base = await PmtilesTileServer.instance.baseUrl();
+  for (final name in merged) {
+    sources.remove(name);
+  }
+  sources['orm'] = {'type': 'vector', 'url': '$base/tiles.json'};
+  final layers = style['layers'];
+  if (layers is List) {
+    for (final layer in layers) {
+      if (layer is Map && merged.contains(layer['source'])) {
+        layer['source'] = 'orm';
+      }
+    }
+  }
 }
 
 Map<String, dynamic> _stateDefaults(Map<String, dynamic> ormStyle, bool dark) {

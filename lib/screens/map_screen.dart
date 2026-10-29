@@ -5,7 +5,7 @@ import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:lbjconsole/services/database_service.dart';
 import 'package:lbjconsole/models/train_record.dart';
-import 'package:lbjconsole/ui/web_map.dart';
+import 'package:lbjconsole/ui/native_map.dart';
 import 'package:lbjconsole/ui/app_map.dart';
 import 'package:lbjconsole/ui/glass_morph_menu.dart';
 import 'package:lbjconsole/models/merged_record.dart';
@@ -399,16 +399,16 @@ class _MapScreenState extends State<MapScreen> {
   // target (nearest within 28 screen px, resolved in the page).
   void _pushMapData() {
     final lines = <List<LatLng>>[];
-    final chips = <WebMapChip>[];
-    final dots = <WebMapDot>[];
-    final hits = <WebMapHit>[];
+    final chips = <MapChip>[];
+    final dots = <MapDot>[];
+    final hits = <MapHit>[];
     final mixed = MergeService.getMixedList(_trainRecords, _mergeSettings);
     for (final item in mixed) {
       if (item is TrainRecord) {
         final position = _positionForRecord(item);
         if (position == null) continue;
         chips.add(
-          WebMapChip(id: item.uniqueId, position: position, label: _chipLabel(item)),
+          MapChip(id: item.uniqueId, position: position, label: _chipLabel(item)),
         );
       } else if (item is MergedTrainRecord) {
         final entries = <MapEntry<TrainRecord, LatLng>>[];
@@ -423,7 +423,7 @@ class _MapScreenState extends State<MapScreen> {
         }
         if (entries.isNotEmpty) {
           chips.add(
-            WebMapChip(
+            MapChip(
               id: entries.first.key.uniqueId,
               position: entries.first.value,
               label: _chipLabel(entries.first.key),
@@ -435,12 +435,12 @@ class _MapScreenState extends State<MapScreen> {
     for (final record in _trainRecords) {
       final position = _positionForRecord(record);
       if (position != null) {
-        hits.add(WebMapHit(id: record.uniqueId, position: position));
+        hits.add(MapHit(id: record.uniqueId, position: position));
       }
     }
     final location = _userLocation;
     if (location != null) {
-      dots.add(WebMapDot(position: location, location: true));
+      dots.add(MapDot(position: location, location: true));
     }
     _webMap.setData(lines: lines, chips: chips, dots: dots, hits: hits);
   }
@@ -811,7 +811,6 @@ class _MapScreenState extends State<MapScreen> {
               minZoom: 2,
               maxZoom: 18,
               interactive: true,
-              hybridComposition: true,
               orm: true,
               ormVisible: _railwayLayerVisible,
               dark: Theme.of(context).brightness == Brightness.dark,

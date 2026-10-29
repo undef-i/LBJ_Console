@@ -10,7 +10,7 @@ import '../models/train_record.dart';
 import '../services/merge_service.dart';
 import '../models/map_state.dart';
 import '../services/map_state_service.dart';
-import 'package:lbjconsole/ui/web_map.dart';
+import 'package:lbjconsole/ui/native_map.dart';
 import 'package:lbjconsole/ui/app_map.dart';
 import 'package:lbjconsole/ui/glass_card.dart';
 import 'package:lbjconsole/ui/shape.dart';
@@ -1433,7 +1433,7 @@ class _DelayedMapWithMarker extends StatefulWidget {
 }
 
 class _DelayedMapWithMarkerState extends State<_DelayedMapWithMarker> {
-  final AppMapController _webMap = AppMapController();
+  final AppMapController _map = AppMapController();
   late final String _mapKey;
   Timer? _mapStateSaveTimer;
   ({LatLng center, double zoom, double bearing})? _initialCamera;
@@ -1499,7 +1499,7 @@ class _DelayedMapWithMarkerState extends State<_DelayedMapWithMarker> {
       return const SizedBox.expand();
     }
     return AppMapView(
-      controller: _webMap,
+      controller: _map,
       initialCenter: _initialCamera!.center,
       initialZoom: _initialCamera!.zoom,
       initialBearing: _initialCamera!.bearing,
@@ -1509,7 +1509,7 @@ class _DelayedMapWithMarkerState extends State<_DelayedMapWithMarker> {
       orm: true,
       dark: Theme.of(context).brightness == Brightness.dark,
       onReady: () {
-        _webMap.setData(dots: [WebMapDot(position: widget.position)]);
+        _map.setData(dots: [MapDot(position: widget.position)]);
       },
       onCameraIdle: _onCameraIdle,
     );
@@ -1535,7 +1535,7 @@ class _DelayedMultiMarkerMap extends StatefulWidget {
 }
 
 class _DelayedMultiMarkerMapState extends State<_DelayedMultiMarkerMap> {
-  final AppMapController _webMap = AppMapController();
+  final AppMapController _map = AppMapController();
   late final String _mapKey;
   Timer? _mapStateSaveTimer;
   ({LatLng center, double zoom, double bearing})? _initialCamera;
@@ -1601,7 +1601,7 @@ class _DelayedMultiMarkerMapState extends State<_DelayedMultiMarkerMap> {
       return const SizedBox.expand();
     }
     return AppMapView(
-      controller: _webMap,
+      controller: _map,
       initialCenter: _initialCamera!.center,
       initialZoom: _initialCamera!.zoom,
       initialBearing: _initialCamera!.bearing,
@@ -1611,7 +1611,7 @@ class _DelayedMultiMarkerMapState extends State<_DelayedMultiMarkerMap> {
       orm: true,
       dark: Theme.of(context).brightness == Brightness.dark,
       onReady: () {
-        _webMap.setData(lines: [widget.positions]);
+        _map.setData(lines: [widget.positions]);
       },
       onCameraIdle: _onCameraIdle,
     );
