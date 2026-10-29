@@ -26,7 +26,7 @@ if (flutterVersionName == null) {
 android {
     namespace = "org.noxylva.lbjconsole.flutter"
     compileSdk = 36
-    ndkVersion = "28.1.13356709"
+
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
@@ -70,12 +70,6 @@ android {
             reset()
             include "arm64-v8a", "armeabi-v7a", "x86", "x86_64"
             universalApk true
-        }
-    }
-    externalNativeBuild {
-        cmake {
-            path "src/main/cpp/CMakeLists.txt"
-            version "3.22.1"
         }
     }
 }

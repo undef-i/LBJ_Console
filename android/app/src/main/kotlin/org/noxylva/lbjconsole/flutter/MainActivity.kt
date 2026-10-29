@@ -10,7 +10,6 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity: FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        RtlTcpChannelHandler.registerWith(flutterEngine)
         AudioInputHandler.registerWith(flutterEngine, applicationContext)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "lbj/debug")
             .setMethodCallHandler { call, result ->

@@ -2,10 +2,10 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart';
 import 'package:gbk_codec/gbk_codec.dart';
 import 'package:lbjconsole/models/train_record.dart';
 import 'package:lbjconsole/services/database_service.dart';
+import 'package:lbjconsole/services/demod_worker.dart';
 import 'package:lbjconsole/util/app_log.dart';
 
 const String _lbjInfoAddr = "1234000";
@@ -205,10 +205,6 @@ class RtlTcpService {
   static final RtlTcpService _instance = RtlTcpService._internal();
   factory RtlTcpService() => _instance;
   RtlTcpService._internal();
-  static const _methodChannel =
-      MethodChannel('org.noxylva.lbjconsole/rtl_tcp_method');
-  static const _eventChannel =
-      EventChannel('org.noxylva.lbjconsole/rtl_tcp_event');
   final StreamController<String> _statusController =
       StreamController<String>.broadcast();
   final StreamController<TrainRecord> _dataController =
@@ -226,7 +222,8 @@ class RtlTcpService {
   String _deviceStatus = "未连接";
   bool _isConnected = false;
   DateTime? _lastReceivedTime;
-  StreamSubscription? _eventChannelSubscription;
+  StreamSubscription? _workerSubscription;
+  StreamSubscription? _workerStatusSubscription;
   final _LbJState _state = _LbJState();
   Timer? _reconnectTimer;
   String _lastHost = '127.0.0.1';
@@ -283,99 +280,74 @@ class RtlTcpService {
     }
   }
 
-  void _listenToEventChannel() {
-    if (_eventChannelSubscription != null) {
-      _eventChannelSubscription?.cancel();
+  void _handleMessage(String addr, int func, String numeric, double magsqRaw) {
+    if (addr != _lbjInfoAddr && addr != _lbjInfo2Addr && addr != _lbjSyncAddr) {
+      return;
     }
 
-    _eventChannelSubscription = _eventChannel.receiveBroadcastStream().listen(
-      (dynamic event) {
-        try {
-          final map = event as Map;
+    final String currentRawMessage = "$addr|$func|$numeric";
+    final now = DateTime.now();
+    if (currentRawMessage == _lastRawMessage &&
+        _lastRawMessageAt != null &&
+        now.difference(_lastRawMessageAt!).inMilliseconds <
+            _duplicateWindowMs) {
+      return;
+    }
+    _lastRawMessage = currentRawMessage;
+    _lastRawMessageAt = now;
 
-          if (map.containsKey('connected')) {
-            final connected = map['connected'] as bool? ?? false;
-            if (_isConnected != connected) {
-              _updateConnectionState(connected, connected ? "已连接" : "已断开");
-            }
-          }
+    if (kDebugMode && _logRaw) {
+      AppLog.info('rtl-tcp', 'raw $currentRawMessage');
+    }
 
-          if (map.containsKey('address')) {
-            final addr = map['address'] as String;
+    if (!_isConnected) {
+      _updateConnectionState(true, "已连接");
+    }
+    _lastReceivedTime = DateTime.now();
+    _lastReceivedTimeController.add(_lastReceivedTime);
 
-            if (addr != _lbjInfoAddr &&
-                addr != _lbjInfo2Addr &&
-                addr != _lbjSyncAddr) {
-              return;
-            }
+    _state.updateFromRaw(addr, func, numeric);
 
-            final func = int.tryParse(map['func'] as String? ?? '-1') ?? -1;
-            final numeric = map['numeric'] as String;
-            final magsqRaw = (map['magsqRaw'] as num?)?.toDouble() ?? 0.0;
+    if (addr == _lbjInfoAddr || addr == _lbjInfo2Addr) {
+      final jsonData = _state.toTrainRecordJson(magsqRaw);
+      final trainRecord = TrainRecord.fromJson(jsonData);
 
-            final String currentRawMessage = "$addr|$func|$numeric";
-            final now = DateTime.now();
-            if (currentRawMessage == _lastRawMessage &&
-                _lastRawMessageAt != null &&
-                now.difference(_lastRawMessageAt!).inMilliseconds <
-                    _duplicateWindowMs) {
-              return;
-            }
-            _lastRawMessage = currentRawMessage;
-            _lastRawMessageAt = now;
+      if (kDebugMode && _logParsed) {
+        AppLog.info('rtl-tcp', 'parsed ${jsonEncode(jsonData)}');
+      }
 
-            if (kDebugMode && _logRaw) {
-              AppLog.info('rtl-tcp', 'raw $currentRawMessage');
-            }
+      _dataController.add(trainRecord);
+      DatabaseService.instance.insertRecord(trainRecord);
+    }
+  }
 
-            if (!_isConnected) {
-              _updateConnectionState(true, "已连接");
-            }
-            _lastReceivedTime = DateTime.now();
-            _lastReceivedTimeController.add(_lastReceivedTime);
-
-            _state.updateFromRaw(addr, func, numeric);
-
-            if (addr == _lbjInfoAddr || addr == _lbjInfo2Addr) {
-              final jsonData = _state.toTrainRecordJson(magsqRaw);
-              final trainRecord = TrainRecord.fromJson(jsonData);
-
-              if (kDebugMode && _logParsed) {
-                AppLog.info('rtl-tcp', 'parsed ${jsonEncode(jsonData)}');
-              }
-
-              _dataController.add(trainRecord);
-              DatabaseService.instance.insertRecord(trainRecord);
-            }
-          }
-        } catch (e) {
-          AppLog.error('rtl-tcp', 'state machine failed', e);
-          _updateConnectionState(false, "数据解析错误");
-        }
-      },
-      onError: (dynamic error) {
-        _updateConnectionState(false, "数据通道错误");
-        _eventChannelSubscription?.cancel();
-        _eventChannelSubscription = null;
-      },
-      onDone: () {
-        _updateConnectionState(false, "连接已断开");
-        _eventChannelSubscription = null;
-      },
-    );
+  void _listenToWorker() {
+    _workerSubscription ??= DemodWorker.instance.events.listen((event) {
+      if (event.kind != 'rtl') return;
+      try {
+        _handleMessage(
+          '${event.address}',
+          event.function,
+          event.content,
+          event.magsq,
+        );
+      } catch (e) {
+        AppLog.error('rtl-tcp', 'state machine failed', e);
+        _updateConnectionState(false, "数据解析错误");
+      }
+    });
+    _workerStatusSubscription ??=
+        DemodWorker.instance.rtlStatus.listen((status) {
+      final connected = status.$1;
+      if (_isConnected != connected) {
+        _updateConnectionState(connected, connected ? "已连接" : "已断开");
+      }
+    });
   }
 
   Future<void> _internalConnect() async {
-    if (_eventChannelSubscription == null) {
-      _listenToEventChannel();
-    }
-
-    try {
-      await _methodChannel
-          .invokeMethod('connect', {'host': _lastHost, 'port': _lastPort});
-    } on PlatformException catch (e) {
-      _updateConnectionState(false, "连接失败: ${e.message}");
-    }
+    _listenToWorker();
+    await DemodWorker.instance.rtlConnect(_lastHost, _lastPort);
   }
 
   Future<void> connect({String? host, String? port}) async {
@@ -393,12 +365,10 @@ class RtlTcpService {
   Future<void> disconnect() async {
     _isEnabled = false;
     _cancelAutoReconnect();
-    await _eventChannelSubscription?.cancel();
-    _eventChannelSubscription = null;
     try {
-      await _methodChannel.invokeMethod('disconnect');
+      await DemodWorker.instance.rtlDisconnect();
     } catch (e) {
-      AppLog.error('rtl-tcp', 'native disconnect failed', e);
+      AppLog.error('rtl-tcp', 'disconnect failed', e);
     }
     _updateConnectionState(false, "已禁用");
   }

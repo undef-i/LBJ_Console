@@ -6,6 +6,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:gbk_codec/gbk_codec.dart';
 import 'package:lbjconsole/models/train_record.dart';
 import 'package:lbjconsole/services/database_service.dart';
+import 'package:lbjconsole/services/demod_worker.dart';
 import 'package:lbjconsole/util/app_log.dart';
 
 const String _lbjInfoAddr = "1234000";
@@ -222,6 +223,7 @@ class AudioInputService {
   bool _isListening = false;
   DateTime? _lastReceivedTime;
   StreamSubscription? _eventChannelSubscription;
+  StreamSubscription? _workerSubscription;
   final _LbJState _state = _LbJState();
   String _lastRawMessage = "";
   DateTime? _lastRawMessageAt;
@@ -242,6 +244,54 @@ class AudioInputService {
     _lastReceivedTimeController.add(_lastReceivedTime);
   }
 
+  void _handleMessage(String addr, int func, String numeric) {
+    if (addr != _lbjInfoAddr && addr != _lbjInfo2Addr && addr != _lbjSyncAddr) {
+      return;
+    }
+
+    final String currentRawMessage = "$addr|$func|$numeric";
+    final now = DateTime.now();
+    if (currentRawMessage == _lastRawMessage &&
+        _lastRawMessageAt != null &&
+        now.difference(_lastRawMessageAt!).inMilliseconds <
+            _duplicateWindowMs) {
+      return;
+    }
+    _lastRawMessage = currentRawMessage;
+    _lastRawMessageAt = now;
+
+    if (kDebugMode) {
+      AppLog.info('audio', 'raw $currentRawMessage');
+    }
+
+    if (!_isListening) {
+      _updateListeningState(true, "监听中");
+    }
+    _lastReceivedTime = DateTime.now();
+    _lastReceivedTimeController.add(_lastReceivedTime);
+
+    _state.updateFromRaw(addr, func, numeric);
+
+    if (addr == _lbjInfoAddr || addr == _lbjInfo2Addr) {
+      final jsonData = _state.toTrainRecordJson();
+      final trainRecord = TrainRecord.fromJson(jsonData);
+
+      _dataController.add(trainRecord);
+      DatabaseService.instance.insertRecord(trainRecord);
+    }
+  }
+
+  void _listenToWorker() {
+    _workerSubscription ??= DemodWorker.instance.events.listen((event) {
+      if (event.kind != 'mic') return;
+      try {
+        _handleMessage('${event.address}', event.function, event.content);
+      } catch (e) {
+        AppLog.error('audio', 'state machine failed', e);
+      }
+    });
+  }
+
   void _listenToEventChannel() {
     if (_eventChannelSubscription != null) {
       _eventChannelSubscription?.cancel();
@@ -249,61 +299,15 @@ class AudioInputService {
 
     _eventChannelSubscription = _eventChannel.receiveBroadcastStream().listen(
       (dynamic event) {
-        try {
-          final map = event as Map;
-
-          if (map.containsKey('listening')) {
-            final listening = map['listening'] as bool? ?? false;
-            if (_isListening != listening) {
-              _updateListeningState(listening, listening ? "监听中" : "已停止");
-            }
+        if (event is Uint8List) {
+          DemodWorker.instance.pushPcm(event);
+          return;
+        }
+        if (event is Map && event.containsKey('listening')) {
+          final listening = event['listening'] as bool? ?? false;
+          if (_isListening != listening) {
+            _updateListeningState(listening, listening ? "监听中" : "已停止");
           }
-
-          if (map.containsKey('address')) {
-            final addr = map['address'] as String;
-
-            if (addr != _lbjInfoAddr &&
-                addr != _lbjInfo2Addr &&
-                addr != _lbjSyncAddr) {
-              return;
-            }
-
-            final func = int.tryParse(map['func'] as String? ?? '-1') ?? -1;
-            final numeric = map['numeric'] as String;
-
-            final String currentRawMessage = "$addr|$func|$numeric";
-            final now = DateTime.now();
-            if (currentRawMessage == _lastRawMessage &&
-                _lastRawMessageAt != null &&
-                now.difference(_lastRawMessageAt!).inMilliseconds <
-                    _duplicateWindowMs) {
-              return;
-            }
-            _lastRawMessage = currentRawMessage;
-            _lastRawMessageAt = now;
-
-            if (kDebugMode) {
-              AppLog.info('audio', 'raw $currentRawMessage');
-            }
-
-            if (!_isListening) {
-              _updateListeningState(true, "监听中");
-            }
-            _lastReceivedTime = DateTime.now();
-            _lastReceivedTimeController.add(_lastReceivedTime);
-
-            _state.updateFromRaw(addr, func, numeric);
-
-            if (addr == _lbjInfoAddr || addr == _lbjInfo2Addr) {
-              final jsonData = _state.toTrainRecordJson();
-              final trainRecord = TrainRecord.fromJson(jsonData);
-
-              _dataController.add(trainRecord);
-              DatabaseService.instance.insertRecord(trainRecord);
-            }
-          }
-        } catch (e) {
-          AppLog.error('audio', 'state machine failed', e);
         }
       },
       onError: (dynamic error) {
@@ -311,6 +315,11 @@ class AudioInputService {
         _eventChannelSubscription?.cancel();
       },
     );
+  }
+
+  Future<List<double>> getSpectrum() async {
+    final spectrum = await DemodWorker.instance.spectrum();
+    return spectrum.toList();
   }
 
   Future<bool> startListening() async {
@@ -327,6 +336,8 @@ class AudioInputService {
 
     try {
       _listenToEventChannel();
+      _listenToWorker();
+      await DemodWorker.instance.micReset();
       await _methodChannel.invokeMethod('start');
       _isListening = true;
       _statusController.add("监听中");
@@ -344,6 +355,7 @@ class AudioInputService {
 
     try {
       await _methodChannel.invokeMethod('stop');
+      await DemodWorker.instance.micReset();
       _isListening = false;
       _lastReceivedTime = null;
       _state.reset();
@@ -358,6 +370,7 @@ class AudioInputService {
 
   void dispose() {
     _eventChannelSubscription?.cancel();
+    _workerSubscription?.cancel();
     _statusController.close();
     _dataController.close();
     _connectionController.close();

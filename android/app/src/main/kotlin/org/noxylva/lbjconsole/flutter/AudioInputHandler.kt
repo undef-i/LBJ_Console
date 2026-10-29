@@ -14,20 +14,21 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.EventChannel
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
-import java.nio.charset.Charset
 
 class AudioInputHandler(private val context: Context) : MethodChannel.MethodCallHandler, EventChannel.StreamHandler {
     private var audioRecord: AudioRecord? = null
     private val isRecording = AtomicBoolean(false)
     private var recordingThread: Thread? = null
-    private var processThread: Thread? = null
+    private var forwardThread: Thread? = null
     private val chunkQueue = ArrayBlockingQueue<ShortArray>(16)
     private val droppedChunks = AtomicLong(0)
-    
+
     private val sampleRate = 48000
     private val bufferSize = AudioRecord.getMinBufferSize(
         sampleRate,
@@ -37,17 +38,11 @@ class AudioInputHandler(private val context: Context) : MethodChannel.MethodCall
 
     private val handler = Handler(Looper.getMainLooper())
     private var eventSink: EventChannel.EventSink? = null
-    private var lastRecordingState: Boolean? = null
-    private val messageRegex = "\\[MSG\\]\\s*(\\d+)\\|(-?\\d+)\\|(.*)".toRegex()
 
     companion object {
         private const val METHOD_CHANNEL = "org.noxylva.lbjconsole/audio_input"
         private const val EVENT_CHANNEL = "org.noxylva.lbjconsole/audio_input_event"
         private const val TAG = "AudioInputHandler"
-
-        init {
-            System.loadLibrary("railwaypagerdemod")
-        }
 
         fun registerWith(flutterEngine: FlutterEngine, context: Context) {
             val handler = AudioInputHandler(context)
@@ -58,15 +53,9 @@ class AudioInputHandler(private val context: Context) : MethodChannel.MethodCall
         }
     }
 
-    private external fun nativePushAudio(data: ShortArray, size: Int)
-    private external fun pollMessages(): ByteArray
-    private external fun clearMessageBuffer()
-    private external fun getAudioSpectrum(): FloatArray
-
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
             "start" -> {
-                clearMessageBuffer()
                 if (startRecording()) {
                     result.success(null)
                 } else {
@@ -75,70 +64,31 @@ class AudioInputHandler(private val context: Context) : MethodChannel.MethodCall
             }
             "stop" -> {
                 stopRecording()
-                clearMessageBuffer()
                 result.success(null)
-            }
-            "getSpectrum" -> {
-                try {
-                    val spectrum = getAudioSpectrum()
-                    result.success(spectrum.toList())
-                } catch (e: Exception) {
-                    result.error("FFT_ERROR", "Failed to get spectrum", e.message)
-                }
             }
             else -> result.notImplemented()
         }
     }
 
     override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
-        Log.d(TAG, "EventChannel onListen")
         this.eventSink = events
-        lastRecordingState = null
-        startPolling()
+        val statusMap = mutableMapOf<String, Any?>()
+        statusMap["listening"] = isRecording.get()
+        events?.success(statusMap)
     }
 
     override fun onCancel(arguments: Any?) {
-        Log.d(TAG, "EventChannel onCancel")
-        handler.removeCallbacksAndMessages(null)
         this.eventSink = null
     }
 
-    private fun startPolling() {
-        handler.post(object : Runnable {
-            override fun run() {
-                if (eventSink == null) {
-                    return
-                }
-
-                val recording = isRecording.get()
-                val logsBytes = pollMessages()
-                val logs = if (logsBytes.isNotEmpty()) String(logsBytes, Charsets.ISO_8859_1) else ""
-
-                if (lastRecordingState != recording) {
-                    val statusMap = mutableMapOf<String, Any?>()
-                    statusMap["listening"] = recording
-                    eventSink?.success(statusMap)
-                    lastRecordingState = recording
-                }
-
-                if (logs.isNotEmpty()) {
-                    messageRegex.findAll(logs).forEach { match ->
-                        try {
-                            val dataMap = mutableMapOf<String, Any?>()
-                            dataMap["address"] = match.groupValues[1]
-                            dataMap["func"] = match.groupValues[2]
-                            dataMap["numeric"] = match.groupValues[3]
-
-                            eventSink?.success(dataMap)
-                        } catch (e: Exception) {
-                            Log.e(TAG, "decode_fail", e)
-                        }
-                    }
-                }
-
-                handler.postDelayed(this, 200)
-            }
-        })
+    private fun sendListeningState() {
+        val recording = isRecording.get()
+        handler.post {
+            val sink = eventSink ?: return@post
+            val statusMap = mutableMapOf<String, Any?>()
+            statusMap["listening"] = recording
+            sink.success(statusMap)
+        }
     }
 
     private fun startRecording(): Boolean {
@@ -155,7 +105,7 @@ class AudioInputHandler(private val context: Context) : MethodChannel.MethodCall
 
         try {
             val audioSource = MediaRecorder.AudioSource.UNPROCESSED
-            
+
             audioRecord = AudioRecord(
                 audioSource,
                 sampleRate,
@@ -173,6 +123,7 @@ class AudioInputHandler(private val context: Context) : MethodChannel.MethodCall
             isRecording.set(true)
             chunkQueue.clear()
             droppedChunks.set(0)
+            sendListeningState()
 
             recordingThread = Thread {
                 val buffer = ShortArray(bufferSize)
@@ -191,6 +142,7 @@ class AudioInputHandler(private val context: Context) : MethodChannel.MethodCall
                         readSize < 0 -> {
                             Log.e(TAG, "AudioRecord read error: $readSize")
                             isRecording.set(false)
+                            handler.post { stopRecording() }
                         }
                     }
                 }
@@ -198,17 +150,21 @@ class AudioInputHandler(private val context: Context) : MethodChannel.MethodCall
             recordingThread?.priority = Thread.MAX_PRIORITY
             recordingThread?.start()
 
-            processThread = Thread {
+            forwardThread = Thread {
                 while (isRecording.get() || chunkQueue.isNotEmpty()) {
                     val chunk = try {
                         chunkQueue.poll(100, TimeUnit.MILLISECONDS)
                     } catch (e: InterruptedException) {
                         null
                     } ?: continue
-                    nativePushAudio(chunk, chunk.size)
+                    val bytes = ByteArray(chunk.size * 2)
+                    ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer().put(chunk)
+                    handler.post {
+                        eventSink?.success(bytes)
+                    }
                 }
             }
-            processThread?.start()
+            forwardThread?.start()
             return true
         } catch (e: Exception) {
             Log.e(TAG, "Start recording exception", e)
@@ -228,7 +184,7 @@ class AudioInputHandler(private val context: Context) : MethodChannel.MethodCall
         }
         try {
             recordingThread?.join(1000)
-            processThread?.join(1000)
+            forwardThread?.join(1000)
         } catch (e: InterruptedException) {
             e.printStackTrace()
         }
@@ -240,7 +196,8 @@ class AudioInputHandler(private val context: Context) : MethodChannel.MethodCall
         }
         audioRecord = null
         recordingThread = null
-        processThread = null
+        forwardThread = null
         chunkQueue.clear()
+        sendListeningState()
     }
 }

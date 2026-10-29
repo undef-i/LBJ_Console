@@ -40,6 +40,8 @@ class HistoryScreenState extends State<HistoryScreen> {
   bool _isEditMode = false;
   final Set<String> _selectedRecords = {};
   final Map<String, bool> _expandedStates = {};
+  final Map<String, (String, Brightness, GroupBy, Widget)> _subItemsCache =
+      {};
   late final ScrollController _scrollController;
   bool _isAtTop = true;
   final GlobalKey _listViewportKey = GlobalKey();
@@ -481,6 +483,7 @@ class HistoryScreenState extends State<HistoryScreen> {
               ..clear()
               ..addAll(items);
             _restoreExpandedStates(expandedRecordIdGroups);
+            _pruneSubItemsCache();
             if (!shouldRevealAfterJump) {
               _isLoading = false;
             }
@@ -552,6 +555,7 @@ class HistoryScreenState extends State<HistoryScreen> {
             ..clear()
             ..addAll(mergedItems);
           _restoreExpandedStates(expandedRecordIdGroups);
+          _pruneSubItemsCache();
 
           _selectedRecords.clear();
           for (final item in _displayItems) {
@@ -739,18 +743,48 @@ class HistoryScreenState extends State<HistoryScreen> {
               mergedRecord.records, mergedRecord.groupKey),
         ),
         const SizedBox(height: 12),
+        _mergedSubItems(mergedRecord),
+      ],
+    );
+  }
+
+  Widget _mergedSubItems(MergedTrainRecord mergedRecord) {
+    final fingerprint = mergedRecord.records.map((r) => r.uniqueId).join('_');
+    final brightness = Theme.of(context).brightness;
+    final groupBy = _mergeSettings.groupBy;
+    final hit = _subItemsCache[mergedRecord.groupKey];
+    if (hit != null &&
+        hit.$1 == fingerprint &&
+        hit.$2 == brightness &&
+        hit.$3 == groupBy) {
+      return hit.$4;
+    }
+    final built = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
         ...mergedRecord.records.map(
           (record) => RepaintBoundary(
             key: _subKeyFor('sub:${record.uniqueId}'),
             child: _buildSubRecordItem(
               record,
               mergedRecord.latestRecord,
-              _mergeSettings.groupBy,
+              groupBy,
             ),
           ),
         ),
       ],
     );
+    _subItemsCache[mergedRecord.groupKey] =
+        (fingerprint, brightness, groupBy, built);
+    return built;
+  }
+
+  void _pruneSubItemsCache() {
+    final live = <String>{
+      for (final item in _displayItems)
+        if (item is MergedTrainRecord) item.groupKey,
+    };
+    _subItemsCache.removeWhere((key, _) => !live.contains(key));
   }
 
   Widget _buildSubRecordItem(

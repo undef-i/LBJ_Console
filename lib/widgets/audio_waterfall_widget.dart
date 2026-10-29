@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:lbjconsole/services/audio_input_service.dart';
 
 class _WaterfallCache {
   static final _WaterfallCache instance = _WaterfallCache._();
@@ -64,7 +64,7 @@ class AudioWaterfallWidget extends StatefulWidget {
 }
 
 class _AudioWaterfallWidgetState extends State<AudioWaterfallWidget> {
-  static const platform = MethodChannel('org.noxylva.lbjconsole/audio_input');
+
 
   final _cache = _WaterfallCache.instance;
   ui.Image? _waterfallImage;
@@ -91,9 +91,9 @@ class _AudioWaterfallWidgetState extends State<AudioWaterfallWidget> {
     _updateTimer =
         Timer.periodic(const Duration(milliseconds: 50), (timer) async {
       try {
-        final result = await platform.invokeMethod('getSpectrum');
-        if (result != null && result is List && mounted) {
-          final fftData = result.cast<double>();
+        final result = await AudioInputService().getSpectrum();
+        if (result.isNotEmpty && mounted) {
+          final fftData = result;
 
           final pixels = _cache.pixels!;
           pixels.setRange(
