@@ -507,7 +507,7 @@ class _MapScreenState extends State<MapScreen> {
                 child: const SizedBox.expand(),
               ),
             ),
-            Container(
+            SizedBox(
               width: double.infinity,
               child: Padding(
             padding: const EdgeInsets.all(24),
@@ -771,7 +771,7 @@ class _MapScreenState extends State<MapScreen> {
                     valueColor:
                         AlwaysStoppedAnimation<Color>(Theme.of(context).colorScheme.onSurface),
                   ),
-                  SizedBox(height: 16),
+                  const SizedBox(height: 16),
                   Text(
                     '正在加载地图位置...',
                     style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 16),

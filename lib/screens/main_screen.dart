@@ -687,7 +687,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
   Widget _glassPill(List<Widget> children) {
     final colorScheme = Theme.of(context).colorScheme;
-    final clipper = ShapeBorderClipper(shape: AppShape.full);
+    const clipper = ShapeBorderClipper(shape: AppShape.full);
     final inner = ClipPath(
       clipper: clipper,
       child: Padding(

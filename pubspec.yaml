@@ -31,30 +31,24 @@ dependencies:
   flutter:
     sdk: flutter
 
-  cupertino_icons: ^1.0.8
   material_ui: ^1.5.0
   flutter_blue_plus: ^1.31.15
   permission_handler: ^11.3.1
-  shared_preferences: ^2.3.2
 
   path: ^1.9.0
   path_provider: ^2.1.4
-  intl: ^0.20.3
   flutter_local_notifications: ^17.2.2
   latlong2: ^0.9.1
   flutter_map: ^8.2.1
   maplibre: ^0.3.7
   geolocator: ^13.0.4
-  geolocator_android: 4.6.1
   
   url_launcher: ^6.2.5
   sqflite: ^2.3.3+1
   share_plus: ^10.0.0
   file_picker: ^8.1.2
   package_info_plus: ^8.1.2
-  msix: ^3.16.12
   flutter_background_service: ^5.1.0
-  scrollview_observer: ^1.20.0
   gbk_codec: ^0.4.0
 
 dev_dependencies:
@@ -85,7 +79,6 @@ flutter:
   assets:
     - assets/loco_info.csv
     - assets/train_number_info.csv
-    - assets/loco_type_info.csv
 
   shaders:
     - shaders/liquid_glass.frag
@@ -123,11 +116,3 @@ flutter_launcher_icons:
   adaptive_icon_background: "#000000"
   adaptive_icon_foreground: "assets/icon.png"
 
-msix_config:
-  display_name: LBJ Console
-  publisher_display_name: Noxylva
-  identity_name: LBJConsole
-  publisher: CN=noxylva, O=noxylva.org, C=US
-  logo_path: assets/icon.png
-  capabilities: bluetooth,internetClient,location
-  certificate_path: keystore.jks

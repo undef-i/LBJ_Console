@@ -46,30 +46,7 @@ Future<String?> _build({required bool orm, required bool dark}) async {
   final combined = _combineStyles(base, style, rewrite.spriteUpstreams);
   combined.remove('state');
   await _mergePmtilesSources(combined);
-  _registerLayerKeepSets(combined);
   return jsonEncode(combined);
-}
-
-void _registerLayerKeepSets(Map<String, dynamic> style) {
-  final layers = style['layers'];
-  if (layers is! List) return;
-  final keepSets = <int, Set<String>>{
-    for (var z = 0; z <= 22; z++) z: <String>{},
-  };
-  for (final raw in layers) {
-    if (raw is! Map) continue;
-    if (raw['source'] != 'orm') continue;
-    final sourceLayer = raw['source-layer'];
-    if (sourceLayer is! String) continue;
-    final layout = raw['layout'];
-    if (layout is Map && layout['visibility'] == 'none') continue;
-    final minZoom = (raw['minzoom'] as num?)?.toDouble() ?? 0;
-    final maxZoom = (raw['maxzoom'] as num?)?.toDouble() ?? 24;
-    for (var z = 0; z <= 22; z++) {
-      if (minZoom < z + 1 && maxZoom > z) keepSets[z]!.add(sourceLayer);
-    }
-  }
-  PmtilesArchive.layerKeepSets = keepSets;
 }
 
 Future<void> _mergePmtilesSources(Map<String, dynamic> style) async {

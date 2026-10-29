@@ -22,7 +22,7 @@ class MapEngineStore extends ValueNotifier<MapEngine> {
   }
 }
 
-class _RasterState {
+class RasterState {
   List<List<LatLng>> lines = const [];
   List<MapChip> chips = const [];
   List<MapDot> dots = const [];
@@ -36,7 +36,7 @@ class _RasterState {
 class AppMapController {
   final NativeMapController native = NativeMapController();
   final NativeMapState nativeState = NativeMapState();
-  final _RasterState raster = _RasterState();
+  final RasterState raster = RasterState();
 
   MapController? _rasterMap;
   bool _rasterReady = false;

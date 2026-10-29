@@ -16,8 +16,8 @@ LiquidGlassStyle glassRegularStyle(ColorScheme colorScheme) {
       hairlineSide: 0.75,
     );
   }
-  return LiquidGlassStyle(
-    tint: const Color(0x8AFDFDFD),
+  return const LiquidGlassStyle(
+    tint: Color(0x8AFDFDFD),
     contrast: 0.4,
     saturation: 2.08,
     rim: 0.28,

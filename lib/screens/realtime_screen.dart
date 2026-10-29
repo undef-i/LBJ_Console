@@ -715,8 +715,8 @@ class RealtimeScreenState extends State<RealtimeScreen> {
     if (_displayItems.isEmpty) {
       return Center(
           child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-        Icon(Icons.history, size: 64, color: Colors.grey),
-        SizedBox(height: 16),
+        const Icon(Icons.history, size: 64, color: Colors.grey),
+        const SizedBox(height: 16),
         Text('暂无记录', style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 18))
       ]));
     }
@@ -775,10 +775,9 @@ class RealtimeScreenState extends State<RealtimeScreen> {
               _ViewportAnchorRestorer(
                 onAfterLayout: _applyPendingRenderViewportAnchorCorrection,
                 child: ListView.builder(
-                  key: _listViewportKey,
+                  scrollCacheExtent: const ScrollCacheExtent.pixels(800), key: _listViewportKey,
                   controller: _scrollController,
                   padding: const EdgeInsets.fromLTRB(16.0, 16.0, 16.0, 118.0),
-                  cacheExtent: 800,
                   itemCount: _displayItems.length,
                   itemBuilder: (context, index) {
                     final item = _displayItems[index];

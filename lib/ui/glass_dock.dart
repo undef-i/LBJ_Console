@@ -7,8 +7,6 @@ import 'package:flutter/physics.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
-import 'package:material_color_utilities/material_color_utilities.dart'
-    show Hct;
 
 import 'glass_fallback.dart';
 import 'liquid_glass.dart';
@@ -72,11 +70,6 @@ final _jellySpring = SpringDescription.withDampingRatio(
   stiffness: 100,
   ratio: 0.4,
 );
-final _settleSpring = SpringDescription.withDurationAndBounce(
-  duration: const Duration(milliseconds: 500),
-  bounce: 0.32,
-);
-
 double _rubberBand(double overshoot, double limit) {
   final pull = 1 - 1 / (overshoot.abs() * 0.55 / limit + 1);
   return limit * pull * overshoot.sign;
@@ -433,21 +426,14 @@ class _RenderHitSlop extends RenderProxyBox {
 }
 
 class _PressTransform extends SingleChildRenderObjectWidget {
-  const _PressTransform({
-    required this.lift,
-    required this.pull,
-    this.maxGrowth = _maxPressGrowth,
-    super.child,
-  });
+  const _PressTransform({required this.lift, required this.pull, super.child});
 
   final double lift;
   final Offset pull;
-  final double maxGrowth;
 
   @override
   RenderObject createRenderObject(BuildContext context) {
-    return _RenderPressTransform(lift: lift, pull: pull)
-      ..maxGrowth = maxGrowth;
+    return _RenderPressTransform(lift: lift, pull: pull);
   }
 
   @override
@@ -457,8 +443,7 @@ class _PressTransform extends SingleChildRenderObjectWidget {
   ) {
     renderObject
       ..lift = lift
-      ..pull = pull
-      ..maxGrowth = maxGrowth;
+      ..pull = pull;
   }
 }
 
@@ -469,7 +454,6 @@ class _RenderPressTransform extends RenderProxyBox {
 
   double _lift;
   Offset _pull;
-  double maxGrowth = _maxPressGrowth;
 
   set lift(double value) {
     if (value == _lift) {
@@ -490,7 +474,8 @@ class _RenderPressTransform extends RenderProxyBox {
   Matrix4 get _transform {
     final panel = Offset.zero & size;
     final swell =
-        1 + _lift * math.min(_pressGrowth * 2, maxGrowth / panel.longestSide);
+        1 +
+            _lift * math.min(_pressGrowth * 2, _maxPressGrowth / panel.longestSide);
     final scaleX = swell * (1 + _pull.dx.abs() / panel.width * _pullStretch);
     final scaleY = swell * (1 + _pull.dy.abs() / panel.height * _pullStretch);
     final center = panel.center;
@@ -958,9 +943,9 @@ class _Lens extends StatelessWidget {
       width: rect.width,
       height: rect.height,
       child: translucent
-          ? FallbackGlass(
+          ? const FallbackGlass(
               shape: AppShape.full,
-              child: const SizedBox.expand(),
+              child: SizedBox.expand(),
             )
           : DecoratedBox(
               decoration: ShapeDecoration(

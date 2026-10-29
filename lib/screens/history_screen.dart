@@ -616,8 +616,8 @@ class HistoryScreenState extends State<HistoryScreen> {
     if (_displayItems.isEmpty) {
       return Center(
           child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-        Icon(Icons.history, size: 64, color: Colors.grey),
-        SizedBox(height: 16),
+        const Icon(Icons.history, size: 64, color: Colors.grey),
+        const SizedBox(height: 16),
         Text('暂无记录', style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 18))
       ]));
     }
@@ -651,11 +651,10 @@ class HistoryScreenState extends State<HistoryScreen> {
       child: _ViewportAnchorRestorer(
         onAfterLayout: _applyPendingRenderViewportAnchorCorrection,
         child: ListView.builder(
-        key: _listViewportKey,
+        scrollCacheExtent: const ScrollCacheExtent.pixels(800), key: _listViewportKey,
         controller: _scrollController,
         padding: EdgeInsets.fromLTRB(
             16.0, MediaQuery.paddingOf(context).top + 80, 16.0, 118.0),
-        cacheExtent: 800,
         itemCount: _displayItems.length,
         itemBuilder: (context, index) {
           final item = _displayItems[index];
@@ -927,7 +926,7 @@ class HistoryScreenState extends State<HistoryScreen> {
     if (!_mapOptimalZoom.containsKey(mapId)) {
       return Column(
         children: [
-          SizedBox(height: 8),
+          const SizedBox(height: 8),
           SizedBox(
             height: 228,
             child: Center(

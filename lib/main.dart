@@ -5,7 +5,6 @@ import 'package:lbjconsole/themes/app_theme.dart';
 import 'package:lbjconsole/ui/liquid_glass.dart';
 import 'package:lbjconsole/util/train_type_util.dart';
 import 'package:lbjconsole/util/loco_info_util.dart';
-import 'package:lbjconsole/services/loco_type_service.dart';
 import 'package:lbjconsole/services/background_service.dart';
 
 void main() async {
@@ -18,7 +17,6 @@ void main() async {
   await Future.wait([
     TrainTypeUtil.initialize(),
     LocoInfoUtil.initialize(),
-    LocoTypeService().initialize(),
   ]);
 
   runApp(const LBJReceiverApp());

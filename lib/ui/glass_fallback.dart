@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
 
-import 'shape.dart';
-
 /// Geometry-only glass for what floats over a platform view (the
 /// map). The capture glass cannot see a platform view: its backdrop
 /// replay paints the page background and nothing of the map, so a

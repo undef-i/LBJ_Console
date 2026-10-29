@@ -1,10 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:isolate';
 import 'dart:typed_data';
 
-import 'mvt_simplify.dart';
 import 'orm_style.dart';
 
 final _archiveUrl = ormPMTilesURL.substring('pmtiles://'.length);
@@ -120,8 +118,9 @@ Uint8List _gunzip(Uint8List data, int compression) {
 class _EtagChanged implements Exception {}
 
 class PmtilesArchive {
-  static Map<int, Set<String>>? layerKeepSets;
+  PmtilesArchive([String? archiveUrl]) : _url = archiveUrl ?? _archiveUrl;
 
+  final String _url;
   final _client = HttpClient();
   Future<void>? _loading;
   String? _etag;
@@ -154,7 +153,6 @@ class PmtilesArchive {
 
   static const _tileCacheMaxEntries = 1024;
   static const _tileCacheMaxBytes = 32 * 1024 * 1024;
-  static const _simplifyThreshold = 1024 * 1024;
   static const _directoryCacheMaxEntries = 128;
 
   String? get etag => _etag;
@@ -221,8 +219,16 @@ class PmtilesArchive {
   Future<({Uint8List bytes, String? etag})> _rangeOnce(
     int offset,
     int length,
+  ) {
+    return _rangeOnceInner(offset, length)
+        .timeout(const Duration(seconds: 15));
+  }
+
+  Future<({Uint8List bytes, String? etag})> _rangeOnceInner(
+    int offset,
+    int length,
   ) async {
-    final request = await _client.getUrl(Uri.parse(_archiveUrl));
+    final request = await _client.getUrl(Uri.parse(_url));
     request.headers.set(
       'User-Agent',
       'emu-log/1.0 (+https://rail.nedifinita.com/)',
@@ -323,16 +329,6 @@ class PmtilesArchive {
     } on _EtagChanged {
       _invalidate();
       result = await _tileAttempt(z, x, y);
-    }
-    if (result != null) {
-      final keep = layerKeepSets?[z];
-      if (keep != null) {
-        result = stripVectorTileLayers(result, keep);
-      }
-      if (result.length > _simplifyThreshold) {
-        final raw = result;
-        result = await Isolate.run(() => simplifyVectorTile(raw));
-      }
     }
     _storeTile(tileId, result);
     return result;
@@ -489,7 +485,9 @@ class PmtilesTileServer {
         _logRequest(request.uri.path, 304, stopwatch.elapsedMilliseconds);
         return;
       }
-      final tile = await archive.tile(z, x, y);
+      final tile = await archive
+          .tile(z, x, y)
+          .timeout(const Duration(seconds: 10));
       if (tile == null) {
         response.statusCode = HttpStatus.noContent;
         await response.close();
