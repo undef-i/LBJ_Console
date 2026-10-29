@@ -6,7 +6,6 @@ import 'orm_style.dart';
 import 'pmtiles_local.dart';
 
 const _libertyStyleUrl = 'https://tiles.openfreemap.org/styles/liberty';
-const _ormStyleUrl = 'https://openrailwaymap.app/style.json';
 
 final _styleCache = <String, Future<String?>>{};
 
@@ -19,10 +18,18 @@ Future<String?> _build({required bool orm, required bool dark}) async {
   final base = await _getJson(Uri.parse(_libertyStyleUrl));
   if (base == null) return null;
   if (!orm) return jsonEncode(base);
-  final rawOrm = await _getJson(Uri.parse(_ormStyleUrl));
+  final rawOrm = await _getJson(Uri.parse(ormStyleURL));
   if (rawOrm == null) return jsonEncode(base);
-  final rewrite = rewriteORMStyle(rawOrm);
-  final style = rewrite.style;
+  final style = rawOrm;
+  final sprite = style['sprite'];
+  final spriteUpstreams = <String, String>{
+    if (sprite is String)
+      'orm': sprite
+    else if (sprite is List)
+      for (final entry in sprite)
+        if (entry is Map && entry['id'] is String && entry['url'] is String)
+          entry['id'] as String: entry['url'] as String,
+  };
   final defaults = _stateDefaults(rawOrm, dark);
   final layers = style['layers'];
   if (layers is List) {
@@ -43,7 +50,7 @@ Future<String?> _build({required bool orm, required bool dark}) async {
     }
     style['layers'] = kept;
   }
-  final combined = _combineStyles(base, style, rewrite.spriteUpstreams);
+  final combined = _combineStyles(base, style, spriteUpstreams);
   combined.remove('state');
   await _mergePmtilesSources(combined);
   return jsonEncode(combined);
