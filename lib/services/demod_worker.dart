@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:isolate';
 import 'dart:typed_data';
 
+import '../util/app_log.dart';
 import 'pocsag_demod.dart';
 
 class DemodEvent {
@@ -17,19 +18,23 @@ class DemodEvent {
 void _workerMain(SendPort mainPort) {
   final mic = MicDemod();
   final fft = AudioFft(4096);
+  final iqFft = IqFft(4096);
   final rtl = RtlDemod();
   Socket? socket;
   StreamSubscription<Uint8List>? socketSub;
   var connected = false;
   var connecting = false;
   var generation = 0;
+  var bytesIn = 0;
 
   final port = ReceivePort();
   mainPort.send(port.sendPort);
 
   void sendStatus() {
-    mainPort.send(['rtlStatus', connected, rtl.magsqRaw]);
+    mainPort.send(['rtlStatus', connected, rtl.magsqRaw, bytesIn]);
   }
+
+  Timer.periodic(const Duration(seconds: 2), (_) => sendStatus());
 
   Future<void> teardownSocket() async {
     await socketSub?.cancel();
@@ -39,6 +44,7 @@ void _workerMain(SendPort mainPort) {
   }
 
   port.listen((dynamic raw) async {
+    try {
     final msg = raw as List;
     switch (msg[0] as String) {
       case 'micReset':
@@ -55,15 +61,18 @@ void _workerMain(SendPort mainPort) {
         mic.messages.clear();
         break;
       case 'spectrum':
-        (msg[1] as SendPort).send(fft.spectrum500());
+        (msg[1] as SendPort)
+            .send(connected ? iqFft.spectrum500() : fft.spectrum500());
         break;
       case 'rtlConnect':
         if (connected || connecting) return;
+        mainPort.send(['rtlDiag', '正在建立数据连接']);
         connecting = true;
         final gen = ++generation;
         final host = msg[1] as String;
         final portNum = int.tryParse(msg[2] as String) ?? 0;
         rtl.reset();
+        iqFft.reset();
         try {
           final s = await Socket.connect(
             host,
@@ -75,10 +84,12 @@ void _workerMain(SendPort mainPort) {
             return;
           }
           socket = s;
+          mainPort.send(['rtlDiag', '数据连接已建立']);
           var header = <int>[];
           var headerDone = false;
           socketSub = s.listen(
             (chunk) {
+              try {
               var data = chunk;
               if (!headerDone) {
                 header.addAll(chunk);
@@ -87,6 +98,10 @@ void _workerMain(SendPort mainPort) {
                     header[1] != 0x54 ||
                     header[2] != 0x4C ||
                     header[3] != 0x30) {
+                  mainPort.send([
+                    'rtlDiag',
+                    '数据头不正确：${header.take(4).map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}'
+                  ]);
                   teardownSocket();
                   connected = false;
                   connecting = false;
@@ -106,10 +121,13 @@ void _workerMain(SendPort mainPort) {
                 s.add(cmds.buffer.asUint8List());
                 connected = true;
                 connecting = false;
+                mainPort.send(['rtlDiag', '数据头校验通过']);
                 sendStatus();
                 if (rest.isEmpty) return;
                 data = Uint8List.fromList(rest);
               }
+              bytesIn += data.length;
+              iqFft.pushBytes(data);
               rtl.pushBytes(data);
               for (final m in rtl.messages) {
                 mainPort.send([
@@ -122,6 +140,13 @@ void _workerMain(SendPort mainPort) {
                 ]);
               }
               rtl.messages.clear();
+              } catch (e) {
+                mainPort.send(['rtlDiag', '处理数据出错：$e']);
+                teardownSocket();
+                connected = false;
+                connecting = false;
+                sendStatus();
+              }
             },
             onDone: () {
               if (!identical(socket, s)) return;
@@ -129,6 +154,7 @@ void _workerMain(SendPort mainPort) {
               connecting = false;
               socket = null;
               socketSub = null;
+              mainPort.send(['rtlDiag', '数据连接已断开']);
               sendStatus();
             },
             onError: (Object e) {
@@ -137,6 +163,7 @@ void _workerMain(SendPort mainPort) {
               connecting = false;
               socket = null;
               socketSub = null;
+              mainPort.send(['rtlDiag', '数据连接出错：$e']);
               sendStatus();
             },
           );
@@ -144,6 +171,7 @@ void _workerMain(SendPort mainPort) {
           if (gen == generation) {
             connecting = false;
             connected = false;
+            mainPort.send(['rtlDiag', '数据连接失败：$e']);
             sendStatus();
           }
         }
@@ -158,6 +186,9 @@ void _workerMain(SendPort mainPort) {
         }
         break;
     }
+    } catch (e) {
+      mainPort.send(['rtlDiag', '数据处理出错：$e']);
+    }
   });
 }
 
@@ -169,10 +200,16 @@ class DemodWorker {
   Future<void>? _starting;
   ReceivePort? _lifecycle;
   final _events = StreamController<DemodEvent>.broadcast();
-  final _rtlStatus = StreamController<(bool, double)>.broadcast();
+  final _rtlStatus = StreamController<(bool, double, int)>.broadcast();
+  final _diag = StreamController<String>.broadcast();
 
   Stream<DemodEvent> get events => _events.stream;
-  Stream<(bool, double)> get rtlStatus => _rtlStatus.stream;
+  Stream<(bool, double, int)> get rtlStatus => _rtlStatus.stream;
+  Stream<String> get diagStream => _diag.stream;
+
+  void reportDiag(String message) {
+    _diag.add(message);
+  }
 
   Future<void> ensureStarted() {
     if (_port != null) return Future.value();
@@ -181,22 +218,38 @@ class DemodWorker {
     });
   }
 
-  Future<void> _start() async {
-    final receive = ReceivePort();
-    final lifecycle = _lifecycle ??= ReceivePort();
-    lifecycle.listen((dynamic _) {
+  void _ensureLifecycle() {
+    if (_lifecycle != null) return;
+    final lifecycle = ReceivePort();
+    _lifecycle = lifecycle;
+    lifecycle.listen((dynamic msg) {
+      if (msg is List) {
+        AppLog.error('demod', 'worker error: ${msg.first}');
+        _diag.add('数据处理出错：${msg.first}');
+      }
       _port = null;
       _starting = null;
     });
-    await Isolate.spawn(
-      _workerMain,
-      receive.sendPort,
-      onError: lifecycle.sendPort,
-      onExit: lifecycle.sendPort,
-    );
+  }
+
+  Future<void> _start() async {
+    _ensureLifecycle();
+    final receive = ReceivePort();
+    try {
+      await Isolate.spawn(
+        _workerMain,
+        receive.sendPort,
+        onError: _lifecycle!.sendPort,
+        onExit: _lifecycle!.sendPort,
+      );
+    } catch (e) {
+      _diag.add('数据处理启动失败：$e');
+      rethrow;
+    }
     final completer = Completer<SendPort>();
     receive.listen((dynamic msg) {
       if (msg is SendPort) {
+        _diag.add('数据处理已启动');
         if (!completer.isCompleted) completer.complete(msg);
         return;
       }
@@ -214,7 +267,15 @@ class DemodWorker {
           );
           break;
         case 'rtlStatus':
-          _rtlStatus.add((list[1] as bool, (list[2] as num).toDouble()));
+          _rtlStatus.add((
+            list[1] as bool,
+            (list[2] as num).toDouble(),
+            (list[3] as num).toInt(),
+          ));
+          break;
+        case 'rtlDiag':
+          AppLog.error('rtl-tcp', list[1] as String);
+          _diag.add(list[1] as String);
           break;
       }
     });

@@ -840,3 +840,137 @@ class AudioFft {
     return out;
   }
 }
+
+class IqFft {
+  IqFft(this.fftSize) {
+    _window = Float32List(fftSize);
+    _re = Float64List(fftSize);
+    _im = Float64List(fftSize);
+    _power = Float32List(fftSize);
+    var sum = 0.0;
+    for (var i = 0; i < fftSize; i++) {
+      _window[i] = 0.54 - 0.46 * math.cos(2.0 * math.pi * i / (fftSize - 1));
+      sum += _window[i];
+    }
+    _dbOffset = 20.0 * (math.log(sum) / math.ln10);
+    _twRe = Float64List(fftSize ~/ 2);
+    _twIm = Float64List(fftSize ~/ 2);
+    for (var k = 0; k < fftSize ~/ 2; k++) {
+      final angle = -2.0 * math.pi * k / fftSize;
+      _twRe[k] = math.cos(angle);
+      _twIm[k] = math.sin(angle);
+    }
+  }
+
+  final int fftSize;
+  late final Float32List _window;
+  late final Float64List _re;
+  late final Float64List _im;
+  late final Float32List _power;
+  late final Float64List _twRe;
+  late final Float64List _twIm;
+  var _dbOffset = 0.0;
+  var _bufferPos = 0;
+  int? _carry;
+
+  void reset() {
+    _bufferPos = 0;
+    _carry = null;
+    _power.fillRange(0, fftSize, 0.0);
+  }
+
+  void pushBytes(Uint8List bytes) {
+    var src = 0;
+    if (_carry != null && bytes.isNotEmpty) {
+      _pushSample(_carry!, bytes[0]);
+      _carry = null;
+      src = 1;
+    }
+    while (src + 1 < bytes.length) {
+      _pushSample(bytes[src], bytes[src + 1]);
+      src += 2;
+    }
+    if (src < bytes.length) {
+      _carry = bytes[src];
+    }
+  }
+
+  void _pushSample(int iByte, int qByte) {
+    _re[_bufferPos] = (iByte - 127.5) / 127.5;
+    _im[_bufferPos] = (qByte - 127.5) / 127.5;
+    _bufferPos++;
+    if (_bufferPos >= fftSize) {
+      _computeFft();
+      _bufferPos = 0;
+    }
+  }
+
+  void _computeFft() {
+    final n = fftSize;
+    final re = _re;
+    final im = _im;
+    final win = _window;
+    for (var i = 0; i < n; i++) {
+      re[i] *= win[i];
+      im[i] *= win[i];
+    }
+    var j = 0;
+    for (var i = 0; i < n - 1; i++) {
+      if (i < j) {
+        var t = re[i];
+        re[i] = re[j];
+        re[j] = t;
+        t = im[i];
+        im[i] = im[j];
+        im[j] = t;
+      }
+      var m = n >> 1;
+      while (m >= 1 && j >= m) {
+        j -= m;
+        m >>= 1;
+      }
+      j += m;
+    }
+    for (var len = 2; len <= n; len <<= 1) {
+      final half = len >> 1;
+      final stride = n ~/ len;
+      for (var base = 0; base < n; base += len) {
+        for (var k = 0; k < half; k++) {
+          final tw = k * stride;
+          final wr = _twRe[tw];
+          final wi = _twIm[tw];
+          final a = base + k;
+          final b = a + half;
+          final xr = re[b] * wr - im[b] * wi;
+          final xi = re[b] * wi + im[b] * wr;
+          re[b] = re[a] - xr;
+          im[b] = im[a] - xi;
+          re[a] += xr;
+          im[a] += xi;
+        }
+      }
+    }
+    for (var i = 0; i < n; i++) {
+      _power[i] = re[i] * re[i] + im[i] * im[i];
+    }
+  }
+
+  Float32List spectrum500() {
+    final out = Float32List(500);
+    final half = fftSize ~/ 2;
+    for (var i = 0; i < 500; i++) {
+      final begin = (i * fftSize) ~/ 500;
+      final end = ((i + 1) * fftSize) ~/ 500;
+      var peak = 0.0;
+      for (var j = begin; j < end; j++) {
+        final p = _power[(j + half) % fftSize];
+        if (p > peak) peak = p;
+      }
+      if (peak < 1e-20) peak = 1e-20;
+      final dbfs = 10.0 * (math.log(peak) / math.ln10) - _dbOffset;
+      final normalized = (dbfs + 80.0) / 80.0;
+      out[i] = normalized < 0.0 ? 0.0 : (normalized > 1.0 ? 1.0 : normalized);
+    }
+    return out;
+  }
+}

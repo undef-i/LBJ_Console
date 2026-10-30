@@ -226,6 +226,8 @@ class RtlTcpService {
   StreamSubscription? _workerStatusSubscription;
   final _LbJState _state = _LbJState();
   Timer? _reconnectTimer;
+  DateTime? lastStatusAt;
+  int lastBytesIn = 0;
   String _lastHost = '127.0.0.1';
   String _lastPort = '14423';
   static const Duration _reconnectInterval = Duration(seconds: 2);
@@ -338,6 +340,8 @@ class RtlTcpService {
     });
     _workerStatusSubscription ??=
         DemodWorker.instance.rtlStatus.listen((status) {
+      lastStatusAt = DateTime.now();
+      lastBytesIn = status.$3;
       final connected = status.$1;
       if (_isConnected != connected) {
         _updateConnectionState(connected, connected ? "已连接" : "已断开");
@@ -346,8 +350,12 @@ class RtlTcpService {
   }
 
   Future<void> _internalConnect() async {
-    _listenToWorker();
-    await DemodWorker.instance.rtlConnect(_lastHost, _lastPort);
+    try {
+      _listenToWorker();
+      await DemodWorker.instance.rtlConnect(_lastHost, _lastPort);
+    } catch (e) {
+      DemodWorker.instance.reportDiag('数据连接启动失败：$e');
+    }
   }
 
   Future<void> connect({String? host, String? port}) async {

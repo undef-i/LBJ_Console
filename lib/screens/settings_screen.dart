@@ -8,6 +8,7 @@ import 'package:lbjconsole/services/database_service.dart';
 import 'package:lbjconsole/services/background_service.dart';
 import 'package:lbjconsole/services/audio_input_service.dart';
 import 'package:lbjconsole/services/rtl_tcp_service.dart';
+import 'package:lbjconsole/services/embedded_usb_service.dart';
 import 'package:lbjconsole/themes/app_theme.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -64,6 +65,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   String _rtlTcpHost = '127.0.0.1';
   String _rtlTcpPort = '14423';
+  bool _debugMode = false;
   int _aboutIconTapCount = 0;
   Timer? _aboutIconTapTimer;
   late final Future<String> _appVersion;
@@ -97,6 +99,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
         _rtlTcpHost = settingsMap['rtlTcpHost']?.toString() ?? '127.0.0.1';
         _rtlTcpPort = settingsMap['rtlTcpPort']?.toString() ?? '14423';
+        _debugMode = (settingsMap['debugMode'] ?? 0) == 1;
         _rtlTcpHostController.text = _rtlTcpHost;
         _rtlTcpPortController.text = _rtlTcpPort;
 
@@ -139,6 +142,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _switchInputSource(InputSource newSource) async {
     await AudioInputService().stopListening();
+    await EmbeddedUsbService.instance.deactivate();
     await RtlTcpService().disconnect();
     setState(() {
       _inputSource = newSource;
@@ -150,6 +154,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
         break;
       case InputSource.rtlTcp:
         RtlTcpService().connect(host: _rtlTcpHost, port: _rtlTcpPort);
+        break;
+      case InputSource.usb:
+        await EmbeddedUsbService.instance.activate();
         break;
       case InputSource.bluetooth:
         break;
@@ -239,11 +246,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
               DropdownMenuItem(
                 value: InputSource.rtlTcp,
-                child: Text('RTL-TCP'),
+                child: Text('rtl_tcp'),
+              ),
+              DropdownMenuItem(
+                value: InputSource.usb,
+                child: Text('USB 设备'),
               ),
               DropdownMenuItem(
                 value: InputSource.audioInput,
-                child: Text('音频输入'),
+                child: Text('音频设备'),
               ),
             ],
             onChanged: (value) {
@@ -292,7 +303,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
             child: FlTonalButton(
-              label: '重新连接 RTL-TCP',
+              label: '重新连接 rtl_tcp',
               icon: Icons.refresh,
               height: 44,
               onPressed: () {
@@ -301,10 +312,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
         ],
-        if (_inputSource == InputSource.audioInput)
+        if (_inputSource == InputSource.usb)
           FlRow(
-            leading: Icon(Icons.mic, color: scheme.onSurfaceVariant),
-            title: const Text('音频解调已启用。请通过音频线 (Line-in) 或麦克风输入信号。'),
+            leading: Icon(Icons.usb, color: scheme.onSurfaceVariant),
+            title: const Text('支持 ADALM-PLUTO、RTL2832U。'),
             titleStyle: TextStyle(
               fontSize: 13,
               height: 18 / 13,
@@ -538,10 +549,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ? DateTime.fromMillisecondsSinceEpoch(ts).toString().substring(0, 19)
           : '';
       final desc = (info['description'] as String? ?? '').trim();
-      return [reason, when, if (desc.isNotEmpty) desc].join('\n');
+      final trace = (info['trace'] as String? ?? '').trim();
+      return [
+        reason,
+        when,
+        if (desc.isNotEmpty) desc,
+        if (trace.isNotEmpty)
+          trace.length > 3000 ? trace.substring(0, 3000) : trace,
+      ].join('\n');
     } catch (_) {
       return '读取失败';
     }
+  }
+
+  void _setDebugMode(bool value) {
+    setState(() {
+      _debugMode = value;
+    });
+    _databaseService.setSetting('debugMode', value ? 1 : 0);
   }
 
   void _showTemporaryRecordsPanel() {
@@ -554,6 +579,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       isDismissible: true,
       builder: (context) {
         bool enabled = widget.temporaryRecordsEnabled;
+        bool debug = _debugMode;
 
         return StatefulBuilder(
           builder: (context, setSheetState) {
@@ -581,6 +607,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             color: Theme.of(context).colorScheme.primary),
                         const SizedBox(width: 12),
                         const Text('调试', style: AppTheme.titleMedium),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('调试模式', style: AppTheme.bodyLarge),
+                              SizedBox(height: 2),
+                              Text('在连接弹窗中显示状态信息',
+                                  style: AppTheme.caption),
+                            ],
+                          ),
+                        ),
+                        GlassSwitch(
+                          value: debug,
+                          onChanged: (value) {
+                            setSheetState(() {
+                              debug = value;
+                            });
+                            _setDebugMode(value);
+                          },
+                        ),
                       ],
                     ),
                     const SizedBox(height: 16),

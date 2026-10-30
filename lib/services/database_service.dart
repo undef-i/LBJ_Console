@@ -8,7 +8,7 @@ import 'dart:convert';
 import 'package:lbjconsole/models/train_record.dart';
 import 'package:lbjconsole/util/app_log.dart';
 
-enum InputSource { bluetooth, rtlTcp, audioInput }
+enum InputSource { bluetooth, rtlTcp, audioInput, usb }
 
 class DatabaseService {
   static final DatabaseService instance = DatabaseService._internal();
@@ -16,7 +16,7 @@ class DatabaseService {
   DatabaseService._internal();
 
   static const String _databaseName = 'train_database';
-  static const _databaseVersion = 11;
+  static const _databaseVersion = 15;
 
   static const String trainRecordsTable = 'train_records';
   static const String appSettingsTable = 'app_settings';
@@ -132,6 +132,24 @@ class DatabaseService {
       await db.execute(
           'ALTER TABLE $appSettingsTable ADD COLUMN mapEngine TEXT NOT NULL DEFAULT "native"');
     }
+    if (oldVersion < 12) {
+      await db.execute(
+          'ALTER TABLE $appSettingsTable ADD COLUMN usbDeviceType TEXT NOT NULL DEFAULT "rtl"');
+      await db.execute(
+          'ALTER TABLE $appSettingsTable ADD COLUMN usbStarted INTEGER NOT NULL DEFAULT 1');
+    }
+    if (oldVersion < 13) {
+      await db.execute(
+          'ALTER TABLE $appSettingsTable DROP COLUMN usbDeviceType');
+    }
+    if (oldVersion < 14) {
+      await db.execute(
+          'ALTER TABLE $appSettingsTable DROP COLUMN usbStarted');
+    }
+    if (oldVersion < 15) {
+      await db.execute(
+          'ALTER TABLE $appSettingsTable ADD COLUMN debugMode INTEGER NOT NULL DEFAULT 0');
+    }
   }
 
   Future<void> _ensureIndexes(Database db) async {
@@ -194,7 +212,8 @@ class DatabaseService {
         rtlTcpHost TEXT NOT NULL DEFAULT '127.0.0.1',
         rtlTcpPort TEXT NOT NULL DEFAULT '14423',
         inputSource TEXT NOT NULL DEFAULT 'bluetooth',
-        mapEngine TEXT NOT NULL DEFAULT 'native'
+        mapEngine TEXT NOT NULL DEFAULT 'native',
+        debugMode INTEGER NOT NULL DEFAULT 0
       )
     ''');
 

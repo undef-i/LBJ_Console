@@ -14,6 +14,7 @@ import 'package:lbjconsole/services/database_service.dart';
 import 'package:lbjconsole/services/notification_service.dart';
 import 'package:lbjconsole/services/background_service.dart';
 import 'package:lbjconsole/services/rtl_tcp_service.dart';
+import 'package:lbjconsole/services/embedded_usb_service.dart';
 import 'package:lbjconsole/services/audio_input_service.dart';
 import 'package:lbjconsole/ui/glass_dock.dart';
 import 'package:lbjconsole/ui/glass_styles.dart';
@@ -85,6 +86,29 @@ class _ConnectionStatusWidgetState extends State<_ConnectionStatusWidget> {
 
   @override
   Widget build(BuildContext context) {
+    if (widget.inputSource == InputSource.usb) {
+      return ValueListenableBuilder<int>(
+        valueListenable: EmbeddedUsbService.instance.linkState,
+        builder: (context, link, _) {
+          final style = TextStyle(
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+            fontSize: 13,
+            fontWeight: FontWeight.w500,
+          );
+          if (link == 2) {
+            final t = widget.rtlTcpLastReceivedTime;
+            if (t != null) {
+              return _LastReceivedTimeWidget(
+                lastReceivedTime: t,
+                isConnected: true,
+              );
+            }
+            return Text('已连接', style: style);
+          }
+          return Text(link == 1 ? '连接中' : '未连接', style: style);
+        },
+      );
+    }
     bool isConnected;
     String statusText;
     DateTime? displayTime;
@@ -93,6 +117,12 @@ class _ConnectionStatusWidgetState extends State<_ConnectionStatusWidget> {
       case InputSource.rtlTcp:
         isConnected = widget.rtlTcpConnected;
         statusText = isConnected ? '已连接' : '未连接';
+        displayTime = widget.rtlTcpLastReceivedTime;
+        break;
+      case InputSource.usb:
+        final link = EmbeddedUsbService.instance.linkState.value;
+        isConnected = link == 2;
+        statusText = link == 2 ? '已连接' : (link == 1 ? '连接中' : '未连接');
         displayTime = widget.rtlTcpLastReceivedTime;
         break;
       case InputSource.audioInput:
@@ -293,10 +323,18 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     final sourceStr = settings?['inputSource'] as String? ?? 'bluetooth';
 
     if (mounted) {
-      final newSource = InputSource.values.firstWhere(
+      var newSource = InputSource.values.firstWhere(
         (e) => e.name == sourceStr,
         orElse: () => InputSource.bluetooth,
       );
+
+      final launchedByUsb =
+          await EmbeddedUsbService.instance.consumeAttachLaunch();
+      if (launchedByUsb && newSource != InputSource.usb) {
+        newSource = InputSource.usb;
+        await _databaseService.updateSettings({'inputSource': 'usb'});
+      }
+      if (!mounted) return;
 
       setState(() {
         _inputSource = newSource;
@@ -307,6 +345,8 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         final host = settings?['rtlTcpHost']?.toString() ?? '127.0.0.1';
         final port = settings?['rtlTcpPort']?.toString() ?? '14423';
         _connectToRtlTcp(host, port);
+      } else if (_inputSource == InputSource.usb) {
+        await EmbeddedUsbService.instance.activate();
       } else if (_inputSource == InputSource.audioInput) {
         await AudioInputService().startListening();
         setState(() {});
@@ -369,6 +409,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
         switch (newInputSource) {
           case InputSource.rtlTcp:
+          case InputSource.usb:
             setState(() {
               _rtlTcpConnected = _rtlTcpService.isConnected;
             });
@@ -537,7 +578,23 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _bleService.onAppResume();
+      _handleUsbAttachLaunch();
     }
+  }
+
+  Future<void> _handleUsbAttachLaunch() async {
+    final launched = await EmbeddedUsbService.instance.consumeAttachLaunch();
+    if (!launched || !mounted) return;
+    await _databaseService.updateSettings({'inputSource': 'usb'});
+    if (_inputSource == InputSource.usb) {
+      await EmbeddedUsbService.instance.connectNow();
+      return;
+    }
+    if (!mounted) return;
+    setState(() {
+      _inputSource = InputSource.usb;
+    });
+    await EmbeddedUsbService.instance.connectNow();
   }
 
   Future<void> _initializeServices() async {
@@ -550,7 +607,8 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     });
 
     _rtlTcpDataSubscription = _rtlTcpService.dataStream.listen((record) {
-      if (_inputSource == InputSource.rtlTcp) {
+      if (_inputSource == InputSource.rtlTcp ||
+          _inputSource == InputSource.usb) {
         _processRecord(record);
       }
     });
@@ -630,6 +688,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     } else {
       final IconData statusIcon = switch (_inputSource) {
         InputSource.rtlTcp => Icons.wifi,
+        InputSource.usb => Icons.usb,
         InputSource.audioInput => Icons.mic,
         InputSource.bluetooth => Icons.bluetooth,
       };
@@ -856,11 +915,27 @@ class _PixelPerfectBluetoothDialogState
   _ScanState _scanState = _ScanState.initial;
   StreamSubscription? _connectionSubscription;
   StreamSubscription? _rtlTcpConnectionSubscription;
-  bool _rtlTcpConnected = false;
+  StreamSubscription? _debugSettingsSubscription;
+  bool _debugMode = false;
 
   @override
   void initState() {
     super.initState();
+    DatabaseService.instance.getAllSettings().then((settings) {
+      if (mounted) {
+        setState(() {
+          _debugMode = (settings?['debugMode'] ?? 0) == 1;
+        });
+      }
+    });
+    _debugSettingsSubscription =
+        DatabaseService.instance.onSettingsChanged((settings) {
+      if (mounted) {
+        setState(() {
+          _debugMode = (settings['debugMode'] ?? 0) == 1;
+        });
+      }
+    });
     _connectionSubscription = widget.bleService.connectionStream.listen((_) {
       if (mounted) setState(() {});
     });
@@ -868,16 +943,9 @@ class _PixelPerfectBluetoothDialogState
     _rtlTcpConnectionSubscription =
         widget.bleService.rtlTcpService?.connectionStream.listen((connected) {
       if (mounted) {
-        setState(() {
-          _rtlTcpConnected = connected;
-        });
+        setState(() {});
       }
     });
-
-    if (widget.inputSource == InputSource.rtlTcp &&
-        widget.bleService.rtlTcpService != null) {
-      _rtlTcpConnected = widget.bleService.rtlTcpService!.isConnected;
-    }
 
     if (!widget.bleService.isConnected &&
         widget.inputSource == InputSource.bluetooth) {
@@ -889,6 +957,7 @@ class _PixelPerfectBluetoothDialogState
   void dispose() {
     _connectionSubscription?.cancel();
     _rtlTcpConnectionSubscription?.cancel();
+    _debugSettingsSubscription?.cancel();
     super.dispose();
   }
 
@@ -922,8 +991,9 @@ class _PixelPerfectBluetoothDialogState
   @override
   Widget build(BuildContext context) {
     final (String title, Widget content) = switch (widget.inputSource) {
-      InputSource.rtlTcp => ('RTL-TCP 服务器', _buildRtlTcpView(context)),
-      InputSource.audioInput => ('音频输入', _buildAudioInputView(context)),
+      InputSource.rtlTcp => ('rtl_tcp 服务器', _buildRtlTcpView(context)),
+      InputSource.usb => ('USB 设备', _buildUsbView(context)),
+      InputSource.audioInput => ('音频设备', _buildAudioInputView(context)),
       InputSource.bluetooth => (
           '蓝牙设备',
           widget.bleService.isConnected
@@ -1021,22 +1091,37 @@ class _PixelPerfectBluetoothDialogState
   }
 
   Widget _buildRtlTcpView(BuildContext context) {
-    final isConnected = _rtlTcpConnected;
-    final currentAddress =
-        widget.bleService.rtlTcpService?.currentAddress ?? '未配置';
+    return const Column(mainAxisSize: MainAxisSize.min, children: [
+      SizedBox(height: 8),
+      AudioWaterfallWidget(),
+    ]);
+  }
 
+  Widget _buildUsbView(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Column(mainAxisSize: MainAxisSize.min, children: [
-      Icon(Icons.wifi,
-          size: 48, color: isConnected ? Colors.green : Colors.red),
-      const SizedBox(height: 16),
-      Text(isConnected ? '已连接' : '未连接',
-          style: Theme.of(context)
-              .textTheme
-              .titleMedium
-              ?.copyWith(fontWeight: FontWeight.bold)),
       const SizedBox(height: 8),
-      Text(currentAddress,
-          style: TextStyle(color: isConnected ? Colors.green : Colors.grey)),
+      const AudioWaterfallWidget(),
+      if (_debugMode)
+        ValueListenableBuilder<String>(
+          valueListenable: EmbeddedUsbService.instance.statusText,
+        builder: (context, text, _) => text.isEmpty
+            ? const SizedBox.shrink()
+            : Align(
+                alignment: Alignment.centerLeft,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                  child: Text(
+                    text,
+                    style: TextStyle(
+                      fontSize: 13,
+                      height: 18 / 13,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              ),
+      ),
     ]);
   }
 
