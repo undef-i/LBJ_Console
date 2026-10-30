@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
@@ -168,6 +169,7 @@ class NativeMapView extends StatefulWidget {
   final bool orm;
   final bool ormVisible;
   final bool dark;
+  final bool attribution;
   final VoidCallback? onReady;
   final VoidCallback? onError;
   final void Function(LatLng center, double zoom, double bearing)?
@@ -188,6 +190,7 @@ class NativeMapView extends StatefulWidget {
     this.orm = false,
     this.ormVisible = true,
     this.dark = false,
+    this.attribution = false,
     this.onReady,
     this.onError,
     this.onCameraIdle,
@@ -408,9 +411,76 @@ class _NativeMapViewState extends State<NativeMapView> {
                 );
               },
             ),
+            if (widget.attribution) const _AttributionButton(),
           ],
         );
       },
+    );
+  }
+}
+
+class _AttributionButton extends StatefulWidget {
+  const _AttributionButton();
+
+  @override
+  State<_AttributionButton> createState() => _AttributionButtonState();
+}
+
+class _AttributionButtonState extends State<_AttributionButton> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    const text = '© OpenStreetMap contributors © OpenMapTiles';
+    const style = TextStyle(fontSize: 10, height: 1.3);
+    final maxWidth = MediaQuery.sizeOf(context).width / 2;
+    var shift = 0.0;
+    if (_expanded) {
+      final painter = TextPainter(
+        text: const TextSpan(text: text, style: style),
+        textDirection: Directionality.of(context),
+      )..layout(maxWidth: maxWidth);
+      final pillHeight = math.max(30.0, painter.height + 10);
+      shift = math.min((pillHeight - 30) / 2, 8);
+      painter.dispose();
+    }
+    return SafeArea(
+      child: Container(
+        alignment: Alignment.bottomRight,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+        child: Transform.translate(
+          offset: Offset(0, shift),
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => setState(() => _expanded = !_expanded),
+            child: Container(
+              decoration: BoxDecoration(
+                color: theme.scaffoldBackgroundColor,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (_expanded)
+                    Padding(
+                      padding:
+                          const EdgeInsets.only(bottom: 5, top: 5, left: 10),
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(maxWidth: maxWidth),
+                        child: const Text(text, style: style),
+                      ),
+                    ),
+                  const SizedBox.square(
+                    dimension: 30,
+                    child: Icon(Icons.info, size: 18),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -437,7 +507,7 @@ class _LocationDot extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: const Color(0xFF1E88E5),
+        color: Colors.black,
         shape: BoxShape.circle,
         border: Border.all(color: Colors.white, width: 3),
         boxShadow: const [

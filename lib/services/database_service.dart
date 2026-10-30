@@ -57,6 +57,10 @@ class DatabaseService {
         version: _databaseVersion,
         onCreate: _onCreate,
         onUpgrade: _onUpgrade,
+        onDowngrade: (db, oldVersion, newVersion) async {
+          throw StateError(
+              'database downgrade $oldVersion -> $newVersion refused');
+        },
         onOpen: _ensureIndexes,
       );
 
@@ -133,23 +137,38 @@ class DatabaseService {
           'ALTER TABLE $appSettingsTable ADD COLUMN mapEngine TEXT NOT NULL DEFAULT "native"');
     }
     if (oldVersion < 12) {
-      await db.execute(
-          'ALTER TABLE $appSettingsTable ADD COLUMN usbDeviceType TEXT NOT NULL DEFAULT "rtl"');
-      await db.execute(
-          'ALTER TABLE $appSettingsTable ADD COLUMN usbStarted INTEGER NOT NULL DEFAULT 1');
+      if (!await _hasColumn(db, 'usbDeviceType')) {
+        await db.execute(
+            'ALTER TABLE $appSettingsTable ADD COLUMN usbDeviceType TEXT NOT NULL DEFAULT "rtl"');
+      }
+      if (!await _hasColumn(db, 'usbStarted')) {
+        await db.execute(
+            'ALTER TABLE $appSettingsTable ADD COLUMN usbStarted INTEGER NOT NULL DEFAULT 1');
+      }
     }
     if (oldVersion < 13) {
-      await db.execute(
-          'ALTER TABLE $appSettingsTable DROP COLUMN usbDeviceType');
+      if (await _hasColumn(db, 'usbDeviceType')) {
+        await db.execute(
+            'ALTER TABLE $appSettingsTable DROP COLUMN usbDeviceType');
+      }
     }
     if (oldVersion < 14) {
-      await db.execute(
-          'ALTER TABLE $appSettingsTable DROP COLUMN usbStarted');
+      if (await _hasColumn(db, 'usbStarted')) {
+        await db.execute(
+            'ALTER TABLE $appSettingsTable DROP COLUMN usbStarted');
+      }
     }
     if (oldVersion < 15) {
-      await db.execute(
-          'ALTER TABLE $appSettingsTable ADD COLUMN debugMode INTEGER NOT NULL DEFAULT 0');
+      if (!await _hasColumn(db, 'debugMode')) {
+        await db.execute(
+            'ALTER TABLE $appSettingsTable ADD COLUMN debugMode INTEGER NOT NULL DEFAULT 0');
+      }
     }
+  }
+
+  Future<bool> _hasColumn(Database db, String column) async {
+    final rows = await db.rawQuery('PRAGMA table_info($appSettingsTable)');
+    return rows.any((row) => row['name'] == column);
   }
 
   Future<void> _ensureIndexes(Database db) async {
@@ -424,6 +443,40 @@ class DatabaseService {
       'appSettings': settings,
       'path': db.path,
     };
+  }
+
+  Future<String> diagnoseDatabase() async {
+    final parts = <String>[];
+    try {
+      final directory = await getApplicationDocumentsDirectory();
+      final file = File(join(directory.path, _databaseName));
+      if (!await file.exists()) {
+        parts.add('数据库文件不存在');
+      } else {
+        final size = await file.length();
+        final raw = await openDatabase(file.path, readOnly: true);
+        try {
+          final version = await raw.getVersion();
+          final count = Sqflite.firstIntValue(
+            await raw.rawQuery('SELECT COUNT(*) FROM $trainRecordsTable'),
+          );
+          parts.add(
+              '文件 ${(size / 1024).toStringAsFixed(0)} KB，版本 $version，记录 $count 条\n${file.path}');
+        } finally {
+          await raw.close();
+        }
+      }
+    } catch (e) {
+      parts.add('原始读取失败：$e');
+    }
+    try {
+      final db = await database;
+      final count = await getRecordCount();
+      parts.add('正式打开成功，记录 $count 条\n${db.path}');
+    } catch (e) {
+      parts.add('正式打开失败：$e');
+    }
+    return parts.join('\n');
   }
 
   Future<String?> backupDatabase() async {

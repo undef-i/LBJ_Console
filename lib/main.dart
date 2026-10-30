@@ -1,4 +1,6 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:lbjconsole/screens/main_screen.dart';
 import 'package:lbjconsole/themes/app_theme.dart';
@@ -9,6 +11,14 @@ import 'package:lbjconsole/services/background_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  LicenseRegistry.addLicense(() async* {
+    final libusb = await rootBundle.loadString('assets/licenses/libusb.txt');
+    yield LicenseEntryWithLineBreaks(['libusb 1.0.28'], libusb);
+    final librtlsdr =
+        await rootBundle.loadString('assets/licenses/librtlsdr.txt');
+    yield LicenseEntryWithLineBreaks(['librtlsdr'], librtlsdr);
+  });
 
   await _initializeNotifications();
 

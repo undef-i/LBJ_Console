@@ -1540,6 +1540,7 @@ class _DelayedMapWithMarkerState extends State<_DelayedMapWithMarker> {
       maxZoom: HistoryScreenState._smallMapMaxZoom,
       interactive: true,
       orm: true,
+      attribution: true,
       dark: Theme.of(context).brightness == Brightness.dark,
       onReady: () {
         _map.setData(dots: [MapDot(position: widget.position)]);
@@ -1642,6 +1643,7 @@ class _DelayedMultiMarkerMapState extends State<_DelayedMultiMarkerMap> {
       maxZoom: HistoryScreenState._smallMapMaxZoom,
       interactive: true,
       orm: true,
+      attribution: true,
       dark: Theme.of(context).brightness == Brightness.dark,
       onReady: () {
         _map.setData(lines: [widget.positions]);

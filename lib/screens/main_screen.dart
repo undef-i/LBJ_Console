@@ -651,7 +651,9 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       fontSize: 17,
       height: 22 / 17,
       fontWeight: FontWeight.w600,
-      color: colorScheme.onSurface,
+      color: Theme.of(context).brightness == Brightness.dark
+          ? Colors.white
+          : colorScheme.onSurface,
     );
 
     final Widget leading;
@@ -864,6 +866,23 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
             right: 0,
             height: 72,
             child: _buildTopBar(context),
+          ),
+          Positioned(
+            top: MediaQuery.paddingOf(context).top + 52,
+            left: 20,
+            child: Opacity(
+              opacity: (_currentIndex == 1 || _currentIndex == 2) ? 1 : 0,
+              child: Text(
+                '© OpenStreetMap contributors',
+                style: TextStyle(
+                  fontSize: 10,
+                  height: 13 / 10,
+                  color: Theme.of(context).brightness == Brightness.dark
+                      ? Colors.white
+                      : Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
           ),
           Positioned(
             left: 0,

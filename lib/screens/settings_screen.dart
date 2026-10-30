@@ -4,6 +4,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:lbjconsole/models/merged_record.dart';
+import 'package:lbjconsole/screens/licenses_screen.dart';
 import 'package:lbjconsole/services/database_service.dart';
 import 'package:lbjconsole/services/background_service.dart';
 import 'package:lbjconsole/services/audio_input_service.dart';
@@ -315,7 +316,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         if (_inputSource == InputSource.usb)
           FlRow(
             leading: Icon(Icons.usb, color: scheme.onSurfaceVariant),
-            title: const Text('支持 ADALM-PLUTO、RTL2832U。'),
+            title: const Text('支持 ADALM-PLUTO、RTL2832U'),
             titleStyle: TextStyle(
               fontSize: 13,
               height: 18 / 13,
@@ -571,6 +572,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   void _showTemporaryRecordsPanel() {
     final exitFuture = _lastExitText();
+    final dbFuture = _databaseService.diagnoseDatabase();
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
@@ -688,6 +690,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     const SizedBox(height: 2),
                     FutureBuilder<String>(
                       future: exitFuture,
+                      builder: (context, snapshot) => Text(
+                        snapshot.data ?? '读取中',
+                        style: AppTheme.caption,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    const Text('数据库状态', style: AppTheme.bodyLarge),
+                    const SizedBox(height: 2),
+                    FutureBuilder<String>(
+                      future: dbFuture,
                       builder: (context, snapshot) => Text(
                         snapshot.data ?? '读取中',
                         style: AppTheme.caption,
@@ -1002,6 +1014,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 if (await canLaunchUrl(url)) {
                   await launchUrl(url);
                 }
+              },
+            ),
+            FlRow(
+              title: const Text('开放源代码许可'),
+              trailing: Icon(
+                Icons.arrow_forward_ios,
+                size: 18,
+                color: scheme.onSurfaceVariant,
+              ),
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (context) => const LicensesScreen(),
+                  ),
+                );
               },
             ),
           ],

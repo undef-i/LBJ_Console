@@ -25,7 +25,7 @@ LBJ Console 依赖以下数据文件，位于 `assets` 目录，用于支持机�
 
 # 致谢
 
-本项目的 RTL-TCP 解析功能以 [RailwayPagerDemod](https://github.com/Arch-Jason/RailwayPagerDemod) 为基础，并移植了 [SX1276_Receive_LBJ](https://github.com/FLN1021/SX1276_Receive_LBJ) 的部分解析逻辑。音频解调移植自 [PDW](https://github.com/Discriminator/PDW)。界面参数参考 [FlClash](https://github.com/chen08209/FlClash)。
+本项目的 rtl_tcp 解析功能参考了 [RailwayPagerDemod](https://github.com/Arch-Jason/RailwayPagerDemod)，并移植了 [SX1276_Receive_LBJ](https://github.com/FLN1021/SX1276_Receive_LBJ) 的部分解析逻辑。音频解调参考了 [PDW](https://github.com/Discriminator/PDW)。界面参数参考 [FlClash](https://github.com/chen08209/FlClash)。
 
 感谢以上项目作者的贡献。
 

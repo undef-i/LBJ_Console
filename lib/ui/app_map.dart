@@ -150,6 +150,7 @@ class AppMapView extends StatelessWidget {
   final bool orm;
   final bool ormVisible;
   final bool dark;
+  final bool attribution;
   final VoidCallback? onReady;
   final VoidCallback? onError;
   final void Function(LatLng center, double zoom, double bearing)?
@@ -169,6 +170,7 @@ class AppMapView extends StatelessWidget {
     this.orm = false,
     this.ormVisible = true,
     this.dark = false,
+    this.attribution = false,
     this.onReady,
     this.onError,
     this.onCameraIdle,
@@ -194,6 +196,7 @@ class AppMapView extends StatelessWidget {
             orm: orm,
             ormVisible: ormVisible,
             dark: dark,
+            attribution: attribution,
             onReady: onReady,
             onError: onError,
             onCameraIdle: onCameraIdle,
@@ -211,6 +214,7 @@ class AppMapView extends StatelessWidget {
           interactive: interactive,
           orm: orm,
           ormVisible: ormVisible,
+          attribution: attribution,
           onReady: onReady,
           onCameraIdle: onCameraIdle,
           onChipTap: onChipTap,
@@ -231,6 +235,7 @@ class RasterMapView extends StatefulWidget {
   final bool interactive;
   final bool orm;
   final bool ormVisible;
+  final bool attribution;
   final VoidCallback? onReady;
   final void Function(LatLng center, double zoom, double bearing)?
       onCameraIdle;
@@ -248,6 +253,7 @@ class RasterMapView extends StatefulWidget {
     this.interactive = true,
     this.orm = false,
     this.ormVisible = true,
+    this.attribution = false,
     this.onReady,
     this.onCameraIdle,
     this.onChipTap,
@@ -406,6 +412,13 @@ class _RasterMapViewState extends State<RasterMapView> {
                   ),
               ],
             ),
+            if (widget.attribution)
+              const RichAttributionWidget(
+                alignment: AttributionAlignment.bottomRight,
+                attributions: [
+                  TextSourceAttribution('OpenStreetMap contributors'),
+                ],
+              ),
           ],
         );
       },
@@ -435,7 +448,7 @@ class _LocationDot extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: const Color(0xFF1E88E5),
+        color: Colors.black,
         shape: BoxShape.circle,
         border: Border.all(color: Colors.white, width: 3),
         boxShadow: const [

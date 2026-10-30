@@ -70,7 +70,11 @@ Future<void> _mergePmtilesSources(Map<String, dynamic> style) async {
   for (final name in merged) {
     sources.remove(name);
   }
-  sources['orm'] = {'type': 'vector', 'url': '$base/tiles.json'};
+  sources['orm'] = {
+    'type': 'vector',
+    'url': '$base/tiles.json',
+    'attribution': '© OpenStreetMap contributors © OpenMapTiles',
+  };
   final layers = style['layers'];
   if (layers is List) {
     for (final layer in layers) {
@@ -509,6 +513,15 @@ Map<String, dynamic> _combineStyles(
       source['data'] = {'type': 'FeatureCollection', 'features': <dynamic>[]};
     }
     sources['orm-${entry.key}'] = source;
+  }
+  for (final entry in sources.entries) {
+    final source = entry.value;
+    if (source is Map) {
+      sources[entry.key] = {
+        ...Map<String, dynamic>.from(source),
+        'attribution': '© OpenStreetMap contributors © OpenMapTiles',
+      };
+    }
   }
   final baseSprite = baseStyle['sprite'];
   final baseSpriteIsSingle = baseSprite is String;
