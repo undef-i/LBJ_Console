@@ -95,10 +95,9 @@ const _anchorOverlap = 8.0;
 const _menuMinWidth = 160.0;
 const _menuMaxWidth = 280.0;
 const _maxContentBlur = 8.0;
-const _dismissScale = 0.8;
 
 const _openDuration = Duration(milliseconds: 750);
-const _shrinkDuration = Duration(milliseconds: 200);
+const _shrinkDuration = Duration(milliseconds: 320);
 const _openSeconds = 0.75;
 
 final _growSpring = SpringCurve(
@@ -384,31 +383,57 @@ class _SelectRoute<T> extends PopupRoute<T> {
     final from = _closingFrom;
     final dismissal =
         from <= 0 ? 1.0 : (1 - animation.value / from).clamp(0.0, 1.0);
-    final shrink = Curves.easeOut.transform(dismissal);
-    final scale = ui.lerpDouble(1, _dismissScale, shrink)!;
-    final center = anchor.center;
-    final transform = Matrix4.translationValues(center.dx, center.dy, 0)
-      ..scaleByDouble(scale, scale, 1, 1)
-      ..translateByDouble(-center.dx, -center.dy, 0, 1);
-    final clipper = ShapeBorderClipper(shape: AppShape.all(_cardRadius));
-    return Transform(
-      transform: transform,
-      child: Opacity(
-        opacity: 1 - shrink,
-        child: Stack(
-          children: [
-            Positioned.fromRect(
-              rect: _finalRect,
-              child: LiquidGlass(
-                style: glassMenuStyle(colorScheme),
-                shadows: glassMenuShadowsOf(colorScheme),
-                clipper: clipper,
-                child: ClipPath(clipper: clipper, child: child),
+    final shrink = Curves.easeOutCubic.transform(dismissal);
+    final rect = Rect.lerp(_finalRect, anchor, shrink)!;
+    final radius = math.max(
+      0.0,
+      ui.lerpDouble(_cardRadius, anchor.shortestSide / 2, shrink) ??
+          _cardRadius,
+    );
+    final clipper = ShapeBorderClipper(shape: AppShape.all(radius));
+    final reveal = (1 - shrink).clamp(0.0, 1.0);
+    final coverScale = math.max(
+      rect.width / _finalRect.width,
+      rect.height / _finalRect.height,
+    );
+    return Stack(
+      children: [
+        Positioned.fromRect(
+          rect: rect,
+          child: LiquidGlass(
+            style: LiquidGlassStyle.lerp(
+              glassMenuStyle(colorScheme),
+              glassRegularStyle(colorScheme),
+              shrink,
+            ),
+            shadows: glassMenuShadowsOf(colorScheme),
+            clipper: clipper,
+            child: ClipPath(
+              clipper: clipper,
+              child: Center(
+                child: Opacity(
+                  opacity: reveal,
+                  child: ImageFiltered(
+                    enabled: reveal < 1,
+                    imageFilter: ui.ImageFilter.blur(
+                      sigmaX: _maxContentBlur * (1 - reveal),
+                      sigmaY: _maxContentBlur * (1 - reveal),
+                    ),
+                    child: Transform.scale(
+                      scale: coverScale,
+                      child: SizedBox(
+                        width: _finalRect.width,
+                        height: _finalRect.height,
+                        child: child,
+                      ),
+                    ),
+                  ),
+                ),
               ),
             ),
-          ],
+          ),
         ),
-      ),
+      ],
     );
   }
 }

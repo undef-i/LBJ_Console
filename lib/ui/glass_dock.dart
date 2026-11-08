@@ -873,7 +873,10 @@ class _FloatingBarState extends State<_FloatingBar>
                         AnimatedBuilder(
                           animation: _motion,
                           builder: (_, _) =>
-                              _GlassLens(rect: lensRect(), lift: _lift.value),
+                              _GlassLens(
+                                rect: lensRect(),
+                                lift: _lift.value,
+                              ),
                         ),
                       items(lensed ? _LensPart.outside : _LensPart.both),
                       if (lensed)
@@ -999,6 +1002,7 @@ class _GlassLens extends StatelessWidget {
       child: IgnorePointer(
         child: LiquidGlass(
           style: style,
+          bendBackdrop: true,
           shadows: _lensShadows(colorScheme, lift),
         ),
       ),
@@ -1065,6 +1069,7 @@ class _LensContent extends StatelessWidget {
                     style: _lensContentStyle(
                       Theme.of(context).colorScheme,
                     ).scale(lift),
+                    bendBackdrop: true,
                   ),
                 ),
               ],

@@ -9,12 +9,10 @@ import 'package:material_ui/material_ui.dart';
 
 part 'liquid_glass_capture.dart';
 
-const _shaderAsset = 'shaders/liquid_glass.frag';
+const _shaderAsset = 'shaders/lens_glass.frag';
 const _glowIn = Duration(milliseconds: 120);
 const _glowOut = Duration(milliseconds: 360);
 const double _glowSpread = 3;
-const _profileTurns = 64;
-// kLine in shaders/liquid_glass.frag.
 const double _hairlineWidth = 0.67;
 // In corner radii from the corner of the bounds.
 const _shineAround = [
@@ -36,14 +34,7 @@ const _shineBands = [
   (depth: 11 / 3, width: 2 / 3, lit: 0.045),
   (depth: 13 / 3, width: 2 / 3, lit: 0.035),
 ];
-// The size of uShineEnds in shaders/liquid_glass.frag.
-const _shineSlots = 12;
-final _noShine = List<double>.unmodifiable(
-  List<double>.filled(2 * (_shineAround.length + 2) + 2 * _shineSlots, 0),
-);
-final _flatProfile = List<double>.unmodifiable(
-  List<double>.filled(_profileTurns, 0),
-);
+
 
 /// How much of iOS's glass the panes draw (.agents/architecture.md).
 enum LiquidGlassQuality { standard, ultra }
@@ -73,8 +64,6 @@ class LiquidGlassScope extends InheritedWidget {
       enabled != oldWidget.enabled || quality != oldWidget.quality;
 }
 
-/// Lengths are dp. The shader shrinks [bevel] and [refraction] to fit a pane
-/// too small for them, so that a button bends in proportion to the dock.
 @immutable
 class LiquidGlassStyle {
   const LiquidGlassStyle({
@@ -499,19 +488,6 @@ class LiquidGlassRim {
   static double _roundOf(Size size, double radius) =>
       math.min(math.max(0.0, radius), size.shortestSide / 2);
 
-  List<double> _uniforms(Size size, double radius) {
-    final turns = _turns(size, _roundOf(size, radius));
-    final ends = [for (final band in _shineBands) band.depth + band.width];
-    return [
-      for (final (turn, _) in turns) turn,
-      for (final (_, lit) in turns) shine * lit,
-      for (var index = 0; index < _shineSlots; index++)
-        ends[math.min(index, ends.length - 1)],
-      for (var index = 0; index < _shineSlots; index++)
-        index < _shineBands.length ? _shineBands[index].lit : 0.0,
-    ];
-  }
-
   void _paintShine(Canvas canvas, Rect rect, double radius) {
     final round = _roundOf(rect.size, radius);
     final shape = AppRadius.all(round).toRSuperellipse(rect);
@@ -614,10 +590,6 @@ class LiquidGlassGlow {
   int get hashCode => Object.hash(center, reach, strength, wash);
 }
 
-/// A pane of glass behind [child], after iOS's Liquid Glass, a pill unless
-/// [clipper] shapes it. It casts [shadows] only outside itself, as one
-/// under it would show through. Without Impeller's shader filters it frosts
-/// but does not bend.
 class LiquidGlass extends StatelessWidget {
   const LiquidGlass({
     super.key,
@@ -626,14 +598,12 @@ class LiquidGlass extends StatelessWidget {
     this.shadows = const [],
     this.pressed = false,
     this.glow,
+    this.bendBackdrop = false,
     this.child,
   });
 
   final LiquidGlassStyle style;
 
-  /// Shapes the pane to its path in place of the pill. The glass bends
-  /// to the path by how far it reaches from the pane's center in each
-  /// direction, so it must meet every ray from the center once.
   final CustomClipper<Path>? clipper;
 
   final List<BoxShadow> shadows;
@@ -642,6 +612,8 @@ class LiquidGlass extends StatelessWidget {
 
   /// Lights the pane in place of the glow [pressed] lights at its center.
   final LiquidGlassGlow? glow;
+
+  final bool bendBackdrop;
 
   final Widget? child;
 
@@ -680,6 +652,7 @@ class LiquidGlass extends StatelessWidget {
         press: 0,
         fading: false,
         glow: glow,
+        bendBackdrop: bendBackdrop,
         child: child,
       );
     }
@@ -694,6 +667,7 @@ class LiquidGlass extends StatelessWidget {
         press: press,
         fading: !pressed,
         glow: null,
+        bendBackdrop: bendBackdrop,
         child: child,
       ),
       child: child,
@@ -709,6 +683,7 @@ class _LiquidGlassPane extends SingleChildRenderObjectWidget {
     required this.press,
     required this.fading,
     required this.glow,
+    required this.bendBackdrop,
     super.child,
   });
 
@@ -718,6 +693,7 @@ class _LiquidGlassPane extends SingleChildRenderObjectWidget {
   final double press;
   final bool fading;
   final LiquidGlassGlow? glow;
+  final bool bendBackdrop;
 
   @override
   _RenderLiquidGlass createRenderObject(BuildContext context) {
@@ -728,6 +704,9 @@ class _LiquidGlassPane extends SingleChildRenderObjectWidget {
       press: press,
       fading: fading,
       glow: glow,
+      bendBackdrop: bendBackdrop,
+      devicePixelRatio: MediaQuery.devicePixelRatioOf(context),
+      quality: LiquidGlassScope.qualityOf(context),
     );
   }
 
@@ -742,7 +721,10 @@ class _LiquidGlassPane extends SingleChildRenderObjectWidget {
       ..shadows = shadows
       ..press = press
       ..fading = fading
-      ..glow = glow;
+      ..glow = glow
+      ..bendBackdrop = bendBackdrop
+      ..devicePixelRatio = MediaQuery.devicePixelRatioOf(context)
+      ..quality = LiquidGlassScope.qualityOf(context);
   }
 }
 
@@ -754,12 +736,18 @@ class _RenderLiquidGlass extends RenderProxyBox {
     required double press,
     required bool fading,
     required LiquidGlassGlow? glow,
+    required bool bendBackdrop,
+    required double devicePixelRatio,
+    required LiquidGlassQuality quality,
   }) : _style = style,
        _clipper = clipper,
        _shadows = shadows,
        _press = press,
        _fading = fading,
-       _glow = glow;
+       _glow = glow,
+       _bendBackdrop = bendBackdrop,
+       _devicePixelRatio = devicePixelRatio,
+       _quality = quality;
 
   late final _pane = LiquidGlassPane(markNeedsPaint);
 
@@ -854,6 +842,33 @@ class _RenderLiquidGlass extends RenderProxyBox {
     markNeedsPaint();
   }
 
+  bool _bendBackdrop;
+  set bendBackdrop(bool value) {
+    if (value == _bendBackdrop) {
+      return;
+    }
+    _bendBackdrop = value;
+    markNeedsPaint();
+  }
+
+  double _devicePixelRatio;
+  set devicePixelRatio(double value) {
+    if (value == _devicePixelRatio) {
+      return;
+    }
+    _devicePixelRatio = value;
+    markNeedsPaint();
+  }
+
+  LiquidGlassQuality _quality;
+  set quality(LiquidGlassQuality value) {
+    if (value == _quality) {
+      return;
+    }
+    _quality = value;
+    markNeedsPaint();
+  }
+
   @override
   bool get alwaysNeedsCompositing => true;
 
@@ -900,7 +915,11 @@ class _RenderLiquidGlass extends RenderProxyBox {
             ? LiquidGlassOutline(outline)
             : LiquidGlassCorners(BorderRadius.circular(size.shortestSide / 2)),
         style: _style,
-        shadows: _shadows,
+        shadows: outline == null ? _shadows : const [],
+        quality: _quality,
+        bendBackdrop: _bendBackdrop,
+        globalOrigin: localToGlobal(Offset.zero),
+        devicePixelRatio: _devicePixelRatio,
         glow:
             _glow ??
             LiquidGlassGlow(
@@ -945,10 +964,7 @@ class LiquidGlassPane {
   final VoidCallback onReady;
 
   final _layer = LayerHandle<_LiquidGlassLayer>();
-  Path? _profiled;
-  List<double> _profile = _flatProfile;
 
-  /// A pane moving within [hold] keeps one capture (.agents/architecture.md).
   void paint(
     PaintingContext context,
     Rect rect, {
@@ -956,7 +972,10 @@ class LiquidGlassPane {
     required LiquidGlassStyle style,
     List<BoxShadow> shadows = const [],
     LiquidGlassGlow glow = LiquidGlassGlow.none,
-    Rect? hold,
+    LiquidGlassQuality quality = LiquidGlassQuality.ultra,
+    bool bendBackdrop = false,
+    Offset globalOrigin = Offset.zero,
+    double devicePixelRatio = 1,
     LiquidGlassRim? rim,
   }) {
     final pane = _layer.layer ??= _LiquidGlassLayer();
@@ -970,36 +989,28 @@ class LiquidGlassPane {
           bottomLeft: radius.bottomLeft.clamp(maximum: limit),
           bottomRight: radius.bottomRight.clamp(maximum: limit),
         );
-        _profiled = null;
-        if (hold == null) {
-          _paintShadows(context.canvas, rect, corners, shadows);
-        }
+        _paintShadows(context.canvas, rect, corners, shadows);
         pane
           ..corners = corners
-          ..outline = null
-          ..profile = _flatProfile;
+          ..outline = null;
       case LiquidGlassOutline(:final path):
         assert(shadows.isEmpty, 'An outlined pane casts none');
-        if (!identical(path, _profiled)) {
-          _profiled = path;
-          _profile = liquidGlassProfile(path, rect.size.center(Offset.zero));
-        }
         pane
           ..corners = BorderRadius.zero
-          ..outline = path.shift(rect.topLeft)
-          ..profile = _profile;
+          ..outline = path.shift(rect.topLeft);
     }
     pane
       ..program = _GlassProgram.request(onReady)
       ..rect = rect
-      ..style = style
+      ..style = quality == LiquidGlassQuality.standard
+          ? style._standard
+          : style
       ..glow = glow
-      ..hold = hold
+      ..bendBackdrop = bendBackdrop
+      ..globalOrigin = globalOrigin
+      ..devicePixelRatio = devicePixelRatio
       ..rim = rim;
     context.addLayer(pane);
-    if (hold != null) {
-      _paintShadows(context.canvas, rect, pane.corners, shadows);
-    }
   }
 
   void clear() => _layer.layer = null;
@@ -1050,8 +1061,6 @@ abstract final class _GlassProgram {
   static ui.FragmentProgram? _program;
   static Future<void>? _loading;
 
-  /// Final: a bundled shader that failed once fails again, and every attempt
-  /// loads synchronously on the UI isolate.
   static var _failed = false;
   static final _waiting = <VoidCallback>{};
 
@@ -1099,20 +1108,29 @@ class _LiquidGlassLayer extends Layer {
   Rect rect = Rect.zero;
   BorderRadius corners = BorderRadius.zero;
   Path? outline;
-  List<double> profile = _flatProfile;
   LiquidGlassStyle style = const LiquidGlassStyle(tint: Colors.transparent);
   LiquidGlassGlow glow = LiquidGlassGlow.none;
-  Rect? hold;
+  bool bendBackdrop = false;
+  Offset globalOrigin = Offset.zero;
+  double devicePixelRatio = 1;
   LiquidGlassRim? rim;
-  _Placement? _held;
 
   ui.Picture? _frost;
-  (Rect, BorderRadius, Path?, LiquidGlassStyle, LiquidGlassRim?)? _frostKey;
+  (
+    Rect,
+    BorderRadius,
+    Path?,
+    LiquidGlassStyle,
+    LiquidGlassGlow,
+    LiquidGlassRim?,
+    bool,
+  )?
+  _frostKey;
 
-  int _capturedPass = -1;
-  ui.Picture? _captured;
-  ui.FragmentShader? _captureShader;
-  (ui.Image, Path?, BlendMode, ui.FragmentProgram?, List<double>)? _captureKey;
+  ui.ImageFilter? _filter;
+  (double, double, double)? _filterKey;
+
+  ui.FragmentShader? _lensShader;
 
   @override
   bool get alwaysNeedsAddToScene => true;
@@ -1120,8 +1138,7 @@ class _LiquidGlassLayer extends Layer {
   @override
   void dispose() {
     _frost?.dispose();
-    _dropCaptured();
-    _captureShader?.dispose();
+    _lensShader?.dispose();
     super.dispose();
   }
 
@@ -1130,58 +1147,7 @@ class _LiquidGlassLayer extends Layer {
     if (_skipped > 0) {
       return;
     }
-    if (_capturedPass == _LiquidGlassHostLayer._pass) {
-      if (_captured case final picture?) {
-        builder.addPicture(Offset.zero, picture);
-      }
-      return;
-    }
-    _dropCaptured();
-    _addFrost(builder);
-  }
-
-  /// The uniforms from the pane's shape on, after where it and its texture
-  /// lie.
-  List<double> _look(LiquidGlassStyle style) => [
-    rect.width,
-    rect.height,
-    style.bevel,
-    style.blur,
-    corners.topLeft.x,
-    corners.topRight.x,
-    corners.bottomRight.x,
-    corners.bottomLeft.x,
-    ...liquidGlassCornerCurves(rect.size, corners),
-    style.refraction,
-    style.saturation,
-    style.brightness,
-    style.tint.r,
-    style.tint.g,
-    style.tint.b,
-    style.tint.a,
-    style.rim,
-    style.rimWidth,
-    style.endShade,
-    glow.center.dx,
-    glow.center.dy,
-    glow.strength,
-    style.contrast,
-    glow.reach,
-    glow.wash,
-    style.hairline,
-    style.dispersion,
-    style.rimBlur,
-    style.rimTail,
-    style.rimFocus,
-    style.rimAdded,
-    style._hairlineSide,
-    outline == null ? 0.0 : 1.0,
-    ...profile,
-    ...rim?._uniforms(rect.size, corners.topLeft.x) ?? _noShine,
-  ];
-
-  void _addFrost(ui.SceneBuilder builder) {
-    final key = (rect, corners, outline, style, rim);
+    final key = (rect, corners, outline, style, glow, rim, bendBackdrop);
     if (_frost == null || key != _frostKey) {
       _frost?.dispose();
       _frost = _paintFrost();
@@ -1192,116 +1158,61 @@ class _LiquidGlassLayer extends Layer {
     } else {
       builder.pushClipRSuperellipse(corners.toRSuperellipse(rect));
     }
+    builder.pushBackdropFilter(_backdropFilter());
     builder.addPicture(Offset.zero, _frost!);
+    builder.pop();
     builder.pop();
   }
 
-  /// Draws the pane from [atlas], where a host laid out what lies behind it,
-  /// until the next pass of the host; [mapping] places the pane's slot.
-  void _captureFrom(
-    int pass,
-    ui.Image atlas,
-    List<double> mapping,
-    BlendMode blendMode,
-    LiquidGlassStyle style,
-  ) {
-    _capturedPass = pass;
+  ui.ImageFilter _backdropFilter() {
     final program = this.program;
-    final uniforms = <double>[
-      atlas.width.toDouble(),
-      atlas.height.toDouble(),
-      -rect.left,
-      -rect.top,
-      1,
-      1,
-      ...mapping,
-      ..._look(style),
-    ];
-    if (_captureKey
-        case (final image, final path, final mode, final shaded, final values)?
-        when _captured != null &&
-            identical(image, atlas) &&
-            identical(path, outline) &&
-            mode == blendMode &&
-            identical(shaded, program) &&
-            listEquals(values, uniforms)) {
-      return;
-    }
-    final recorder = ui.PictureRecorder();
-    final canvas = Canvas(recorder);
-    if (program == null) {
-      _frostFrom(canvas, atlas, mapping, blendMode, style);
-    } else {
-      final shader = _captureShader ??= program.fragmentShader();
-      shader.setImageSampler(0, atlas, filterQuality: FilterQuality.low);
+    if (bendBackdrop && program != null) {
+      final shader = _lensShader ??= program.fragmentShader();
+      final uniforms = [
+        0.0,
+        0.0,
+        globalOrigin.dx * devicePixelRatio,
+        globalOrigin.dy * devicePixelRatio,
+        rect.width,
+        rect.height,
+        corners.topLeft.x,
+        devicePixelRatio,
+        style.refraction,
+        style.bevel,
+        style.dispersion,
+        style.rimBlur,
+        style.saturation,
+        style.brightness,
+        ...liquidGlassCornerCurves(rect.size, corners),
+        style.rim,
+        style.rimWidth,
+        style.endShade,
+        style.rimTail,
+        style.rimFocus,
+        style.rimAdded,
+        style._hairlineSide,
+        style.hairline,
+      ];
       for (final (index, value) in uniforms.indexed) {
         shader.setFloat(index, value);
       }
-      final paint = Paint()
-        ..shader = shader
-        ..blendMode = blendMode;
-      if (outline case final outline?) {
-        canvas.drawPath(outline, paint);
-      } else {
-        canvas.drawRSuperellipse(corners.toRSuperellipse(rect), paint);
-      }
+      return ui.ImageFilter.shader(shader);
     }
-    _captured?.dispose();
-    _captured = recorder.endRecording();
-    _captureKey = (atlas, outline, blendMode, program, uniforms);
-  }
-
-  /// Frosts the pane, without bending it, from the part of [atlas] behind it,
-  /// which holds its blur already.
-  void _frostFrom(
-    Canvas canvas,
-    ui.Image atlas,
-    List<double> mapping,
-    BlendMode blendMode,
-    LiquidGlassStyle style,
-  ) {
-    canvas.save();
-    if (outline case final outline?) {
-      canvas.clipPath(outline);
-    } else {
-      canvas.clipRSuperellipse(corners.toRSuperellipse(rect));
+    final key = (style.blur, style.saturation, style.brightness);
+    if (_filter == null || key != _filterKey) {
+      _filter = ui.ImageFilter.compose(
+        outer: ui.ColorFilter.matrix(
+          _optics(style.saturation, style.brightness),
+        ),
+        inner: ui.ImageFilter.blur(
+          sigmaX: style.blur,
+          sigmaY: style.blur,
+          tileMode: TileMode.clamp,
+        ),
+      );
+      _filterKey = key;
     }
-    final saturate = ColorFilter.matrix(
-      _optics(style.saturation, style.brightness),
-    );
-    void drawSlot(int from, Paint paint) => canvas.drawImageRect(
-      atlas,
-      Rect.fromLTWH(
-        -mapping[from] / mapping[from + 2],
-        -mapping[from + 1] / mapping[from + 3],
-        rect.width / mapping[from + 2],
-        rect.height / mapping[from + 3],
-      ),
-      rect,
-      paint
-        ..filterQuality = FilterQuality.low
-        ..colorFilter = saturate,
-    );
-    drawSlot(0, Paint()..blendMode = blendMode);
-    final haze = mapping[_hazeShare];
-    if (haze > 0) {
-      drawSlot(_hazeSample, Paint()..color = Color.fromRGBO(0, 0, 0, haze));
-    }
-    _drawFrost(canvas, overCapture: true);
-    canvas.restore();
-  }
-
-  /// Draws nothing until the next pass of the host, as nothing of the pane
-  /// shows.
-  void _captureNothing(int pass) {
-    _capturedPass = pass;
-    _dropCaptured();
-  }
-
-  void _dropCaptured() {
-    _captured?.dispose();
-    _captured = null;
-    _captureKey = null;
+    return _filter!;
   }
 
   ui.Picture _paintFrost() {
@@ -1310,14 +1221,9 @@ class _LiquidGlassLayer extends Layer {
     return recorder.endRecording();
   }
 
-  /// Thickens the tint to stand in for the frost, unless the pane lies
-  /// [overCapture], which holds the blur.
-  void _drawFrost(Canvas canvas, {bool overCapture = false}) {
+  void _drawFrost(Canvas canvas) {
     final tint = style.tint;
-    final fill = Paint()
-      ..color = overCapture
-          ? tint
-          : tint.withValues(alpha: math.min(1, tint.a + 0.2));
+    final fill = Paint()..color = tint;
     final rim = style.rim;
     final stroke = Paint()
       ..style = PaintingStyle.stroke
@@ -1338,66 +1244,52 @@ class _LiquidGlassLayer extends Layer {
       );
     if (outline case final outline?) {
       // The clip keeps the inner half of a stroke twice as wide.
-      canvas
-        ..drawPath(outline, fill)
-        ..drawPath(outline, stroke..strokeWidth = style.rimWidth * 2)
-        ..drawPath(outline, hairline..strokeWidth = _hairlineWidth * 2);
+      canvas.drawPath(outline, fill);
+      if (!bendBackdrop) {
+        canvas
+          ..drawPath(outline, stroke..strokeWidth = style.rimWidth * 2)
+          ..drawPath(outline, hairline..strokeWidth = _hairlineWidth * 2);
+      }
     } else {
       final shape = corners.toRSuperellipse(rect);
-      canvas
-        ..drawRSuperellipse(shape, fill)
-        ..drawRSuperellipse(shape.deflate(style.rimWidth / 2), stroke)
-        ..drawRSuperellipse(
-          shape.deflate(_hairlineWidth / 2),
-          hairline..strokeWidth = _hairlineWidth,
-        );
+      canvas.drawRSuperellipse(shape, fill);
+      if (!bendBackdrop) {
+        canvas
+          ..drawRSuperellipse(shape.deflate(style.rimWidth / 2), stroke)
+          ..drawRSuperellipse(
+            shape.deflate(_hairlineWidth / 2),
+            hairline..strokeWidth = _hairlineWidth,
+          );
+      }
       this.rim?._paintShine(canvas, rect, corners.topLeft.x);
     }
+    if (glow.strength > 0) {
+      final center = rect.topLeft + glow.center;
+      final light = Paint()
+        ..shader = RadialGradient(
+          colors: [
+            Colors.white.withValues(alpha: glow.strength),
+            Colors.white.withValues(alpha: 0),
+          ],
+        ).createShader(Rect.fromCircle(center: center, radius: glow.reach));
+      if (glow.wash > 0) {
+        final wash = Paint()
+          ..color = Colors.white.withValues(alpha: glow.strength * glow.wash);
+        if (outline case final outline?) {
+          canvas.drawPath(outline, wash);
+        } else {
+          canvas.drawRSuperellipse(corners.toRSuperellipse(rect), wash);
+        }
+      }
+      if (outline case final outline?) {
+        canvas.drawPath(outline, light);
+      } else {
+        canvas.drawRSuperellipse(corners.toRSuperellipse(rect), light);
+      }
+    }
   }
 }
 
-/// How far [outline] reaches from [center] along [_profileTurns] even turns,
-/// the first toward +x and the rest toward +y, as the shader reads it.
-@visibleForTesting
-List<double> liquidGlassProfile(Path outline, Offset center) {
-  const step = 2 * math.pi / _profileTurns;
-  final profile = List<double>.filled(_profileTurns, 0);
-  void cross(Offset from, Offset to) {
-    final start = from.direction;
-    var span = to.direction - start;
-    if (span > math.pi) {
-      span -= 2 * math.pi;
-    } else if (span <= -math.pi) {
-      span += 2 * math.pi;
-    }
-    final edge = to - from;
-    final first = (math.min(start, start + span) / step).ceil();
-    final last = (math.max(start, start + span) / step).floor();
-    for (var turn = first; turn <= last; turn++) {
-      final ray = Offset.fromDirection(turn * step);
-      final facing = ray.dx * edge.dy - ray.dy * edge.dx;
-      profile[turn % _profileTurns] = facing.abs() < 1e-9
-          ? math.max(from.distance, to.distance)
-          : (from.dx * edge.dy - from.dy * edge.dx) / facing;
-    }
-  }
-
-  for (final metric in outline.computeMetrics()) {
-    final samples = math.max(_profileTurns * 4, metric.length.ceil());
-    Offset pointAt(int index) =>
-        metric.getTangentForOffset(metric.length * index / samples)!.position -
-        center;
-    var previous = pointAt(0);
-    for (var index = 1; index <= samples; index++) {
-      final next = pointAt(index);
-      cross(previous, next);
-      previous = next;
-    }
-  }
-  return profile;
-}
-
-@visibleForTesting
 List<double> liquidGlassCornerCurves(Size size, BorderRadius corners) => [
   for (final radius in [
     corners.topLeft.x,
@@ -1429,8 +1321,6 @@ List<double> _cornerCurve(double halfWidth, double halfHeight, double radius) {
 
 typedef _Octant = ({double n, Offset joint, Offset center, double radius});
 
-/// ComputeOctant in impeller/geometry/round_superellipse_param.cc, which the
-/// shader's cornerInset follows.
 _Octant _superellipseOctant(double a, double radius) {
   if (radius <= 1e-3) {
     return (n: 0, joint: Offset.zero, center: Offset.zero, radius: 0);
@@ -1454,7 +1344,6 @@ _Octant _superellipseOctant(double a, double radius) {
 
 const _octantGap = 1 - math.sqrt1_2;
 
-/// By the ratio of an octant's side to its radius: n, and 1 / (1 - xJ / a).
 const _octantFits = [
   (2.0, 2.00000000, 1.13276676),
   (2.1, 2.18349805, 1.20311921),
@@ -1492,7 +1381,7 @@ List<double> _optics(double saturation, double brightness) {
   final rest = 1 - saturation;
   final kept = saturation * brightness;
   return [
-    red * rest + kept, green * rest, blue * rest, 0, 0, //
+    red * rest + kept, green * rest, blue * rest, 0, 0,
     red * rest, green * rest + kept, blue * rest, 0, 0,
     red * rest, green * rest, blue * rest + kept, 0, 0,
     0, 0, 0, 1, 0,

@@ -225,7 +225,12 @@ class _AlertGlass extends SingleChildRenderObjectWidget {
 
   @override
   _RenderAlertGlass createRenderObject(BuildContext context) {
-    return _RenderAlertGlass(style, rim, shadows);
+    return _RenderAlertGlass(
+      style,
+      rim,
+      shadows,
+      quality: LiquidGlassScope.qualityOf(context),
+    );
   }
 
   @override
@@ -236,12 +241,18 @@ class _AlertGlass extends SingleChildRenderObjectWidget {
     renderObject
       ..style = style
       ..rim = rim
-      ..shadows = shadows;
+      ..shadows = shadows
+      ..quality = LiquidGlassScope.qualityOf(context);
   }
 }
 
 class _RenderAlertGlass extends RenderProxyBox {
-  _RenderAlertGlass(this._style, this._rim, this._shadows);
+  _RenderAlertGlass(
+    this._style,
+    this._rim,
+    this._shadows, {
+    required LiquidGlassQuality quality,
+  }) : _quality = quality;
 
   late final _pane = LiquidGlassPane(markNeedsPaint);
 
@@ -272,6 +283,15 @@ class _RenderAlertGlass extends RenderProxyBox {
     markNeedsPaint();
   }
 
+  LiquidGlassQuality _quality;
+  set quality(LiquidGlassQuality value) {
+    if (value == _quality) {
+      return;
+    }
+    _quality = value;
+    markNeedsPaint();
+  }
+
   @override
   bool get alwaysNeedsCompositing => true;
 
@@ -293,6 +313,7 @@ class _RenderAlertGlass extends RenderProxyBox {
         shape: LiquidGlassCorners.circular(_alertCorner),
         style: _style,
         shadows: _shadows,
+        quality: _quality,
         rim: _rim,
       );
       _rim.paintLine(context.canvas, rect, _alertCorner);
