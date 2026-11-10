@@ -1,0 +1,20 @@
+{
+  "resources": [
+    {
+      "id": "loco_info",
+      "name": "机车配属",
+      "file": "loco_info.csv",
+      "version": "20260911",
+      "sha256": "cbe6817b2dc636481e1725394d6e8f41085d326785c6c88097166fa68c941ae1",
+      "size": 783813
+    },
+    {
+      "id": "loco_type_info",
+      "name": "机车类型",
+      "file": "loco_type_info.csv",
+      "version": "20261110",
+      "sha256": "b85c3899b96a5d9cca2f3651f150a4041349cdea2673252f104455203a307337",
+      "size": 1601
+    }
+  ]
+}
