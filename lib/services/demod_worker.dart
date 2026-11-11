@@ -108,7 +108,6 @@ void _workerMain(SendPort mainPort) {
     return rssi.clamp(-120.0, 0.0).toDouble();
   }
 
-
   void emitFfsk(
     List<FfskMessage> messages,
     double rssi, {
@@ -422,9 +421,9 @@ class DemodWorker {
   static final DemodWorker instance = DemodWorker._();
 
   static const protoFreqLabel = {
-    'lbj': 'LBJ 821.2375 MHz',
-    'klw': 'KLW 866.2375 MHz',
-    'tdcs': 'TDCS 457.550 MHz',
+    'lbj': '821.2375 MHz',
+    'klw': '866.2375 MHz',
+    'tdcs': '457.550 MHz',
   };
 
   List<String> _protocols = ['lbj'];
@@ -449,6 +448,7 @@ class DemodWorker {
   void logRaw(String kind, String line) {
     _rawLogs.add((kind, line));
   }
+
   Stream<KlwEvent> get klwEvents => _klwEvents.stream;
   Stream<TrainRecord> get tdcsRecords => _tdcsRecords.stream;
   Stream<FfskAlarmEvent> get alarmEvents => _alarmEvents.stream;

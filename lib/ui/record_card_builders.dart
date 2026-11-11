@@ -163,7 +163,11 @@ mixin RecordCardBuilders<T extends StatefulWidget> on State<T> {
             const SizedBox(height: 2),
             Text(
               event.timeText,
-              style: TextStyle(fontSize: 20, color: colorScheme.onSurface),
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: colorScheme.onSurface,
+              ),
             ),
           ],
         ),

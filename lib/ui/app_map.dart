@@ -390,7 +390,7 @@ class AppMapController {
   }
 }
 
-class AppMapView extends StatelessWidget {
+class AppMapView extends StatefulWidget {
   final AppMapController controller;
   final LatLng initialCenter;
   final double initialZoom;
@@ -429,48 +429,73 @@ class AppMapView extends StatelessWidget {
   });
 
   @override
+  State<AppMapView> createState() => _AppMapViewState();
+}
+
+class _AppMapViewState extends State<AppMapView> {
+  MapEngine _engine = MapEngineStore.instance.value;
+  bool _swapScheduled = false;
+
+  @override
+  void initState() {
+    super.initState();
+    MapEngineStore.instance.addListener(_onEngineChanged);
+  }
+
+  @override
+  void dispose() {
+    MapEngineStore.instance.removeListener(_onEngineChanged);
+    super.dispose();
+  }
+
+  void _onEngineChanged() {
+    if (_swapScheduled) return;
+    _swapScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _swapScheduled = false;
+      if (!mounted) return;
+      setState(() => _engine = MapEngineStore.instance.value);
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder<MapEngine>(
-      valueListenable: MapEngineStore.instance,
-      builder: (context, engine, _) {
-        if (engine == MapEngine.native) {
-          return NativeMapView(
-            controller: controller.native,
-            state: controller.nativeState,
-            initialCenter: initialCenter,
-            initialZoom: initialZoom,
-            initialBearing: initialBearing,
-            minZoom: minZoom,
-            maxZoom: maxZoom,
-            interactive: interactive,
-            orm: orm,
-            ormVisible: ormVisible,
-            dark: dark,
-            attribution: attribution,
-            onReady: onReady,
-            onError: onError,
-            onCameraIdle: onCameraIdle,
-            onChipTap: onChipTap,
-            onTap: onTap,
-          );
-        }
-        return RasterMapView(
-          controller: controller,
-          initialCenter: initialCenter,
-          initialZoom: initialZoom,
-          initialBearing: initialBearing,
-          minZoom: minZoom,
-          maxZoom: maxZoom,
-          interactive: interactive,
-          orm: orm,
-          ormVisible: ormVisible,
-          attribution: attribution,
-          onReady: onReady,
-          onCameraIdle: onCameraIdle,
-          onChipTap: onChipTap,
-          onTap: onTap,
-        );
-      },
+    if (_engine == MapEngine.native) {
+      return NativeMapView(
+        controller: widget.controller.native,
+        state: widget.controller.nativeState,
+        initialCenter: widget.initialCenter,
+        initialZoom: widget.initialZoom,
+        initialBearing: widget.initialBearing,
+        minZoom: widget.minZoom,
+        maxZoom: widget.maxZoom,
+        interactive: widget.interactive,
+        orm: widget.orm,
+        ormVisible: widget.ormVisible,
+        dark: widget.dark,
+        attribution: widget.attribution,
+        onReady: widget.onReady,
+        onError: widget.onError,
+        onCameraIdle: widget.onCameraIdle,
+        onChipTap: widget.onChipTap,
+        onTap: widget.onTap,
+      );
+    }
+    return RasterMapView(
+      controller: widget.controller,
+      initialCenter: widget.initialCenter,
+      initialZoom: widget.initialZoom,
+      initialBearing: widget.initialBearing,
+      minZoom: widget.minZoom,
+      maxZoom: widget.maxZoom,
+      interactive: widget.interactive,
+      orm: widget.orm,
+      ormVisible: widget.ormVisible,
+      attribution: widget.attribution,
+      onReady: widget.onReady,
+      onCameraIdle: widget.onCameraIdle,
+      onChipTap: widget.onChipTap,
+      onTap: widget.onTap,
     );
   }
 }

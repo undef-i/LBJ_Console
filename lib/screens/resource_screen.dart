@@ -32,8 +32,7 @@ class _ResourceScreenState extends State<ResourceScreen> {
   }
 
   void _show(String text) {
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(text)));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
   }
 
   Future<void> _update(String id) async {
@@ -107,7 +106,7 @@ class _ResourceScreenState extends State<ResourceScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('车次编排和数据资源管理')),
+      appBar: AppBar(title: const Text('数据管理')),
       body: !_loaded
           ? const Center(child: CircularProgressIndicator())
           : ListView(
@@ -118,8 +117,11 @@ class _ResourceScreenState extends State<ResourceScreen> {
                   rows: [
                     _trainRow('auto', '自动', '按记录的接收时间选择'),
                     _trainRow('2014', '2014 版', '2026 年 11 月 25 日前'),
-                    _trainRow('2026-1', '2026 版（第一批）',
-                        '2026 年 11 月 25 日至 12 月下旬'),
+                    _trainRow(
+                      '2026-1',
+                      '2026 版（第一批）',
+                      '2026 年 11 月 25 日至 12 月下旬',
+                    ),
                     _trainRow('2026', '2026 版', '2026 年 12 月下旬起'),
                   ],
                 ),

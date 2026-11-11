@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:latlong2/latlong.dart';
@@ -1278,22 +1279,63 @@ class _DelayedMultiMarkerMapState extends State<_DelayedMultiMarkerMap> {
 
   @override
   Widget build(BuildContext context) {
-    return AppMapView(
-      controller: _map,
-      initialCenter: widget.positions.first,
-      initialZoom: HistoryScreenState._singlePointMapZoom,
-      minZoom: HistoryScreenState._smallMapMinZoom,
-      maxZoom: HistoryScreenState._smallMapMaxZoom,
-      interactive: true,
-      orm: true,
-      attribution: true,
-      dark: Theme.of(context).brightness == Brightness.dark,
-      onReady: () {
-        _map.setData(
-          lines: [widget.positions],
-          dots: [MapDot(position: widget.positions.first)],
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final gcj = RasterMapStore.instance.value.dataGcj;
+        final points = gcj
+            ? [for (final point in widget.positions) wgs84ToGcj02(point)]
+            : widget.positions;
+        var minLat = points.first.latitude;
+        var maxLat = minLat;
+        var minLng = points.first.longitude;
+        var maxLng = minLng;
+        for (final point in points) {
+          if (point.latitude < minLat) minLat = point.latitude;
+          if (point.latitude > maxLat) maxLat = point.latitude;
+          if (point.longitude < minLng) minLng = point.longitude;
+          if (point.longitude > maxLng) maxLng = point.longitude;
+        }
+        final center = LatLng((minLat + maxLat) / 2, (minLng + maxLng) / 2);
+        var zoom = HistoryScreenState._singlePointMapZoom;
+        final width = constraints.maxWidth - 48;
+        final height = constraints.maxHeight - 48;
+        if (width > 0 && height > 0 && (maxLat > minLat || maxLng > minLng)) {
+          var fit = double.infinity;
+          if (maxLng > minLng) {
+            fit = math.min(
+              fit,
+              math.log(width * 360 / (256 * (maxLng - minLng))) / math.ln2,
+            );
+          }
+          if (maxLat > minLat) {
+            double mercator(double lat) =>
+                math.log(math.tan(math.pi / 4 + lat * math.pi / 360));
+            final fraction =
+                (mercator(maxLat) - mercator(minLat)) / (2 * math.pi);
+            fit = math.min(fit, math.log(height / (256 * fraction)) / math.ln2);
+          }
+          zoom = fit.clamp(
+            HistoryScreenState._smallMapMinZoom,
+            HistoryScreenState._singlePointMapZoom,
+          );
+        }
+        return AppMapView(
+          controller: _map,
+          initialCenter: center,
+          initialZoom: zoom,
+          minZoom: HistoryScreenState._smallMapMinZoom,
+          maxZoom: HistoryScreenState._smallMapMaxZoom,
+          interactive: true,
+          orm: true,
+          attribution: true,
+          dark: Theme.of(context).brightness == Brightness.dark,
+          onReady: () {
+            _map.setData(
+              lines: [widget.positions],
+              dots: [MapDot(position: widget.positions.first)],
+            );
+          },
         );
-        _map.fitBounds(widget.positions, padding: 24, maxZoom: 17);
       },
     );
   }

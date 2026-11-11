@@ -12,19 +12,34 @@ int _intensityToArgb(double intensity) {
   Color color;
   if (intensity < 0.2) {
     color = Color.lerp(
-        const Color(0xFF000033), const Color(0xFF0000FF), intensity / 0.2)!;
+      const Color(0xFF000033),
+      const Color(0xFF0000FF),
+      intensity / 0.2,
+    )!;
   } else if (intensity < 0.4) {
-    color = Color.lerp(const Color(0xFF0000FF), const Color(0xFF00FFFF),
-        (intensity - 0.2) / 0.2)!;
+    color = Color.lerp(
+      const Color(0xFF0000FF),
+      const Color(0xFF00FFFF),
+      (intensity - 0.2) / 0.2,
+    )!;
   } else if (intensity < 0.6) {
-    color = Color.lerp(const Color(0xFF00FFFF), const Color(0xFF00FF00),
-        (intensity - 0.4) / 0.2)!;
+    color = Color.lerp(
+      const Color(0xFF00FFFF),
+      const Color(0xFF00FF00),
+      (intensity - 0.4) / 0.2,
+    )!;
   } else if (intensity < 0.8) {
-    color = Color.lerp(const Color(0xFF00FF00), const Color(0xFFFFFF00),
-        (intensity - 0.6) / 0.2)!;
+    color = Color.lerp(
+      const Color(0xFF00FF00),
+      const Color(0xFFFFFF00),
+      (intensity - 0.6) / 0.2,
+    )!;
   } else {
-    color = Color.lerp(const Color(0xFFFFFF00), const Color(0xFFFF0000),
-        (intensity - 0.8) / 0.2)!;
+    color = Color.lerp(
+      const Color(0xFFFFFF00),
+      const Color(0xFFFF0000),
+      (intensity - 0.8) / 0.2,
+    )!;
   }
   return ((color.a * 255.0).round() << 24) |
       ((color.r * 255.0).round() << 16) |
@@ -33,8 +48,10 @@ int _intensityToArgb(double intensity) {
 }
 
 final List<int> _colorLUT = List.generate(
-    256, (i) => _intensityToArgb(i / 255.0),
-    growable: false);
+  256,
+  (i) => _intensityToArgb(i / 255.0),
+  growable: false,
+);
 
 Float32List poolSpectrumToWidth(Float32List bins, int width) {
   final out = Float32List(width);
@@ -53,7 +70,8 @@ Float32List poolSpectrumToWidth(Float32List bins, int width) {
 }
 
 class _Strip {
-  _Strip(this.band, this.width) : pixels = Uint32List(width * _waterfallHeight) {
+  _Strip(this.band, this.width)
+    : pixels = Uint32List(width * _waterfallHeight) {
     for (var i = 0; i < pixels.length; i++) {
       pixels[i] = 0xFF000033;
     }
@@ -76,8 +94,13 @@ class _Strip {
 
   Future<void> rebuild() async {
     final completer = Completer<ui.Image>();
-    ui.decodeImageFromPixels(pixels.buffer.asUint8List(), width,
-        _waterfallHeight, ui.PixelFormat.bgra8888, completer.complete);
+    ui.decodeImageFromPixels(
+      pixels.buffer.asUint8List(),
+      width,
+      _waterfallHeight,
+      ui.PixelFormat.bgra8888,
+      completer.complete,
+    );
     final newImage = await completer.future;
     image?.dispose();
     image = newImage;
@@ -107,8 +130,10 @@ class _AudioWaterfallWidgetState extends State<AudioWaterfallWidget> {
   @override
   void initState() {
     super.initState();
-    _updateTimer =
-        Timer.periodic(const Duration(milliseconds: 50), (_) => _tick());
+    _updateTimer = Timer.periodic(
+      const Duration(milliseconds: 50),
+      (_) => _tick(),
+    );
   }
 
   @override
@@ -147,7 +172,8 @@ class _AudioWaterfallWidgetState extends State<AudioWaterfallWidget> {
         _signature = signature;
         _resetStrips(bands);
       }
-      final strip = _strips[frame.band] ??
+      final strip =
+          _strips[frame.band] ??
           (_bandOrder.isNotEmpty ? _strips[_bandOrder.first] : null);
       if (strip == null) return;
       strip.append(frame.values);
@@ -176,15 +202,27 @@ class _AudioWaterfallWidgetState extends State<AudioWaterfallWidget> {
           decoration: BoxDecoration(
             color: Colors.black,
             border: Border(
-              left: BorderSide(color: Colors.cyan.withValues(alpha: 0.3), width: 2),
-              right: BorderSide(color: Colors.cyan.withValues(alpha: 0.3), width: 2),
-              top: BorderSide(color: Colors.cyan.withValues(alpha: 0.3), width: 2),
+              left: BorderSide(
+                color: Colors.cyan.withValues(alpha: 0.3),
+                width: 2,
+              ),
+              right: BorderSide(
+                color: Colors.cyan.withValues(alpha: 0.3),
+                width: 2,
+              ),
+              top: BorderSide(
+                color: Colors.cyan.withValues(alpha: 0.3),
+                width: 2,
+              ),
             ),
           ),
           child: !anySpectrum
               ? const Center(
                   child: CircularProgressIndicator(
-                      color: Colors.cyan, strokeWidth: 2))
+                    color: Colors.cyan,
+                    strokeWidth: 2,
+                  ),
+                )
               : Row(
                   children: [
                     for (var i = 0; i < strips.length; i++)
@@ -195,9 +233,9 @@ class _AudioWaterfallWidgetState extends State<AudioWaterfallWidget> {
                               left: i == 0
                                   ? BorderSide.none
                                   : BorderSide(
-                                      color:
-                                          Colors.cyan.withValues(alpha: 0.3),
-                                      width: 1),
+                                      color: Colors.cyan.withValues(alpha: 0.3),
+                                      width: 1,
+                                    ),
                             ),
                           ),
                           child: Stack(
@@ -206,15 +244,18 @@ class _AudioWaterfallWidgetState extends State<AudioWaterfallWidget> {
                                 child: strips[i].latest.isEmpty
                                     ? const SizedBox.shrink()
                                     : CustomPaint(
-                                        painter:
-                                            _SpectrumPainter(strips[i].latest)),
+                                        painter: _SpectrumPainter(
+                                          strips[i].latest,
+                                        ),
+                                      ),
                               ),
                               if (multi)
                                 Positioned(
                                   left: 4,
                                   top: 2,
                                   child: Text(
-                                    DemodWorker.protoFreqLabel[strips[i].band] ??
+                                    DemodWorker.protoFreqLabel[strips[i]
+                                            .band] ??
                                         '',
                                     style: TextStyle(
                                       fontSize: 10,
@@ -237,14 +278,24 @@ class _AudioWaterfallWidgetState extends State<AudioWaterfallWidget> {
           decoration: BoxDecoration(
             color: Colors.black,
             border: Border(
-              left: BorderSide(color: Colors.cyan.withValues(alpha: 0.3), width: 2),
-              right: BorderSide(color: Colors.cyan.withValues(alpha: 0.3), width: 2),
-              bottom: BorderSide(color: Colors.cyan.withValues(alpha: 0.3), width: 2),
+              left: BorderSide(
+                color: Colors.cyan.withValues(alpha: 0.3),
+                width: 2,
+              ),
+              right: BorderSide(
+                color: Colors.cyan.withValues(alpha: 0.3),
+                width: 2,
+              ),
+              bottom: BorderSide(
+                color: Colors.cyan.withValues(alpha: 0.3),
+                width: 2,
+              ),
             ),
           ),
           child: !anyImage
               ? const Center(
-                  child: CircularProgressIndicator(color: Colors.cyan))
+                  child: CircularProgressIndicator(color: Colors.cyan),
+                )
               : Row(
                   children: [
                     for (var i = 0; i < strips.length; i++)
@@ -255,16 +306,24 @@ class _AudioWaterfallWidgetState extends State<AudioWaterfallWidget> {
                               left: i == 0
                                   ? BorderSide.none
                                   : BorderSide(
-                                      color:
-                                          Colors.cyan.withValues(alpha: 0.3),
-                                      width: 1),
+                                      color: Colors.cyan.withValues(alpha: 0.3),
+                                      width: 1,
+                                    ),
                             ),
                           ),
-                          child: strips[i].image == null
-                              ? const SizedBox.shrink()
-                              : CustomPaint(
-                                  painter:
-                                      _WaterfallImagePainter(strips[i].image!)),
+                          child: Stack(
+                            children: [
+                              Positioned.fill(
+                                child: strips[i].image == null
+                                    ? const SizedBox.shrink()
+                                    : CustomPaint(
+                                        painter: _WaterfallImagePainter(
+                                          strips[i].image!,
+                                        ),
+                                      ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                   ],
@@ -293,14 +352,15 @@ class _SpectrumPainter extends CustomPainter {
     }
 
     canvas.drawPath(
-        path,
-        Paint()
-          ..color = Colors.cyan
-          ..strokeWidth = 0.5
-          ..style = PaintingStyle.stroke
-          ..isAntiAlias = true
-          ..strokeCap = StrokeCap.round
-          ..strokeJoin = StrokeJoin.round);
+      path,
+      Paint()
+        ..color = Colors.cyan
+        ..strokeWidth = 0.5
+        ..style = PaintingStyle.stroke
+        ..isAntiAlias = true
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round,
+    );
   }
 
   @override

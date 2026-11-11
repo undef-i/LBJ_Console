@@ -73,13 +73,13 @@ class _RasterMapScreenState extends State<RasterMapScreen> {
 
   Widget _urlRow(TextEditingController controller, String example) {
     final scheme = Theme.of(context).colorScheme;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Container(
-          constraints: const BoxConstraints(minHeight: 56),
-          padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
-          child: Row(
+    return Container(
+      constraints: const BoxConstraints(minHeight: 56),
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
             children: [
               Text('地址', style: flListTitleStyle(scheme)),
               const SizedBox(width: 16),
@@ -102,12 +102,10 @@ class _RasterMapScreenState extends State<RasterMapScreen> {
               ),
             ],
           ),
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-          child: Text('示例：$example', style: flCaptionStyle(scheme)),
-        ),
-      ],
+          const SizedBox(height: 2),
+          Text('示例：$example', style: flCaptionStyle(scheme)),
+        ],
+      ),
     );
   }
 

@@ -154,8 +154,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       'rtlTcpHost': _rtlTcpHost,
       'rtlTcpPort': _rtlTcpPort,
     };
-    if (_inputSource == InputSource.usb ||
-        _inputSource == InputSource.rtlTcp) {
+    if (_inputSource == InputSource.usb || _inputSource == InputSource.rtlTcp) {
       values['${_protoPrefix}Lbj'] = _protoLbj ? 1 : 0;
       values['${_protoPrefix}Klw'] = _protoKlw ? 1 : 0;
       values['${_protoPrefix}Tdcs'] = _protoTdcs ? 1 : 0;
@@ -323,21 +322,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ],
         if (_inputSource == InputSource.rtlTcp ||
             _inputSource == InputSource.usb) ...[
-          _toggleRow('LBJ (821.2375 MHz)', _protoLbj, (value) {
+          _toggleRow('列车接近预警 (821.2375 MHz)', _protoLbj, (value) {
             if (!value && !_protoKlw && !_protoTdcs) return;
             setState(() {
               _protoLbj = value;
             });
             _saveSettings();
           }),
-          _toggleRow('KLW (866.2375 MHz)', _protoKlw, (value) {
+          _toggleRow('列尾与列车安全预警 (866.2375 MHz)', _protoKlw, (value) {
             if (!value && !_protoLbj && !_protoTdcs) return;
             setState(() {
               _protoKlw = value;
             });
             _saveSettings();
           }),
-          _toggleRow('TDCS (457.550 MHz)', _protoTdcs, (value) {
+          _toggleRow('车次号校核 (457.550 MHz)', _protoTdcs, (value) {
             if (!value && !_protoLbj && !_protoKlw) return;
             setState(() {
               _protoTdcs = value;
@@ -349,7 +348,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           FlRow(
             leading: Icon(Icons.usb, color: scheme.onSurfaceVariant),
             title: const Text(
-                '支持 ADALM-PLUTO、RTL2832U（R820T、R828D、E4000、FC0012、FC0013、FC2580）'),
+              '支持 ADALM-PLUTO、RTL2832U（R820T、R828D、E4000、FC0012、FC0013、FC2580）',
+            ),
             titleStyle: TextStyle(
               fontSize: 13,
               height: 18 / 13,
@@ -587,7 +587,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
         FlRow(
           leading: Icon(Icons.folder_open, color: scheme.primary),
-          title: const Text('车次编排和数据资源管理'),
+          title: const Text('数据管理'),
           subtitle: const Text('数据表版本、更新与车次编排版本'),
           trailing: chevron(),
           onTap: () {
@@ -824,10 +824,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                   children: [
                                     Text('导出原始日志', style: AppTheme.bodyLarge),
                                     SizedBox(height: 2),
-                                    Text(
-                                      '分享原始日志文件',
-                                      style: AppTheme.caption,
-                                    ),
+                                    Text('分享原始日志文件', style: AppTheme.caption),
                                   ],
                                 ),
                               ),

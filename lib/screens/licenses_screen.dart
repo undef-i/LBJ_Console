@@ -49,58 +49,65 @@ class LicensesScreen extends StatelessWidget {
               builder: (context, snapshot) {
                 final licenses = snapshot.data ?? const <String, String>{};
                 final names = licenses.keys.toList()..sort();
-                return ListView(
-                  padding: const EdgeInsets.only(top: 56),
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'LBJ Console',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                              color:
-                                  Theme.of(context).brightness ==
-                                      Brightness.dark
-                                  ? Colors.white
-                                  : null,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            '本程序是 GNU 通用公共许可证第 3 版下的自由软件。',
-                            style: TextStyle(
-                              fontSize: 13,
-                              color:
-                                  Theme.of(context).brightness ==
-                                      Brightness.dark
-                                  ? Colors.white
-                                  : null,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const Divider(),
-                    for (final name in names)
-                      ListTile(
-                        title: Text(name),
-                        trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-                        onTap: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute<void>(
-                              builder: (context) => _LicenseDetailScreen(
-                                package: name,
-                                text: licenses[name]!,
+                return MediaQuery.removePadding(
+                  context: context,
+                  removeTop: true,
+                  child: ListView(
+                    padding: const EdgeInsets.only(top: 56),
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'LBJ Console',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                                color:
+                                    Theme.of(context).brightness ==
+                                        Brightness.dark
+                                    ? Colors.white
+                                    : null,
                               ),
                             ),
-                          );
-                        },
+                            const SizedBox(height: 4),
+                            Text(
+                              '本程序是 GNU 通用公共许可证第 3 版下的自由软件。',
+                              style: TextStyle(
+                                fontSize: 13,
+                                color:
+                                    Theme.of(context).brightness ==
+                                        Brightness.dark
+                                    ? Colors.white
+                                    : null,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                  ],
+                      const Divider(),
+                      for (final name in names)
+                        ListTile(
+                          title: Text(name),
+                          trailing: const Icon(
+                            Icons.arrow_forward_ios,
+                            size: 16,
+                          ),
+                          onTap: () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                builder: (context) => _LicenseDetailScreen(
+                                  package: name,
+                                  text: licenses[name]!,
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                    ],
+                  ),
                 );
               },
             ),
@@ -126,11 +133,15 @@ class _LicenseDetailScreen extends StatelessWidget {
       body: Stack(
         children: [
           SafeArea(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(16, 56 + 16, 16, 16),
-              child: SelectableText(
-                text,
-                style: const TextStyle(fontSize: 13, height: 1.5),
+            child: MediaQuery.removePadding(
+              context: context,
+              removeTop: true,
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(16, 56 + 16, 16, 16),
+                child: SelectableText(
+                  text,
+                  style: const TextStyle(fontSize: 13, height: 1.5),
+                ),
               ),
             ),
           ),
