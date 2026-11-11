@@ -1,14 +1,11 @@
+import 'package:lbjconsole/models/klw_event.dart';
 import 'package:lbjconsole/models/train_record.dart';
 import 'package:lbjconsole/models/merged_record.dart';
 
 class MergeService {
   static bool isNeverGroupableRecord(TrainRecord record, GroupBy groupBy) {
-    final train = record.train.trim();
-    final loco = record.loco.trim();
-
-    final hasValidTrain =
-        train.isNotEmpty && train != "<NUL>" && !train.contains("-----");
-    final hasValidLoco = loco.isNotEmpty && loco != "<NUL>";
+    final hasValidTrain = _hasValidTrain(record.trainNumber.trim());
+    final hasValidLoco = _hasValidLocoRecord(record);
 
     switch (groupBy) {
       case GroupBy.trainOnly:
@@ -34,11 +31,10 @@ class MergeService {
   }
 
   static String? _generateGroupKey(TrainRecord record, GroupBy groupBy) {
-    final train = record.train.trim();
-    final loco = record.loco.trim();
-    final hasTrain =
-        train.isNotEmpty && train != "<NUL>" && !train.contains("-----");
-    final hasLoco = loco.isNotEmpty && loco != "<NUL>";
+    final train = _trainKey(record);
+    final loco = KlwState.recordKey(record);
+    final hasTrain = _hasValidTrain(record.trainNumber.trim());
+    final hasLoco = _hasValidLocoRecord(record);
 
     switch (groupBy) {
       case GroupBy.trainOnly:
@@ -59,12 +55,20 @@ class MergeService {
     }
   }
 
+
+  static String _trainKey(TrainRecord record) {
+    return record.trainNumber.trim();
+  }
+
   static bool _hasValidTrain(String train) {
     return train.isNotEmpty && train != "<NUL>" && !train.contains("-----");
   }
 
-  static bool _hasValidLoco(String loco) {
-    return loco.isNotEmpty && loco != "<NUL>";
+  static bool _hasValidLocoRecord(TrainRecord record) {
+    final raw = record.rawLocoNumber.trim();
+    final parsed = record.parsedLocoNumber.trim();
+    return (raw.isNotEmpty && raw != "<NUL>") ||
+        (parsed.isNotEmpty && parsed != "<NUL>");
   }
 
   static List<Object> getMixedList(
@@ -188,12 +192,12 @@ class MergeService {
     final locoIndex = <String, List<TrainRecord>>{};
 
     for (final record in records) {
-      final train = record.train.trim();
-      final loco = record.loco.trim();
-      if (_hasValidTrain(train)) {
+      final train = _trainKey(record);
+      final loco = KlwState.recordKey(record);
+      if (_hasValidTrain(record.trainNumber.trim())) {
         trainIndex.putIfAbsent(train, () => []).add(record);
       }
-      if (_hasValidLoco(loco)) {
+      if (_hasValidLocoRecord(record)) {
         locoIndex.putIfAbsent(loco, () => []).add(record);
       }
     }
@@ -202,13 +206,13 @@ class MergeService {
       final record = records[i];
       if (usedRecordIds.contains(record.uniqueId)) continue;
 
-      final recordTrain = record.train.trim();
-      final recordLoco = record.loco.trim();
+      final recordTrain = _trainKey(record);
+      final recordLoco = KlwState.recordKey(record);
       final candidates = <TrainRecord>{};
-      if (_hasValidTrain(recordTrain)) {
+      if (_hasValidTrain(record.trainNumber.trim())) {
         candidates.addAll(trainIndex[recordTrain] ?? const <TrainRecord>[]);
       }
-      if (_hasValidLoco(recordLoco)) {
+      if (_hasValidLocoRecord(record)) {
         candidates.addAll(locoIndex[recordLoco] ?? const <TrainRecord>[]);
       }
 
@@ -217,19 +221,22 @@ class MergeService {
         if (otherRecord.uniqueId == record.uniqueId) continue;
         if (usedRecordIds.contains(otherRecord.uniqueId)) continue;
 
-        final otherTrain = otherRecord.train.trim();
-        final otherLoco = otherRecord.loco.trim();
+        final otherTrain = _trainKey(otherRecord);
+        final otherLoco = KlwState.recordKey(otherRecord);
 
-        final trainMatch =
-            _hasValidTrain(recordTrain) && recordTrain == otherTrain;
-        final locoMatch = _hasValidLoco(recordLoco) && recordLoco == otherLoco;
+        final trainMatch = _hasValidTrain(record.trainNumber.trim()) &&
+            recordTrain == otherTrain;
+        final locoMatch =
+            _hasValidLocoRecord(record) && recordLoco == otherLoco;
 
-        final bothTrainEmpty = (recordTrain.isEmpty ||
-                recordTrain == "<NUL>" ||
-                recordTrain.contains("----")) &&
-            (otherTrain.isEmpty ||
-                otherTrain == "<NUL>" ||
-                otherTrain.contains("----"));
+        final rawTrain = record.trainNumber.trim();
+        final otherRawTrain = otherRecord.trainNumber.trim();
+        final bothTrainEmpty = (rawTrain.isEmpty ||
+                rawTrain == "<NUL>" ||
+                rawTrain.contains("----")) &&
+            (otherRawTrain.isEmpty ||
+                otherRawTrain == "<NUL>" ||
+                otherRawTrain.contains("----"));
 
         if (trainMatch || locoMatch || (bothTrainEmpty && locoMatch)) {
           group.add(otherRecord);
@@ -245,16 +252,18 @@ class MergeService {
         }
 
         final firstRecord = processedGroup.first;
-        final train = firstRecord.train.trim();
-        final loco = firstRecord.loco.trim();
+        final train = _trainKey(firstRecord);
+        final loco = KlwState.recordKey(firstRecord);
         String uniqueGroupKey;
 
-        if (_hasValidTrain(train) && _hasValidLoco(loco)) {
-          uniqueGroupKey = "train_or_loco:${train}_$loco";
-        } else if (_hasValidTrain(train) && loco.isEmpty) {
-          uniqueGroupKey = "train_or_loco:train:$train";
-        } else if (_hasValidLoco(loco)) {
-          uniqueGroupKey = "train_or_loco:loco:$loco";
+        if (_hasValidTrain(firstRecord.trainNumber.trim()) &&
+            _hasValidLocoRecord(firstRecord)) {
+          uniqueGroupKey = "train_or_loco:${train}_$loco:${firstRecord.uniqueId}";
+        } else if (_hasValidTrain(firstRecord.trainNumber.trim()) &&
+            !_hasValidLocoRecord(firstRecord)) {
+          uniqueGroupKey = "train_or_loco:train:$train:${firstRecord.uniqueId}";
+        } else if (_hasValidLocoRecord(firstRecord)) {
+          uniqueGroupKey = "train_or_loco:loco:$loco:${firstRecord.uniqueId}";
         } else {
           uniqueGroupKey = "train_or_loco:group_${mergedRecords.length}";
         }
@@ -291,5 +300,59 @@ class MergeService {
     });
 
     return result;
+  }
+
+  static bool recordPassesFieldFilter(TrainRecord record) {
+          bool isFieldMeaningful(String field) {
+            if (field.isEmpty) {
+              return false;
+            }
+            String cleaned = field.replaceAll('<NUL>', '').trim();
+            if (cleaned.isEmpty) {
+              return false;
+            }
+            if (cleaned.runes
+                .every((r) => r == '*'.runes.first || r == ' '.runes.first)) {
+              return false;
+            }
+            return true;
+          }
+
+          final hasTrainNumber = isFieldMeaningful(record.trainNumber) &&
+              !record.trainNumber.contains("-----");
+
+          final hasDirection =
+              record.directionCode == 1 || record.directionCode == 3;
+
+          final hasLocoInfo = isFieldMeaningful(record.rawLocoNumber) ||
+              isFieldMeaningful(record.parsedLocoNumber);
+
+          final hasRoute = isFieldMeaningful(record.route);
+
+          final hasPosition = isFieldMeaningful(record.kilometerMark);
+
+          final hasSpeed =
+              isFieldMeaningful(record.speedKmh) && record.speedKmh != "NUL";
+
+          final hasPositionInfo = record.hasGps;
+
+          final hasTrainType =
+              isFieldMeaningful(record.trainType) && record.trainType != "未知";
+
+          final hasTrainClass =
+              RegExp(r'^[A-Za-z]').hasMatch(record.trainNumber.trim());
+
+          final shouldShow = hasTrainNumber ||
+              hasDirection ||
+              hasLocoInfo ||
+              hasRoute ||
+              hasPosition ||
+              hasSpeed ||
+              hasPositionInfo ||
+              hasTrainType ||
+              hasTrainClass;
+
+          return shouldShow;
+
   }
 }

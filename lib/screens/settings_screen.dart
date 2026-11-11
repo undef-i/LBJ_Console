@@ -4,8 +4,13 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:lbjconsole/models/merged_record.dart';
+import 'package:lbjconsole/screens/clear_data_screen.dart';
+import 'package:lbjconsole/screens/klw_manage_screen.dart';
+import 'package:lbjconsole/screens/raster_map_screen.dart';
+import 'package:lbjconsole/screens/resource_screen.dart';
 import 'package:lbjconsole/screens/licenses_screen.dart';
 import 'package:lbjconsole/services/database_service.dart';
+import 'package:lbjconsole/services/raw_log_service.dart';
 import 'package:lbjconsole/services/background_service.dart';
 import 'package:lbjconsole/services/audio_input_service.dart';
 import 'package:lbjconsole/services/rtl_tcp_service.dart';
@@ -28,14 +33,14 @@ import 'package:lbjconsole/ui/liquid_glass.dart';
 
 class SettingsScreen extends StatefulWidget {
   final VoidCallback? onSettingsChanged;
-  final bool temporaryRecordsEnabled;
-  final ValueChanged<bool>? onTemporaryRecordsChanged;
+  final bool sampleRecordsEnabled;
+  final ValueChanged<bool>? onSampleRecordsChanged;
 
   const SettingsScreen({
     super.key,
     this.onSettingsChanged,
-    this.temporaryRecordsEnabled = false,
-    this.onTemporaryRecordsChanged,
+    this.sampleRecordsEnabled = false,
+    this.onSampleRecordsChanged,
   });
 
   @override
@@ -43,8 +48,6 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-
-
   late DatabaseService _databaseService;
   late TextEditingController _deviceNameController;
   late TextEditingController _rtlTcpHostController;
@@ -67,8 +70,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String _rtlTcpHost = '127.0.0.1';
   String _rtlTcpPort = '14423';
   bool _debugMode = false;
-  int _aboutIconTapCount = 0;
-  Timer? _aboutIconTapTimer;
+  bool _protoLbj = true;
+  bool _protoKlw = false;
+  bool _protoTdcs = false;
+  int _aboutTapCount = 0;
+  Timer? _aboutTapTimer;
   late final Future<String> _appVersion;
 
   @override
@@ -109,6 +115,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           (e) => e.name == sourceStr,
           orElse: () => InputSource.bluetooth,
         );
+        _loadProtos(settingsMap);
 
         final engineStr = settingsMap['mapEngine'] as String? ?? 'vector';
         _mapEngine = MapEngine.values.firstWhere(
@@ -121,10 +128,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  String get _protoPrefix =>
+      _inputSource == InputSource.usb ? 'protoUsb' : 'protoRtl';
+
+  void _loadProtos(Map<String, dynamic> settingsMap) {
+    _protoLbj = (settingsMap['${_protoPrefix}Lbj'] ?? 1) == 1;
+    _protoKlw = (settingsMap['${_protoPrefix}Klw'] ?? 0) == 1;
+    _protoTdcs = (settingsMap['${_protoPrefix}Tdcs'] ?? 0) == 1;
+  }
+
   Future<void> _saveSettings() async {
     if (!_settingsLoaded) return;
 
-    await _databaseService.updateSettings({
+    final values = <String, dynamic>{
       'deviceName': _deviceName,
       'backgroundServiceEnabled': _backgroundServiceEnabled ? 1 : 0,
       'notificationEnabled': _notificationsEnabled ? 1 : 0,
@@ -137,16 +153,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
       'mapEngine': _mapEngine.name,
       'rtlTcpHost': _rtlTcpHost,
       'rtlTcpPort': _rtlTcpPort,
-    });
+    };
+    if (_inputSource == InputSource.usb ||
+        _inputSource == InputSource.rtlTcp) {
+      values['${_protoPrefix}Lbj'] = _protoLbj ? 1 : 0;
+      values['${_protoPrefix}Klw'] = _protoKlw ? 1 : 0;
+      values['${_protoPrefix}Tdcs'] = _protoTdcs ? 1 : 0;
+    }
+    await _databaseService.updateSettings(values);
     widget.onSettingsChanged?.call();
   }
 
   Future<void> _switchInputSource(InputSource newSource) async {
+    await _saveSettings();
     await AudioInputService().stopListening();
     await EmbeddedUsbService.instance.deactivate();
     await RtlTcpService().disconnect();
+    final settingsMap = await _databaseService.getAllSettings() ?? {};
     setState(() {
       _inputSource = newSource;
+      _loadProtos(settingsMap);
     });
 
     switch (newSource) {
@@ -168,7 +194,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   void dispose() {
-    _aboutIconTapTimer?.cancel();
+    _aboutTapTimer?.cancel();
     _deviceNameController.dispose();
     _rtlTcpHostController.dispose();
     _rtlTcpPortController.dispose();
@@ -192,26 +218,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(width: 16),
           Expanded(
             child: TextField(
-                controller: controller,
-                keyboardType: keyboardType,
-                textAlign: TextAlign.end,
-                cursorWidth: 2,
-                onTapOutside: (_) =>
-                    FocusManager.instance.primaryFocus?.unfocus(),
-                decoration: InputDecoration.collapsed(
-                  hintText: hint,
-                  hintStyle: TextStyle(
-                    fontSize: 17,
-                    height: 22 / 17,
-                    color: scheme.onSurfaceVariant,
-                  ),
-                ),
-                style: TextStyle(
+              controller: controller,
+              keyboardType: keyboardType,
+              textAlign: TextAlign.end,
+              cursorWidth: 2,
+              onTapOutside: (_) =>
+                  FocusManager.instance.primaryFocus?.unfocus(),
+              decoration: InputDecoration.collapsed(
+                hintText: hint,
+                hintStyle: TextStyle(
                   fontSize: 17,
                   height: 22 / 17,
-                  color: scheme.onSurface,
+                  color: scheme.onSurfaceVariant,
                 ),
-                onChanged: onChanged,
+              ),
+              style: TextStyle(
+                fontSize: 17,
+                height: 22 / 17,
+                color: scheme.onSurface,
+              ),
+              onChanged: onChanged,
             ),
           ),
         ],
@@ -219,11 +245,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  Widget _toggleRow(
-    String title,
-    bool value,
-    ValueChanged<bool> onChanged,
-  ) {
+  Widget _toggleRow(String title, bool value, ValueChanged<bool> onChanged) {
     return FlRow(
       title: Text(title),
       trailing: GlassSwitch(value: value, onChanged: onChanged),
@@ -249,10 +271,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 value: InputSource.rtlTcp,
                 child: Text('rtl_tcp'),
               ),
-              DropdownMenuItem(
-                value: InputSource.usb,
-                child: Text('USB 设备'),
-              ),
+              DropdownMenuItem(value: InputSource.usb, child: Text('USB 设备')),
               DropdownMenuItem(
                 value: InputSource.audioInput,
                 child: Text('音频设备'),
@@ -301,26 +320,52 @@ class _SettingsScreenState extends State<SettingsScreen> {
               _saveSettings();
             },
           ),
+        ],
+        if (_inputSource == InputSource.rtlTcp ||
+            _inputSource == InputSource.usb) ...[
+          _toggleRow('LBJ (821.2375 MHz)', _protoLbj, (value) {
+            if (!value && !_protoKlw && !_protoTdcs) return;
+            setState(() {
+              _protoLbj = value;
+            });
+            _saveSettings();
+          }),
+          _toggleRow('KLW (866.2375 MHz)', _protoKlw, (value) {
+            if (!value && !_protoLbj && !_protoTdcs) return;
+            setState(() {
+              _protoKlw = value;
+            });
+            _saveSettings();
+          }),
+          _toggleRow('TDCS (457.550 MHz)', _protoTdcs, (value) {
+            if (!value && !_protoLbj && !_protoKlw) return;
+            setState(() {
+              _protoTdcs = value;
+            });
+            _saveSettings();
+          }),
+        ],
+        if (_inputSource == InputSource.usb)
+          FlRow(
+            leading: Icon(Icons.usb, color: scheme.onSurfaceVariant),
+            title: const Text(
+                '支持 ADALM-PLUTO、RTL2832U（R820T、R828D、E4000、FC0012、FC0013、FC2580）'),
+            titleStyle: TextStyle(
+              fontSize: 13,
+              height: 18 / 13,
+              color: scheme.onSurfaceVariant,
+            ),
+          ),
+        if (_inputSource == InputSource.rtlTcp)
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
             child: FlTonalButton(
-              label: '重新连接 rtl_tcp',
+              label: '重新连接',
               icon: Icons.refresh,
               height: 44,
               onPressed: () {
                 RtlTcpService().connect(host: _rtlTcpHost, port: _rtlTcpPort);
               },
-            ),
-          ),
-        ],
-        if (_inputSource == InputSource.usb)
-          FlRow(
-            leading: Icon(Icons.usb, color: scheme.onSurfaceVariant),
-            title: const Text('支持 ADALM-PLUTO、RTL2832U'),
-            titleStyle: TextStyle(
-              fontSize: 13,
-              height: 18 / 13,
-              color: scheme.onSurfaceVariant,
             ),
           ),
       ],
@@ -331,7 +376,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget build(BuildContext context) {
     return ListView(
       padding: EdgeInsets.fromLTRB(
-          16, MediaQuery.paddingOf(context).top + 80, 16, 118),
+        16,
+        MediaQuery.paddingOf(context).top + 80,
+        16,
+        118,
+      ),
       children: [
         _buildInputSourceSettings(),
         _buildAppSettings(),
@@ -374,8 +423,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
           trailing: GlassSelect<MapEngine>(
             value: _mapEngine,
             items: const [
-              DropdownMenuItem(value: MapEngine.raster, child: Text('flutter_map')),
-              DropdownMenuItem(value: MapEngine.native, child: Text('MapLibre Native')),
+              DropdownMenuItem(
+                value: MapEngine.raster,
+                child: Text('flutter_map'),
+              ),
+              DropdownMenuItem(
+                value: MapEngine.native,
+                child: Text('MapLibre Native'),
+              ),
             ],
             onChanged: (value) {
               if (value != null) {
@@ -388,6 +443,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
             },
           ),
         ),
+        if (_mapEngine == MapEngine.raster)
+          FlRow(
+            title: const Text('flutter_map 管理'),
+            trailing: Icon(
+              Icons.arrow_forward_ios,
+              size: 18,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (context) => const RasterMapScreen(),
+                ),
+              );
+            },
+          ),
       ],
     );
   }
@@ -408,14 +479,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
             trailing: GlassSelect<GroupBy>(
               value: _groupBy,
               items: const [
+                DropdownMenuItem(value: GroupBy.trainOnly, child: Text('仅车次号')),
+                DropdownMenuItem(value: GroupBy.locoOnly, child: Text('仅机车号')),
                 DropdownMenuItem(
-                    value: GroupBy.trainOnly, child: Text('仅车次号')),
+                  value: GroupBy.trainOrLoco,
+                  child: Text('车次号或机车号'),
+                ),
                 DropdownMenuItem(
-                    value: GroupBy.locoOnly, child: Text('仅机车号')),
-                DropdownMenuItem(
-                    value: GroupBy.trainOrLoco, child: Text('车次号或机车号')),
-                DropdownMenuItem(
-                    value: GroupBy.trainAndLoco, child: Text('车次号与机车号')),
+                  value: GroupBy.trainAndLoco,
+                  child: Text('车次号与机车号'),
+                ),
               ],
               onChanged: (value) {
                 if (value != null) {
@@ -433,17 +506,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
               value: _timeWindow,
               items: const [
                 DropdownMenuItem(
-                    value: TimeWindow.oneHour, child: Text('1小时内')),
+                  value: TimeWindow.oneHour,
+                  child: Text('1小时内'),
+                ),
                 DropdownMenuItem(
-                    value: TimeWindow.twoHours, child: Text('2小时内')),
+                  value: TimeWindow.twoHours,
+                  child: Text('2小时内'),
+                ),
                 DropdownMenuItem(
-                    value: TimeWindow.sixHours, child: Text('6小时内')),
+                  value: TimeWindow.sixHours,
+                  child: Text('6小时内'),
+                ),
                 DropdownMenuItem(
-                    value: TimeWindow.twelveHours, child: Text('12小时内')),
+                  value: TimeWindow.twelveHours,
+                  child: Text('12小时内'),
+                ),
                 DropdownMenuItem(
-                    value: TimeWindow.oneDay, child: Text('24小时内')),
+                  value: TimeWindow.oneDay,
+                  child: Text('24小时内'),
+                ),
                 DropdownMenuItem(
-                    value: TimeWindow.unlimited, child: Text('不限时间')),
+                  value: TimeWindow.unlimited,
+                  child: Text('不限时间'),
+                ),
               ],
               onChanged: (value) {
                 if (value != null) {
@@ -468,14 +553,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Widget _buildDataManagement() {
     final scheme = Theme.of(context).colorScheme;
-    final destructive = scheme.brightness == Brightness.dark
-        ? const Color(0xFFFF4245)
-        : const Color(0xFFFF383C);
-    Widget chevron() => Icon(
-          Icons.arrow_forward_ios,
-          size: 18,
-          color: scheme.onSurfaceVariant,
-        );
+    Widget chevron() =>
+        Icon(Icons.arrow_forward_ios, size: 18, color: scheme.onSurfaceVariant);
     return FlSection(
       title: '数据管理',
       rows: [
@@ -494,11 +573,36 @@ class _SettingsScreenState extends State<SettingsScreen> {
           onTap: _importData,
         ),
         FlRow(
-          leading: Icon(Icons.clear_all, color: destructive),
-          title: Text('清空数据', style: TextStyle(color: destructive)),
-          subtitle: const Text('删除所有记录和设置'),
+          leading: Icon(Icons.list, color: scheme.primary),
+          title: const Text('KLW 数据管理'),
+          subtitle: const Text('查看和删除 KLW 事件'),
           trailing: chevron(),
-          onTap: _clearAllData,
+          onTap: () {
+            Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (context) => const KlwManageScreen(),
+              ),
+            );
+          },
+        ),
+        FlRow(
+          leading: Icon(Icons.folder_open, color: scheme.primary),
+          title: const Text('车次编排和数据资源管理'),
+          subtitle: const Text('数据表版本、更新与车次编排版本'),
+          trailing: chevron(),
+          onTap: () {
+            Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (context) => const ResourceScreen(),
+              ),
+            );
+          },
+        ),
+        FlRow(
+          leading: Icon(Icons.clear_all, color: scheme.primary),
+          title: const Text('清空数据'),
+          trailing: chevron(),
+          onTap: _openClearData,
         ),
       ],
     );
@@ -513,26 +617,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  void _handleAboutIconTap() {
-    _aboutIconTapTimer?.cancel();
-    _aboutIconTapTimer = Timer(const Duration(seconds: 2), () {
-      _aboutIconTapCount = 0;
+  void _handleAboutTap() {
+    _aboutTapTimer?.cancel();
+    _aboutTapTimer = Timer(const Duration(seconds: 2), () {
+      _aboutTapCount = 0;
     });
 
-    _aboutIconTapCount += 1;
-    if (_aboutIconTapCount < 5) return;
+    _aboutTapCount += 1;
+    if (_aboutTapCount < 5) return;
 
-    _aboutIconTapCount = 0;
-    _aboutIconTapTimer?.cancel();
-    _showTemporaryRecordsPanel();
+    _aboutTapCount = 0;
+    _aboutTapTimer?.cancel();
+    _showSampleRecordsPanel();
   }
 
   static const _debugChannel = MethodChannel('lbj/debug');
 
   Future<String> _lastExitText() async {
     try {
-      final info =
-          await _debugChannel.invokeMapMethod<String, dynamic>('lastExitInfo');
+      final info = await _debugChannel.invokeMapMethod<String, dynamic>(
+        'lastExitInfo',
+      );
       if (info == null) return '无记录';
       final reason = switch (info['reason'] as int? ?? 0) {
         2 => '被信号杀死',
@@ -570,18 +675,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _databaseService.setSetting('debugMode', value ? 1 : 0);
   }
 
-  void _showTemporaryRecordsPanel() {
+  void _setRawLog(bool value) {
+    RawLogService.instance.enabled = value;
+  }
+
+  Future<void> _shareRawLog() async {
+    final path = await RawLogService.instance.exportPath();
+    await Share.shareXFiles([XFile(path)], subject: 'LBJ Console 原始日志');
+  }
+
+  void _showSampleRecordsPanel() {
     final exitFuture = _lastExitText();
     final dbFuture = _databaseService.diagnoseDatabase();
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
+      barrierColor: Colors.black.withValues(
+        alpha: Theme.of(context).brightness == Brightness.dark ? 0.48 : 0.2,
+      ),
       isScrollControlled: true,
       enableDrag: true,
       isDismissible: true,
       builder: (context) {
-        bool enabled = widget.temporaryRecordsEnabled;
+        bool enabled = widget.sampleRecordsEnabled;
         bool debug = _debugMode;
+        bool rawLog = RawLogService.instance.enabled;
 
         return StatefulBuilder(
           builder: (context, setSheetState) {
@@ -598,125 +716,183 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
                 SafeArea(
                   child: Padding(
-                padding: const EdgeInsets.all(20.0),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
+                    padding: const EdgeInsets.all(20.0),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Icon(Icons.science,
-                            color: Theme.of(context).colorScheme.primary),
-                        const SizedBox(width: 12),
-                        const Text('调试', style: AppTheme.titleMedium),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    Row(
-                      children: [
-                        const Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('调试模式', style: AppTheme.bodyLarge),
-                              SizedBox(height: 2),
-                              Text('在连接弹窗中显示状态信息',
-                                  style: AppTheme.caption),
-                            ],
-                          ),
-                        ),
-                        GlassSwitch(
-                          value: debug,
-                          onChanged: (value) {
-                            setSheetState(() {
-                              debug = value;
-                            });
-                            _setDebugMode(value);
-                          },
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    Row(
-                      children: [
-                        const Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('生成临时列车记录', style: AppTheme.bodyLarge),
-                              SizedBox(height: 2),
-                              Text('每 5 秒新增一条真实记录，包含随机移动坐标',
-                                  style: AppTheme.caption),
-                            ],
-                          ),
-                        ),
-                        GlassSwitch(
-                          value: enabled,
-                          onChanged: (value) {
-                            setSheetState(() {
-                              enabled = value;
-                            });
-                            widget.onTemporaryRecordsChanged?.call(value);
-                          },
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onTap: () {
-                        Navigator.pop(context);
-                        _showTileLog();
-                      },
-                      child: const Row(
-                        children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text('瓦片请求日志', style: AppTheme.bodyLarge),
-                                SizedBox(height: 2),
-                                Text('本地瓦片服务的请求记录',
-                                    style: AppTheme.caption),
-                              ],
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.science,
+                              color: Theme.of(context).colorScheme.primary,
                             ),
+                            const SizedBox(width: 12),
+                            const Text('调试', style: AppTheme.titleMedium),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        Row(
+                          children: [
+                            const Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text('调试模式', style: AppTheme.bodyLarge),
+                                  SizedBox(height: 2),
+                                  Text('在连接弹窗中显示状态信息', style: AppTheme.caption),
+                                ],
+                              ),
+                            ),
+                            GlassSwitch(
+                              value: debug,
+                              onChanged: (value) {
+                                setSheetState(() {
+                                  debug = value;
+                                });
+                                _setDebugMode(value);
+                              },
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        Row(
+                          children: [
+                            const Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text('生成示例记录', style: AppTheme.bodyLarge),
+                                  SizedBox(height: 2),
+                                  Text(
+                                    '每 5 秒新增一条，轮流生成 LBJ 记录、TDCS 车次记录与 KLW 事件',
+                                    style: AppTheme.caption,
+                                  ),
+                                ],
+                              ),
+                            ),
+                            GlassSwitch(
+                              value: enabled,
+                              onChanged: (value) {
+                                setSheetState(() {
+                                  enabled = value;
+                                });
+                                widget.onSampleRecordsChanged?.call(value);
+                              },
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        Row(
+                          children: [
+                            const Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text('记录原始日志', style: AppTheme.bodyLarge),
+                                  SizedBox(height: 2),
+                                  Text(
+                                    '记录收到的 POCSAG 批次与 FFSK 原始帧',
+                                    style: AppTheme.caption,
+                                  ),
+                                ],
+                              ),
+                            ),
+                            GlassSwitch(
+                              value: rawLog,
+                              onChanged: (value) {
+                                setSheetState(() {
+                                  rawLog = value;
+                                });
+                                _setRawLog(value);
+                              },
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: () {
+                            Navigator.pop(context);
+                            _shareRawLog();
+                          },
+                          child: const Row(
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text('导出原始日志', style: AppTheme.bodyLarge),
+                                    SizedBox(height: 2),
+                                    Text(
+                                      '分享原始日志文件',
+                                      style: AppTheme.caption,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              Icon(Icons.arrow_forward_ios, size: 18),
+                            ],
                           ),
-                          Icon(Icons.arrow_forward_ios, size: 18),
-                        ],
-                      ),
+                        ),
+                        const SizedBox(height: 16),
+                        GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: () {
+                            Navigator.pop(context);
+                            _showTileLog();
+                          },
+                          child: const Row(
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text('瓦片请求日志', style: AppTheme.bodyLarge),
+                                    SizedBox(height: 2),
+                                    Text(
+                                      '本地瓦片服务的请求记录',
+                                      style: AppTheme.caption,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              Icon(Icons.arrow_forward_ios, size: 18),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        const Text('上次退出', style: AppTheme.bodyLarge),
+                        const SizedBox(height: 2),
+                        FutureBuilder<String>(
+                          future: exitFuture,
+                          builder: (context, snapshot) => Text(
+                            snapshot.data ?? '读取中',
+                            style: AppTheme.caption,
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        const Text('数据库状态', style: AppTheme.bodyLarge),
+                        const SizedBox(height: 2),
+                        FutureBuilder<String>(
+                          future: dbFuture,
+                          builder: (context, snapshot) => Text(
+                            snapshot.data ?? '读取中',
+                            style: AppTheme.caption,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: TextButton(
+                            onPressed: () => Navigator.pop(context),
+                            child: const Text('关闭'),
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 16),
-                    const Text('上次退出', style: AppTheme.bodyLarge),
-                    const SizedBox(height: 2),
-                    FutureBuilder<String>(
-                      future: exitFuture,
-                      builder: (context, snapshot) => Text(
-                        snapshot.data ?? '读取中',
-                        style: AppTheme.caption,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    const Text('数据库状态', style: AppTheme.bodyLarge),
-                    const SizedBox(height: 2),
-                    FutureBuilder<String>(
-                      future: dbFuture,
-                      builder: (context, snapshot) => Text(
-                        snapshot.data ?? '读取中',
-                        style: AppTheme.caption,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: TextButton(
-                        onPressed: () => Navigator.pop(context),
-                        child: const Text('关闭'),
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
-              ),
-            ),
               ],
             );
           },
@@ -758,26 +934,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
           );
         } else {
           scaffoldMessenger.showSnackBar(
-            const SnackBar(
-              content: Text('分享失败：无法生成数据文件'),
-            ),
+            const SnackBar(content: Text('分享失败：无法生成数据文件')),
           );
         }
       } catch (e) {
         if (!mounted) return;
         Navigator.pop(context);
-        scaffoldMessenger.showSnackBar(
-          SnackBar(
-            content: Text('分享错误：$e'),
-          ),
-        );
+        scaffoldMessenger.showSnackBar(SnackBar(content: Text('分享错误：$e')));
       }
     } catch (e) {
-      scaffoldMessenger.showSnackBar(
-        SnackBar(
-          content: Text('分享错误：$e'),
-        ),
-      );
+      scaffoldMessenger.showSnackBar(SnackBar(content: Text('分享错误：$e')));
     }
   }
 
@@ -834,103 +1000,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
       Navigator.pop(context);
 
       if (success) {
-        scaffoldMessenger.showSnackBar(
-          const SnackBar(
-            content: Text('数据导入成功'),
-          ),
-        );
+        scaffoldMessenger.showSnackBar(const SnackBar(content: Text('数据导入成功')));
 
         await _loadSettings();
         setState(() {});
       } else {
-        scaffoldMessenger.showSnackBar(
-          const SnackBar(
-            content: Text('数据导入失败'),
-          ),
-        );
+        scaffoldMessenger.showSnackBar(const SnackBar(content: Text('数据导入失败')));
       }
     } catch (e) {
       if (!mounted) return;
       Navigator.pop(context);
-      scaffoldMessenger.showSnackBar(
-        SnackBar(
-          content: Text('导入错误：$e'),
-        ),
-      );
+      scaffoldMessenger.showSnackBar(SnackBar(content: Text('导入错误：$e')));
     }
   }
 
-  Future<void> _clearAllData() async {
-    final scaffoldMessenger = ScaffoldMessenger.of(context);
-
-    final result = await showGlassDialog<bool>(
-      context: context,
-      builder: (context) => GlassDialog(
-        title: const Text('清空数据'),
-        content: const Text('此操作将删除所有记录和设置，无法撤销。是否继续？'),
-        destructive: true,
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('取消'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('确认清空'),
-          ),
-        ],
-      ),
+  Future<void> _openClearData() async {
+    final cleared = await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(builder: (context) => const ClearDataScreen()),
     );
-
-    if (result != true) return;
+    if (cleared != true || !mounted) return;
+    await _loadSettings();
     if (!mounted) return;
-
-    showGlassDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => const GlassDialog(
-        content: Row(
-          children: [
-            CircularProgressIndicator(),
-            SizedBox(width: 16),
-            Text('正在清空数据...'),
-          ],
-        ),
-      ),
-    );
-
-    try {
-      await _databaseService.deleteAllRecords();
-      await _databaseService.updateSettings({
-        'deviceName': 'LBJReceiver',
-        'backgroundServiceEnabled': 0,
-        'notificationEnabled': 1,
-        'mergeRecordsEnabled': 0,
-        'groupBy': 'trainAndLoco',
-        'timeWindow': 'unlimited',
-        'inputSource': 'bluetooth',
-      });
-
-      if (!mounted) return;
-      Navigator.pop(context);
-
-      scaffoldMessenger.showSnackBar(
-        const SnackBar(
-          content: Text('数据已清空'),
-        ),
-      );
-
-      await _loadSettings();
-      setState(() {});
-    } catch (e) {
-      if (!mounted) return;
-      Navigator.pop(context);
-      scaffoldMessenger.showSnackBar(
-        SnackBar(
-          content: Text('清空错误：$e'),
-        ),
-      );
-    }
+    setState(() {});
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('数据已清空')));
   }
 
   void _showTileLog() {
@@ -965,19 +1059,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 24, 16, 8),
-          child: Row(
-            children: [
-              GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: _handleAboutIconTap,
-                child: Padding(
-                  padding: const EdgeInsets.all(4.0),
-                  child: Icon(Icons.info, color: scheme.primary, size: 20),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Text('关于', style: flCaptionStyle(scheme)),
-            ],
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: _handleAboutTap,
+            child: Text('关于', style: flCaptionStyle(scheme)),
           ),
         ),
         FlSection(
@@ -1009,8 +1094,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 color: scheme.onSurfaceVariant,
               ),
               onTap: () async {
-                final url =
-                    Uri.parse('https://github.com/undef-i/LBJConsole');
+                final url = Uri.parse('https://github.com/undef-i/LBJConsole');
                 if (await canLaunchUrl(url)) {
                   await launchUrl(url);
                 }

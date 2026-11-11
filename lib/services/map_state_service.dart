@@ -27,10 +27,6 @@ class MapStateService {
     return "${recordId}_record_map";
   }
 
-  String getMergedRecordMapKey(String groupKey) {
-    return "${groupKey}_group_map";
-  }
-
   Future<void> saveMapState(String key, MapState state) async {
     try {
       _memoryCache[key] = state;
@@ -79,31 +75,5 @@ class MapStateService {
     return null;
   }
 
-  Future<void> deleteMapState(String key) async {
-    _memoryCache.remove(key);
 
-    try {
-      final db = await DatabaseService.instance.database;
-      await db.delete(
-        _tableName,
-        where: 'key = ?',
-        whereArgs: [key],
-      );
-    // ignore: empty_catches
-    } catch (e) {}
-  }
-
-  Future<void> clearAllMapStates() async {
-    _memoryCache.clear();
-
-    try {
-      final db = await DatabaseService.instance.database;
-      await db.delete(_tableName);
-    // ignore: empty_catches
-    } catch (e) {}
-  }
-
-  void clearMemoryCache() {
-    _memoryCache.clear();
-  }
 }

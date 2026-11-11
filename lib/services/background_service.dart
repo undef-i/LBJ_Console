@@ -46,7 +46,7 @@ class BackgroundService {
         isForegroundMode: true,
         notificationChannelId: _notificationChannelId,
         initialNotificationTitle: 'LBJ Console',
-        initialNotificationContent: '蓝牙连接监控中',
+        initialNotificationContent: '蓝牙连接中',
         foregroundServiceNotificationId: _notificationId,
       ),
       iosConfiguration: IosConfiguration(
@@ -71,105 +71,20 @@ class BackgroundService {
       service.on('setAsBackground').listen((event) {
         service.setAsBackgroundService();
       });
+
+      service.on('updateStatus').listen((event) {
+        final text = event?['text'] as String? ?? '蓝牙连接中';
+        service.setForegroundNotificationInfo(
+          title: 'LBJ Console',
+          content: text,
+        );
+      });
+
+      service.invoke('ready');
     }
 
     service.on('stopService').listen((event) {
       service.stopSelf();
-    });
-
-    BLEService().initialize();
-
-    if (service is AndroidServiceInstance) {
-      await Future.delayed(const Duration(seconds: 1));
-      if (await service.isForegroundService()) {
-        final flutterLocalNotificationsPlugin =
-            FlutterLocalNotificationsPlugin();
-
-        try {
-          const AndroidNotificationChannel channel = AndroidNotificationChannel(
-            _notificationChannelId,
-            _notificationChannelName,
-            description: _notificationChannelDescription,
-            importance: Importance.low,
-            enableLights: false,
-            enableVibration: false,
-            playSound: false,
-          );
-
-          await flutterLocalNotificationsPlugin
-              .resolvePlatformSpecificImplementation<
-                  AndroidFlutterLocalNotificationsPlugin>()
-              ?.createNotificationChannel(channel);
-
-          await flutterLocalNotificationsPlugin.show(
-            _notificationId,
-            'LBJ Console',
-            '蓝牙连接监控中',
-            const NotificationDetails(
-              android: AndroidNotificationDetails(
-                _notificationChannelId,
-                _notificationChannelName,
-                channelDescription: _notificationChannelDescription,
-                icon: '@mipmap/ic_launcher',
-                ongoing: true,
-                autoCancel: false,
-                importance: Importance.low,
-                priority: Priority.low,
-                enableLights: false,
-                enableVibration: false,
-                playSound: false,
-                onlyAlertOnce: true,
-                setAsGroupSummary: false,
-                groupKey: 'lbj_console_group',
-                visibility: NotificationVisibility.public,
-                category: AndroidNotificationCategory.service,
-              ),
-            ),
-          );
-        // ignore: empty_catches
-        } catch (e) {}
-      }
-    }
-
-    Timer.periodic(const Duration(seconds: 30), (timer) async {
-      if (service is AndroidServiceInstance) {
-        if (await service.isForegroundService()) {
-          try {
-            final bleService = BLEService();
-            final isConnected = bleService.isConnected;
-            final deviceStatus = bleService.deviceStatus;
-
-            final flutterLocalNotificationsPlugin =
-                FlutterLocalNotificationsPlugin();
-            await flutterLocalNotificationsPlugin.show(
-              _notificationId,
-              'LBJ Console',
-              isConnected ? '蓝牙已连接 - $deviceStatus' : '蓝牙未连接 - 自动重连中',
-              const NotificationDetails(
-                android: AndroidNotificationDetails(
-                  _notificationChannelId,
-                  _notificationChannelName,
-                  channelDescription: _notificationChannelDescription,
-                  icon: '@mipmap/ic_launcher',
-                  ongoing: true,
-                  autoCancel: false,
-                  importance: Importance.low,
-                  priority: Priority.low,
-                  enableLights: false,
-                  enableVibration: false,
-                  playSound: false,
-                  onlyAlertOnce: true,
-                  setAsGroupSummary: false,
-                  groupKey: 'lbj_console_group',
-                  visibility: NotificationVisibility.public,
-                  category: AndroidNotificationCategory.service,
-                ),
-              ),
-            );
-          // ignore: empty_catches
-          } catch (e) {}
-        }
-      }
     });
   }
 
@@ -178,18 +93,36 @@ class BackgroundService {
     return true;
   }
 
+  static bool _readyBound = false;
+
   static Future<void> startService() async {
     await initialize();
     final service = FlutterBackgroundService();
 
+    if (!_readyBound) {
+      _readyBound = true;
+      service.on('ready').listen((_) => pushBleStatus());
+    }
+
     if (Platform.isAndroid) {
       final isRunning = await service.isRunning();
-      if (!isRunning) {
+      if (isRunning) {
+        await pushBleStatus();
+      } else {
         service.startService();
       }
     } else if (Platform.isIOS) {
       service.startService();
     }
+  }
+
+  static Future<void> pushBleStatus() async {
+    if (!await isRunning()) return;
+    final bleService = BLEService();
+    final text = bleService.isConnected
+        ? '蓝牙已连接 - ${bleService.deviceStatus}'
+        : '蓝牙连接中';
+    FlutterBackgroundService().invoke('updateStatus', {'text': text});
   }
 
   static Future<void> stopService() async {
@@ -202,12 +135,4 @@ class BackgroundService {
     return await service.isRunning();
   }
 
-  static void setForegroundMode(bool isForeground) {
-    final service = FlutterBackgroundService();
-    if (isForeground) {
-      service.invoke('setAsForeground');
-    } else {
-      service.invoke('setAsBackground');
-    }
-  }
 }

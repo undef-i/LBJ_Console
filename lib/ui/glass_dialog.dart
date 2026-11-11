@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
 import 'elastic_press.dart';
-import 'glass_styles.dart';
 import 'liquid_glass.dart';
 import 'motion.dart';
 import 'shape.dart';
@@ -22,8 +21,6 @@ const double _pressedDarkDefaultShare = 0.5;
 const double _alertCorner = 34;
 const Color _destructiveColor = Color(0xFFFF4245);
 
-// UIAlertController on iOS 27 grows in from 1.2 times its size and only
-// fades out, both on one critically damped spring that settles in 0.404 s.
 const _alertDuration = Duration(milliseconds: 404);
 const double _alertEntryScale = 1.2;
 final _alertSpring = SpringCurve(
@@ -174,12 +171,15 @@ class _AlertTransitionState extends State<_AlertTransition> {
 
   void _handleStatus(AnimationStatus status) {
     _heldScale = status == AnimationStatus.reverse ? _scale : null;
+    _exiting = status == AnimationStatus.reverse;
   }
+
+  bool _exiting = false;
 
   @override
   Widget build(BuildContext context) {
     return LiquidGlassFade(
-      opacity: widget.animation,
+      opacity: _exiting ? widget.animation : _fullOpacity,
       child: AnimatedBuilder(
         animation: widget.animation,
         builder: (_, child) => Transform.scale(scale: _scale, child: child),
@@ -188,6 +188,8 @@ class _AlertTransitionState extends State<_AlertTransition> {
     );
   }
 }
+
+const _fullOpacity = AlwaysStoppedAnimation<double>(1.0);
 
 RenderPhysicalShape? _surfaceIn(RenderObject node) {
   if (node is RenderPhysicalShape) {
@@ -209,8 +211,6 @@ Rect _surfaceRectIn(RenderBox box) {
   );
 }
 
-/// An [AlertDialog] takes only a color, so the pane goes where its
-/// [Material] lays out its [PhysicalShape].
 class _AlertGlass extends SingleChildRenderObjectWidget {
   const _AlertGlass({
     required this.style,
@@ -322,8 +322,25 @@ class _RenderAlertGlass extends RenderProxyBox {
   }
 }
 
-LiquidGlassStyle _alertStyle(ColorScheme colorScheme) =>
-    glassMenuStyle(colorScheme, blur: 16);
+LiquidGlassStyle _alertStyle(ColorScheme colorScheme) {
+  if (colorScheme.brightness == Brightness.dark) {
+    return LiquidGlassStyle(
+      tint: colorScheme.surfaceContainerHighest.withValues(alpha: 0.78),
+      contrast: -0.53,
+      blur: 20,
+      saturation: 1.3,
+      brightness: 1.8,
+      rim: 0,
+    );
+  }
+  return LiquidGlassStyle(
+    tint: colorScheme.surfaceBright.withValues(alpha: 0.78),
+    blur: 20,
+    saturation: 1.2,
+    brightness: 1.05,
+    rim: 0,
+  );
+}
 
 LiquidGlassRim _alertRim(ColorScheme colorScheme) =>
     colorScheme.brightness == Brightness.dark
@@ -359,7 +376,6 @@ class GlassDialog extends StatelessWidget {
   final Widget? content;
   final List<Widget> actions;
 
-  /// The last action destroys data: red on the plain fill, as in UIKit.
   final bool destructive;
 
   @override
@@ -434,9 +450,6 @@ class GlassDialog extends StatelessWidget {
   }
 }
 
-/// Text buttons laid out and filled as [GlassDialog] sets its own: the last
-/// one is the default action and is filled, and the first one, the cancel
-/// action by convention, ends a stack.
 class AlertActions extends StatelessWidget {
   const AlertActions({
     super.key,
@@ -534,9 +547,6 @@ class _AlertAction extends StatelessWidget {
   }
 }
 
-/// Two actions side by side when both labels fit half the width; any other
-/// count, or labels too long, stacked in order with the first one at the
-/// bottom.
 class _AlertActions extends MultiChildRenderObjectWidget {
   const _AlertActions({required super.children});
 

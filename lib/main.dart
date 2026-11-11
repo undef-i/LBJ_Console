@@ -8,6 +8,7 @@ import 'package:lbjconsole/ui/liquid_glass.dart';
 import 'package:lbjconsole/util/train_type_util.dart';
 import 'package:lbjconsole/util/loco_info_util.dart';
 import 'package:lbjconsole/services/background_service.dart';
+import 'package:lbjconsole/services/resource_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -23,6 +24,8 @@ void main() async {
   await _initializeNotifications();
 
   await BackgroundService.initialize();
+
+  await ResourceService.initialize();
 
   await Future.wait([
     TrainTypeUtil.initialize(),
@@ -59,7 +62,7 @@ class LBJReceiverApp extends StatelessWidget {
       builder: (context, child) => LiquidGlassScope(
         enabled: true,
         quality: LiquidGlassQuality.standard,
-        child: LiquidGlassHost(enabled: true, child: child!),
+        child: child!,
       ),
       home: const MainScreen(),
     );

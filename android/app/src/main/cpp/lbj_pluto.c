@@ -11,7 +11,6 @@
 
 #include "libusb.h"
 
-#define PLUTO_PORT 14423
 #define PLUTO_FREQ_HZ 821237500
 #define PLUTO_RATE_HZ 2400000
 #define PLUTO_BUF_SAMPLES 8192
@@ -46,6 +45,7 @@ static struct {
 	int start_err;
 	int exit_err;
 	int listen_fd;
+	int port;
 	int client_fd;
 	int send_failed;
 	int finished;
@@ -53,7 +53,7 @@ static struct {
 } P = {
 	PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER,
 	PTHREAD_MUTEX_INITIALIZER,
-	0, NULL, NULL, {0}, {0}, "", "", 0, 0, 0, 0, 0, 0, -1, -1, 0, 0,
+	0, NULL, NULL, {0}, {0}, "", "", 0, 0, 0, 0, 0, 0, -1, 0, -1, 0, 0, 0,
 };
 
 static int pio_fill(struct pio *p)
@@ -450,6 +450,7 @@ static void *pluto_session_main(void *arg)
 		goto out_pipes;
 	}
 
+	P.port = 0;
 	int lfd = socket(AF_INET, SOCK_STREAM, 0);
 	if (lfd < 0) {
 		pluto_signal_started(-3006);
@@ -461,13 +462,17 @@ static void *pluto_session_main(void *arg)
 	memset(&addr, 0, sizeof(addr));
 	addr.sin_family = AF_INET;
 	addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-	addr.sin_port = htons(PLUTO_PORT);
+	addr.sin_port = 0;
 	if (bind(lfd, (struct sockaddr *)&addr, sizeof(addr)) < 0 ||
 	    listen(lfd, 1) < 0) {
 		close(lfd);
 		pluto_signal_started(-3007);
 		goto out_pipes;
 	}
+	struct sockaddr_in bound;
+	socklen_t blen = sizeof(bound);
+	if (getsockname(lfd, (struct sockaddr *)&bound, &blen) == 0)
+		P.port = ntohs(bound.sin_port);
 	P.listen_fd = lfd;
 	pluto_signal_started(0);
 	P.stage = 4;
@@ -572,6 +577,11 @@ out_ctx:
 int lbj_pluto_running(void)
 {
 	return P.running && !P.finished;
+}
+
+int lbj_pluto_port(void)
+{
+	return P.port;
 }
 
 int lbj_pluto_stage(void)

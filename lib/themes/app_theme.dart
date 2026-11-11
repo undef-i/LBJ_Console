@@ -176,9 +176,6 @@ class AppTheme {
     );
   }
 
-  static const Color errorRed = Color(0xFFCF6679);
-  static const Color successGreen = Color(0xFF4CAF50);
-  static const Color warningOrange = Color(0xFFFF9800);
 
   static const TextStyle titleLarge = TextStyle(
     fontSize: 20,
@@ -207,31 +204,5 @@ class AppTheme {
     fontWeight: FontWeight.w500,
   );
 
-  static const double spacingXS = 4.0;
-  static const double spacingS = 8.0;
-  static const double spacingM = 16.0;
-  static const double spacingL = 24.0;
-  static const double spacingXL = 32.0;
-  static const double spacingXXL = 48.0;
 
-  static const double radiusS = 4.0;
-  static const double radiusM = 8.0;
-  static const double radiusL = 12.0;
-  static const double radiusXL = 16.0;
-
-  static List<BoxShadow> get cardShadow => [
-        BoxShadow(
-          color: Colors.black.withValues(alpha: 0.3),
-          blurRadius: 8,
-          offset: const Offset(0, 2),
-        ),
-      ];
-
-  static List<BoxShadow> get buttonShadow => [
-        BoxShadow(
-          color: Colors.black.withValues(alpha: 0.2),
-          blurRadius: 4,
-          offset: const Offset(0, 2),
-        ),
-      ];
 }

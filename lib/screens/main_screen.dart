@@ -2,8 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:typed_data';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:lbjconsole/models/train_record.dart';
+import 'package:lbjconsole/models/klw_event.dart';
+import 'package:lbjconsole/models/ffsk_alarm_event.dart';
 import 'package:lbjconsole/screens/history_screen.dart';
 import 'package:lbjconsole/screens/map_screen.dart';
 import 'package:lbjconsole/screens/realtime_screen.dart';
@@ -16,6 +19,9 @@ import 'package:lbjconsole/services/background_service.dart';
 import 'package:lbjconsole/services/rtl_tcp_service.dart';
 import 'package:lbjconsole/services/embedded_usb_service.dart';
 import 'package:lbjconsole/services/audio_input_service.dart';
+import 'package:lbjconsole/services/demod_worker.dart';
+import 'package:lbjconsole/services/raw_log_service.dart';
+import 'package:lbjconsole/services/sample_frames.dart';
 import 'package:lbjconsole/ui/glass_dock.dart';
 import 'package:lbjconsole/ui/glass_styles.dart';
 import 'package:lbjconsole/ui/liquid_glass.dart';
@@ -24,6 +30,7 @@ import 'package:lbjconsole/util/app_log.dart';
 import 'package:lbjconsole/widgets/audio_waterfall_widget.dart';
 import 'package:lbjconsole/ui/glass_card.dart';
 import 'package:lbjconsole/ui/glass_dialog.dart';
+import 'package:lbjconsole/ui/glass_buttons.dart';
 import 'package:lbjconsole/ui/glass_morph_menu.dart';
 import 'package:lbjconsole/ui/scroll_edge_fade.dart';
 
@@ -89,26 +96,13 @@ class _ConnectionStatusWidgetState extends State<_ConnectionStatusWidget> {
     if (widget.inputSource == InputSource.usb) {
       return ValueListenableBuilder<int>(
         valueListenable: EmbeddedUsbService.instance.linkState,
-        builder: (context, link, _) {
-          final style = TextStyle(
-            color: Theme.of(context).colorScheme.onSurfaceVariant,
-            fontSize: 13,
-            fontWeight: FontWeight.w500,
-          );
-          if (link == 2) {
-            final t = widget.rtlTcpLastReceivedTime;
-            if (t != null) {
-              return _LastReceivedTimeWidget(
-                lastReceivedTime: t,
-                isConnected: true,
-              );
-            }
-            return Text('已连接', style: style);
-          }
-          return Text(link == 1 ? '连接中' : '未连接', style: style);
-        },
+        builder: (context, link, _) => _statusContent(context),
       );
     }
+    return _statusContent(context);
+  }
+
+  Widget _statusContent(BuildContext context) {
     bool isConnected;
     String statusText;
     DateTime? displayTime;
@@ -245,15 +239,14 @@ class MainScreen extends StatefulWidget {
 }
 
 class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
-  // TEMP: 临时测试数据。发布前把开关改成 false 或删除本段相关代码。
-  static const double _temporaryMinLat = 18.0;
-  static const double _temporaryMaxLat = 53.0;
-  static const double _temporaryMinLng = 73.0;
-  static const double _temporaryMaxLng = 135.0;
-  static const double _temporaryStartRadiusDegrees = 0.1;
-  static const double _temporaryMaxStepDegrees = 0.02;
-  static const String _temporaryTrainNumber = '7001';
-  static const List<List<double>> _temporaryChinaAnchors = [
+  static const double _sampleMinLat = 18.0;
+  static const double _sampleMaxLat = 53.0;
+  static const double _sampleMinLng = 73.0;
+  static const double _sampleMaxLng = 135.0;
+  static const double _sampleStartRadiusDegrees = 0.1;
+  static const double _sampleMaxStepDegrees = 0.02;
+  static const String _sampleTrainNumber = '7001';
+  static const List<List<double>> _sampleChinaAnchors = [
     [39.9042, 116.4074],
     [31.2304, 121.4737],
     [23.1291, 113.2644],
@@ -272,7 +265,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   late final RtlTcpService _rtlTcpService;
   final NotificationService _notificationService = NotificationService();
   final DatabaseService _databaseService = DatabaseService.instance;
-  final math.Random _temporaryRandom = math.Random();
+  final math.Random _sampleRandom = math.Random();
 
   StreamSubscription? _connectionSubscription;
   StreamSubscription? _rtlTcpConnectionSubscription;
@@ -280,19 +273,29 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   StreamSubscription? _dataSubscription;
   StreamSubscription? _rtlTcpDataSubscription;
   StreamSubscription? _audioDataSubscription;
+  StreamSubscription? _ffskTdcsSubscription;
+  StreamSubscription? _ffskKlwSubscription;
+  StreamSubscription? _ffskAlarmSubscription;
+  StreamSubscription? _audioSyncSubscription;
+  StreamSubscription? _rtlTcpSyncSubscription;
+  StreamSubscription? _bleSyncSubscription;
+  StreamSubscription? _bleTdcsSubscription;
+  StreamSubscription? _bleKlwSubscription;
+  StreamSubscription? _bleAlarmSubscription;
   StreamSubscription? _lastReceivedTimeSubscription;
   StreamSubscription? _rtlTcpLastReceivedTimeSubscription;
   StreamSubscription? _audioLastReceivedTimeSubscription;
   StreamSubscription? _settingsSubscription;
-  Timer? _temporaryRecordTimer;
+  Timer? _sampleRecordTimer;
   DateTime? _lastReceivedTime;
   DateTime? _rtlTcpLastReceivedTime;
   DateTime? _audioLastReceivedTime;
-  double? _temporaryLat;
-  double? _temporaryLng;
-  int _temporaryRecordSerial = 0;
-  bool _temporaryRecordsEnabled = false;
+  double? _sampleLat;
+  double? _sampleLng;
+  int _sampleRecordSerial = 0;
+  bool _sampleRecordsEnabled = false;
   bool _isHistoryEditMode = false;
+  bool _topBarWasEditing = false;
 
   InputSource _inputSource = InputSource.bluetooth;
 
@@ -311,6 +314,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     _bleService.initialize();
     _loadInputSettings();
     _initializeServices();
+    RawLogService.instance.attach();
     _checkAndStartBackgroundService();
     _setupConnectionListener();
     _setupLastReceivedTimeListener();
@@ -320,6 +324,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   void _loadInputSettings() async {
     final settings = await _databaseService.getAllSettings();
     MapEngineStore.instance.applySettings(settings);
+    RasterMapStore.instance.applySettings(settings);
     final sourceStr = settings?['inputSource'] as String? ?? 'bluetooth';
 
     if (mounted) {
@@ -350,6 +355,10 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       } else if (_inputSource == InputSource.audioInput) {
         await AudioInputService().startListening();
         setState(() {});
+      }
+
+      if ((settings?['sampleRecordsEnabled'] ?? 0) == 1) {
+        _setSampleRecordsEnabled(true);
       }
     }
   }
@@ -396,6 +405,8 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   void _setupSettingsListener() {
     _settingsSubscription =
         DatabaseService.instance.onSettingsChanged((settings) {
+      DemodWorker.instance
+          .setProtocols(DemodWorker.protocolsFromSettings(settings));
       if (mounted) {
         final sourceStr = settings['inputSource'] as String? ?? 'bluetooth';
         final newInputSource = InputSource.values.firstWhere(
@@ -435,6 +446,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
   void _setupConnectionListener() {
     _connectionSubscription = _bleService.connectionStream.listen((connected) {
+      BackgroundService.pushBleStatus();
       if (mounted) {
         setState(() {});
       }
@@ -465,107 +477,188 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     }
   }
 
-  void _startTemporaryRecords() {
-    if (!_temporaryRecordsEnabled) return;
+  void _startSampleRecords() {
+    if (!_sampleRecordsEnabled) return;
 
-    final startIndex = _temporaryRandom.nextInt(_temporaryChinaAnchors.length);
-    final start = _temporaryChinaAnchors[startIndex];
-    _temporaryLat ??= (start[0] + _temporaryStartOffset())
-        .clamp(_temporaryMinLat, _temporaryMaxLat)
+    final startIndex = _sampleRandom.nextInt(_sampleChinaAnchors.length);
+    final start = _sampleChinaAnchors[startIndex];
+    _sampleLat ??= (start[0] + _sampleStartOffset())
+        .clamp(_sampleMinLat, _sampleMaxLat)
         .toDouble();
-    _temporaryLng ??= (start[1] + _temporaryStartOffset())
-        .clamp(_temporaryMinLng, _temporaryMaxLng)
+    _sampleLng ??= (start[1] + _sampleStartOffset())
+        .clamp(_sampleMinLng, _sampleMaxLng)
         .toDouble();
 
-    _temporaryRecordTimer?.cancel();
-    _temporaryRecordTimer = Timer.periodic(
+    _sampleRecordTimer?.cancel();
+    _sampleRecordTimer = Timer.periodic(
       const Duration(seconds: 5),
-      (_) => _insertTemporaryRecord(),
+      (_) => _insertSampleRecord(),
     );
   }
 
-  void _setTemporaryRecordsEnabled(bool enabled) {
-    if (_temporaryRecordsEnabled == enabled) return;
+  void _setSampleRecordsEnabled(bool enabled) {
+    if (_sampleRecordsEnabled == enabled) return;
 
     setState(() {
-      _temporaryRecordsEnabled = enabled;
+      _sampleRecordsEnabled = enabled;
     });
+    _databaseService.setSetting('sampleRecordsEnabled', enabled ? 1 : 0);
 
     if (enabled) {
-      _startTemporaryRecords();
+      AudioInputService().ensureWorkerListener();
+      _startSampleRecords();
     } else {
-      _temporaryRecordTimer?.cancel();
-      _temporaryRecordTimer = null;
+      _sampleRecordTimer?.cancel();
+      _sampleRecordTimer = null;
     }
   }
 
-  Future<void> _insertTemporaryRecord() async {
+  int _sampleTdcsSerial = 0;
+  int _sampleKlwSerial = 0;
+  int _sampleAlarmSerial = 0;
+  int _sampleKlwPressureA = 492;
+  int _sampleKlwPressureB = 478;
+
+  Future<void> _insertSampleRecord() async {
     final now = DateTime.now();
     final latStep =
-        (_temporaryRandom.nextDouble() - 0.5) * _temporaryMaxStepDegrees;
+        (_sampleRandom.nextDouble() - 0.5) * _sampleMaxStepDegrees;
     final lngStep =
-        (_temporaryRandom.nextDouble() - 0.5) * _temporaryMaxStepDegrees;
+        (_sampleRandom.nextDouble() - 0.5) * _sampleMaxStepDegrees;
 
-    _temporaryLat = ((_temporaryLat ?? 35.0) + latStep)
-        .clamp(_temporaryMinLat, _temporaryMaxLat)
+    _sampleLat = ((_sampleLat ?? 35.0) + latStep)
+        .clamp(_sampleMinLat, _sampleMaxLat)
         .toDouble();
-    _temporaryLng = ((_temporaryLng ?? 105.0) + lngStep)
-        .clamp(_temporaryMinLng, _temporaryMaxLng)
+    _sampleLng = ((_sampleLng ?? 105.0) + lngStep)
+        .clamp(_sampleMinLng, _sampleMaxLng)
         .toDouble();
-    _temporaryRecordSerial += 1;
+    _sampleRecordSerial += 1;
 
-    final serialText = _temporaryRecordSerial.toString().padLeft(4, '0');
-    final record = TrainRecord(
-      uniqueId: 'temporary_${now.millisecondsSinceEpoch}_$serialText',
-      timestamp: now,
-      receivedTimestamp: now,
-      train: _temporaryTrainNumber,
-      direction: _temporaryRecordSerial.isEven ? 0 : 1,
-      speed: '${60 + _temporaryRandom.nextInt(80)}',
-      position: '${(_temporaryRecordSerial % 300) + 1}.0',
-      time: _temporaryClockText(now),
-      loco: 'TEMP$serialText',
-      locoType: 'HXD',
-      lbjClass: 'G',
-      route: '临时测试',
-      positionInfo: _temporaryDmsPosition(_temporaryLat!, _temporaryLng!),
-      rssi: -65 + _temporaryRandom.nextDouble() * 12,
+    switch (_sampleRecordSerial % 12) {
+      case 1:
+      case 5:
+      case 9:
+        await _pushSamplePcm(_sampleTdcsPcm());
+      case 2:
+      case 6:
+      case 10:
+        await _pushSamplePcm(_sampleKlwPcm(now));
+      case 3:
+      case 7:
+      case 11:
+        await _pushSamplePcm(
+            ffskSamplePcm(alarmSampleFrame(_sampleAlarmSerial++ % 8, now)));
+      default:
+        await _pushSamplePcm(_sampleLbjPcm(now));
+    }
+  }
+
+  Future<void> _pushSamplePcm(Int16List pcm) async {
+    final bytes = pcm.buffer.asUint8List();
+    const chunkBytes = 4800 * 2;
+    for (var at = 0; at < bytes.length; at += chunkBytes) {
+      final end =
+          at + chunkBytes > bytes.length ? bytes.length : at + chunkBytes;
+      await DemodWorker.instance.pushPcm(Uint8List.sublistView(bytes, at, end));
+    }
+  }
+
+  Int16List _sampleLbjPcm(DateTime now) {
+    final hh = now.hour.toString().padLeft(2, '0');
+    final mm = now.minute.toString().padLeft(2, '0');
+    return lbjSamplePcm(
+      up: _sampleRecordSerial % 12 == 4,
+      sync: '0$hh${mm}00000',
+      info:
+          '$_sampleTrainNumber ${60 + _sampleRandom.nextInt(80)} ${(_sampleRecordSerial % 300) + 1}0',
+      info2: lbjInfo2(loco: '23900001', lat: _sampleLat!, lng: _sampleLng!),
     );
-
-    await _databaseService.insertRecord(record);
-    if (!mounted) return;
-    _processRecord(record);
   }
 
-  String _temporaryDmsPosition(double lat, double lng) {
-    return '${_temporaryDmsCoordinate(lat)} ${_temporaryDmsCoordinate(lng)}';
+  Int16List _sampleTdcsPcm() {
+    _sampleTdcsSerial += 1;
+    return ffskSamplePcm(tdcsSampleFrame(
+      shared: _sampleTdcsSerial.isOdd,
+      serial: _sampleTdcsSerial,
+      speed: 55 + _sampleRandom.nextInt(85),
+      weight: 3800 + _sampleRandom.nextInt(1400),
+      length: (520 + _sampleRandom.nextInt(180)) / 10,
+      cars: 48 + _sampleRandom.nextInt(14),
+      test: _sampleTdcsSerial % 5 == 4,
+    ));
   }
 
-  double _temporaryStartOffset() {
-    return (_temporaryRandom.nextDouble() - 0.5) * _temporaryStartRadiusDegrees;
+  static const _sampleKlwCommands = [
+    0x91, 0x92, 0x93, 0x94, 0x30, 0x31, 0xB0, 0xB1, 0x24, 0x25,
+    0x83, 0x84, 0xB5, 0xB6, 0x5B, 0xA3, 0xA4, 0xA1, 0xA2,
+  ];
+  static const _sampleKlwPressureCommands = {
+    0x91, 0x92, 0x30, 0x31, 0x93, 0x94, 0xA3, 0xA4,
+  };
+
+  Int16List _sampleKlwPcm(DateTime now) {
+    _sampleKlwSerial += 1;
+    final pairA = _sampleKlwSerial.isOdd;
+    final command = _sampleKlwCommands[
+        (_sampleKlwSerial - 1) % _sampleKlwCommands.length];
+    int? eventPressure;
+    if (_sampleKlwPressureCommands.contains(command)) {
+      if (command == 0x30 || command == 0x31) {
+        eventPressure = 300 + _sampleRandom.nextInt(40);
+      } else {
+        var pressure = pairA ? _sampleKlwPressureA : _sampleKlwPressureB;
+        pressure = (pressure + _sampleRandom.nextInt(13) - 6)
+            .clamp(430, 510)
+            .toInt();
+        if (pairA) {
+          _sampleKlwPressureA = pressure;
+        } else {
+          _sampleKlwPressureB = pressure;
+        }
+        eventPressure = pressure;
+      }
+    }
+    final int layout;
+    if (command == 0xA1 || command == 0xA2) {
+      layout = 17;
+    } else if (_sampleKlwSerial % 7 == 3) {
+      layout = 15;
+    } else if (_sampleKlwSerial % 11 == 5) {
+      layout = 6;
+    } else {
+      layout = 11;
+    }
+    return ffskSamplePcm(klwSampleFrame(
+      pairA: pairA,
+      command: command,
+      pressure: eventPressure,
+      layout: layout,
+      now: now,
+    ));
   }
 
-  String _temporaryClockText(DateTime time) {
-    final hour = time.hour.toString().padLeft(2, '0');
-    final minute = time.minute.toString().padLeft(2, '0');
-    return '$hour:$minute';
-  }
-
-  String _temporaryDmsCoordinate(double value) {
-    final degrees = value.truncate();
-    final minutes = (value - degrees) * 60.0;
-    return '$degrees°${minutes.toStringAsFixed(4)}′';
+  double _sampleStartOffset() {
+    return (_sampleRandom.nextDouble() - 0.5) * _sampleStartRadiusDegrees;
   }
 
   @override
   void dispose() {
-    _temporaryRecordTimer?.cancel();
+    _sampleRecordTimer?.cancel();
     _connectionSubscription?.cancel();
     _rtlTcpConnectionSubscription?.cancel();
     _audioConnectionSubscription?.cancel();
     _dataSubscription?.cancel();
     _rtlTcpDataSubscription?.cancel();
     _audioDataSubscription?.cancel();
+    _ffskTdcsSubscription?.cancel();
+    _ffskKlwSubscription?.cancel();
+    _ffskAlarmSubscription?.cancel();
+    _audioSyncSubscription?.cancel();
+    _rtlTcpSyncSubscription?.cancel();
+    _bleSyncSubscription?.cancel();
+    _bleTdcsSubscription?.cancel();
+    _bleKlwSubscription?.cancel();
+    _bleAlarmSubscription?.cancel();
     _lastReceivedTimeSubscription?.cancel();
     _rtlTcpLastReceivedTimeSubscription?.cancel();
     _audioLastReceivedTimeSubscription?.cancel();
@@ -618,6 +711,90 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         _processRecord(record);
       }
     });
+
+    _ffskTdcsSubscription = DemodWorker.instance.tdcsRecords.listen((record) {
+      if (_inputSource != InputSource.bluetooth) {
+        _handleTdcsRecord(record);
+      }
+    });
+
+    _ffskKlwSubscription = DemodWorker.instance.klwEvents.listen((event) {
+      if (_inputSource != InputSource.bluetooth) {
+        _handleKlwEvent(event);
+      }
+    });
+
+    _ffskAlarmSubscription = DemodWorker.instance.alarmEvents.listen((event) {
+      if (_inputSource != InputSource.bluetooth) {
+        _handleAlarmEvent(event);
+      }
+    });
+
+    _audioSyncSubscription = AudioInputService().syncEvents.listen((event) {
+      if (_inputSource != InputSource.bluetooth) {
+        _handleSyncEvent();
+      }
+    });
+
+    _rtlTcpSyncSubscription = _rtlTcpService.syncEvents.listen((event) {
+      if (_inputSource != InputSource.bluetooth) {
+        _handleSyncEvent();
+      }
+    });
+
+    _bleSyncSubscription = _bleService.syncEvents.listen((event) {
+      if (_inputSource == InputSource.bluetooth) {
+        _handleSyncEvent();
+      }
+    });
+
+    _bleTdcsSubscription = _bleService.tdcsRecords.listen((record) {
+      if (_inputSource == InputSource.bluetooth) {
+        _handleTdcsRecord(record);
+      }
+    });
+
+    _bleKlwSubscription = _bleService.klwEvents.listen((event) {
+      if (_inputSource == InputSource.bluetooth) {
+        _handleKlwEvent(event);
+      }
+    });
+
+    _bleAlarmSubscription = _bleService.alarmEvents.listen((event) {
+      if (_inputSource == InputSource.bluetooth) {
+        _handleAlarmEvent(event);
+      }
+    });
+
+    final settings = await DatabaseService.instance.getAllSettings();
+    if (settings != null) {
+      DemodWorker.instance
+          .setProtocols(DemodWorker.protocolsFromSettings(settings));
+    }
+  }
+
+  Future<void> _handleTdcsRecord(TrainRecord record) async {
+    await _databaseService.insertRecord(record);
+    if (!mounted) return;
+    _processRecord(record);
+  }
+
+  Future<void> _handleKlwEvent(KlwEvent event) async {
+    await _databaseService.insertKlwEvent(event);
+    if (!mounted) return;
+    _historyScreenKey.currentState?.refreshKlwStates();
+    _realtimeScreenKey.currentState?.refreshKlwStates();
+  }
+
+  Future<void> _handleAlarmEvent(FfskAlarmEvent event) async {
+    await _databaseService.insertAlarmEvent(event);
+    if (!mounted) return;
+    _historyScreenKey.currentState?.refreshAlarmEvents();
+  }
+
+  void _handleSyncEvent() {
+    if (!mounted) return;
+    _historyScreenKey.currentState?.refreshSyncEvents();
   }
 
   void _processRecord(TrainRecord record) {
@@ -638,10 +815,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     }
   }
 
-  // The header floats over the full-bleed page: at the left the
-  // page's title, plain fixed text in the manner of iOS 26's bar
-  // titles (glass is for controls, not titles); at the right the
-  // connection status on its liquid-glass capsule.
   Widget _buildTopBar(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final historyState = _historyScreenKey.currentState;
@@ -675,18 +848,16 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
           Text('已选择 $selectedCount 项', style: titleStyle),
         ],
       );
-      trailing = _glassPill([
-        IconButton(
-          icon: const Icon(Icons.delete, size: 24),
-          color: colorScheme.onSurface,
-          style: IconButton.styleFrom(
-            minimumSize: const Size(40, 40),
-            maximumSize: const Size(40, 40),
-            padding: EdgeInsets.zero,
+      trailing = Opacity(
+        opacity: selectedCount > 0 ? 1.0 : 0.4,
+        child: IgnorePointer(
+          ignoring: selectedCount == 0,
+          child: GlassIconButton(
+            icon: Icons.delete,
+            onPressed: _handleHistoryDeleteSelected,
           ),
-          onPressed: selectedCount > 0 ? _handleHistoryDeleteSelected : null,
         ),
-      ]);
+      );
     } else {
       final IconData statusIcon = switch (_inputSource) {
         InputSource.rtlTcp => Icons.wifi,
@@ -705,7 +876,10 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         menuWidth: 320,
         onOpen: _handleConnectionMenuOpen,
         onClosed: _handleConnectionMenuClosed,
-        triggerBuilder: (context, toggle) => _glassPill([
+        triggerBuilder: (context, toggle) => GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: toggle,
+          child: _glassPill([
           _ConnectionStatusWidget(
             bleService: _bleService,
             rtlTcpService: _rtlTcpService,
@@ -725,7 +899,8 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
             ),
             onPressed: toggle,
           ),
-        ]),
+          ]),
+        ),
         menuBuilder: (context, close) => _PixelPerfectBluetoothDialog(
           bleService: _bleService,
           inputSource: _inputSource,
@@ -734,13 +909,53 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       );
     }
 
+    final morphing = editing || _topBarWasEditing;
+    _topBarWasEditing = editing;
+    final slotDuration =
+        morphing ? const Duration(milliseconds: 240) : Duration.zero;
+    final slotReverseDuration =
+        morphing ? const Duration(milliseconds: 180) : Duration.zero;
+
+    Widget slot(Widget child, bool edit, Alignment alignment) {
+      return AnimatedSize(
+        duration: slotDuration,
+        curve: Curves.easeOutCubic,
+        alignment: alignment,
+        child: AnimatedSwitcher(
+          duration: slotDuration,
+          reverseDuration: slotReverseDuration,
+          switchInCurve: Curves.easeOutCubic,
+          switchOutCurve: Curves.easeInCubic,
+          layoutBuilder: (currentChild, previousChildren) => Stack(
+            alignment: alignment,
+            children: [
+              ...previousChildren,
+              if (currentChild != null) currentChild,
+            ],
+          ),
+          transitionBuilder: (child, animation) => FadeTransition(
+            opacity: animation,
+            child: ScaleTransition(
+              scale: Tween<double>(begin: 0.75, end: 1.0).animate(animation),
+              alignment: alignment,
+              child: child,
+            ),
+          ),
+          child: KeyedSubtree(
+            key: ValueKey(edit ? 'edit' : 'normal'),
+            child: child,
+          ),
+        ),
+      );
+    }
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Row(
         children: [
-          leading,
+          slot(leading, editing, Alignment.centerLeft),
           const Spacer(),
-          trailing,
+          slot(trailing, editing, Alignment.centerRight),
         ],
       ),
     );
@@ -760,7 +975,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       height: 44,
       child: LiquidGlass(
         style: glassRegularStyle(colorScheme),
-        shadows: glassMenuShadowsOf(colorScheme),
+        shadows: const [],
         clipper: clipper,
         child: inner,
       ),
@@ -798,7 +1013,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       builder: (context) => GlassDialog(
         title: const Text('确认删除'),
         content: Text('确定要删除选中的 ${historyState.getSelectedCount()} 条记录吗？'),
-        destructive: true,
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
@@ -814,6 +1028,11 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     if (confirmed == true) {
       final idsToDelete = historyState.getSelectedRecordIds().toList();
       await DatabaseService.instance.deleteRecords(idsToDelete);
+      final eventIds = historyState.getSelectedEventIds();
+      await DatabaseService.instance.deleteAlarmEvents(
+          eventIds.where((id) => id.startsWith('alarm_')).toList());
+      await DatabaseService.instance.deleteSyncEvents(
+          eventIds.where((id) => id.startsWith('sync_')).toList());
 
       historyState.setEditMode(false);
 
@@ -846,8 +1065,8 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       ),
       const MapScreen(),
       SettingsScreen(
-        temporaryRecordsEnabled: _temporaryRecordsEnabled,
-        onTemporaryRecordsChanged: _setTemporaryRecordsEnabled,
+        sampleRecordsEnabled: _sampleRecordsEnabled,
+        onSampleRecordsChanged: _setSampleRecordsEnabled,
       ),
     ];
 
@@ -1178,8 +1397,3 @@ class _PixelPerfectBluetoothDialogState
 }
 
 
-/// The connection panel as a morph popup growing out of the status
-/// capsule's source button, on the same choreography as the glass
-/// select menus: the pane springs from the anchor rect to its final
-/// rect under the top-right corner while its style morphs regular ->
-/// menu and the content fades in over the first half.

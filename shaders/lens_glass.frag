@@ -87,23 +87,51 @@ float cornerInset(vec2 p, vec2 halfSize) {
 }
 
 vec4 texel(vec2 pixel) {
-  vec2 p = pixel;
+  vec2 p = clamp(pixel, uOrigin + 0.5, uOrigin + uPaneSize * uDpr - 0.5);
 #ifdef IMPELLER_TARGET_OPENGLES
   p.y = uSize.y - p.y;
 #endif
   return texture(uTexture, clamp(p, vec2(0.5), uSize - 0.5) / uSize);
 }
 
-vec4 frosted(vec2 point, float sigma) {
-  vec2 pixel = uOrigin + point * uDpr;
-  if (sigma < 0.5) {
-    return texel(pixel);
+const float kGoldenAngle = 2.39996322973;
+const float kFrostReach = 2.07846096908;
+
+vec4 frostDisc(vec2 center, float reach, float falloff, int taps) {
+  float decay = exp(-falloff / float(taps));
+  float weight = sqrt(decay);
+  vec2 turn = vec2(cos(kGoldenAngle), sin(kGoldenAngle));
+  vec2 ray = vec2(1.0, 0.0);
+  vec4 sum = vec4(0.0);
+  float total = 0.0;
+  for (int i = 0; i < 64; i++) {
+    if (i >= taps) break;
+    float spread = sqrt((float(i) + 0.5) / float(taps));
+    sum += texel(center + ray * reach * spread) * weight;
+    total += weight;
+    weight *= decay;
+    ray = vec2(ray.x * turn.x - ray.y * turn.y, ray.x * turn.y + ray.y * turn.x);
   }
-  vec2 spread = vec2(sigma, -sigma) * uDpr;
-  return 0.25 * (texel(pixel + spread.xx)
-      + texel(pixel + spread.yy)
-      + texel(pixel + spread.xy)
-      + texel(pixel + spread.yx));
+  return sum / total;
+}
+
+vec4 frosted(vec2 point, float frost) {
+  vec2 center = uOrigin + point * uDpr;
+  float sigma = frost * uDpr;
+  sigma = sqrt(max(sigma * sigma - 0.25, 0.0));
+  float reach = max(sigma - 0.5, 0.0) * kFrostReach;
+  if (reach <= 0.0) {
+    return texel(center);
+  }
+  float ratio = reach / sigma;
+  float falloff = 0.5 * ratio * ratio;
+  if (sigma <= 2.0) {
+    return frostDisc(center, reach, falloff, 16);
+  }
+  if (sigma <= 3.5) {
+    return frostDisc(center, reach, falloff, 32);
+  }
+  return frostDisc(center, reach, falloff, 64);
 }
 
 void main() {

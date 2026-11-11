@@ -95,8 +95,6 @@ class _Spring extends ChangeNotifier implements ValueListenable<double> {
   }
 }
 
-/// Grows under a press and stretches after a dragging finger, springing back
-/// on release. The press only paints: layout and hit testing see it at rest.
 class ElasticPress extends StatefulWidget {
   const ElasticPress({
     super.key,
@@ -113,19 +111,15 @@ class ElasticPress extends StatefulWidget {
   final double maxGrowth;
   final double? maxPull;
 
-  /// Where the pressed panel lies in this box, when the box is larger.
   final Rect Function(RenderBox box)? panelOf;
 
   final Widget child;
 
-  static ElasticPressHandle? maybeOf(BuildContext context) =>
-      context.findAncestorStateOfType<_ElasticPressState>();
 
   @override
   State<ElasticPress> createState() => _ElasticPressState();
 }
 
-/// Drives an [ElasticPress] with a press it does not hear, at global positions.
 abstract interface class ElasticPressHandle {
   void press(Offset position);
 
@@ -212,7 +206,6 @@ class _ElasticPressState extends State<ElasticPress>
     _settle();
   }
 
-  // A tap lets go before the swell has risen; it rises all the way first.
   void _settle() {
     if (!_releasing || _lift.value < _liftSnap) {
       return;

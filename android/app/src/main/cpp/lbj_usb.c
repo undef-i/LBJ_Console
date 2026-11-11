@@ -17,11 +17,11 @@ JNIEXPORT void JNICALL
 Java_org_noxylva_lbjconsole_flutter_LbjUsbNative_nativeStop(JNIEnv *env, jclass cls);
 
 int lbj_pluto_running(void);
+int lbj_pluto_port(void);
 int lbj_pluto_exit_error(void);
 int lbj_pluto_stage(void);
 void lbj_pluto_stop(void);
 
-#define LBJ_PORT 14423
 #define LBJ_FREQ_HZ 821237500
 #define LBJ_RATE_HZ 240000
 
@@ -36,13 +36,14 @@ static struct {
 	int start_err;
 	int exit_err;
 	int listen_fd;
+	int port;
 	int client_fd;
 	int send_failed;
 	int finished;
 	int stage;
 } S = {
 	PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER,
-	0, NULL, 0, 0, 0, 0, 0, -1, -1, 0, 0,
+	0, NULL, 0, 0, 0, 0, 0, -1, 0, -1, 0, 0, 0,
 };
 
 struct command {
@@ -183,13 +184,17 @@ static void *session_main(void *arg)
 	memset(&addr, 0, sizeof(addr));
 	addr.sin_family = AF_INET;
 	addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-	addr.sin_port = htons(LBJ_PORT);
+	addr.sin_port = 0;
 	if (bind(lfd, (struct sockaddr *)&addr, sizeof(addr)) < 0 ||
 	    listen(lfd, 1) < 0) {
 		close(lfd);
 		signal_started(-1001);
 		goto out_dev;
 	}
+	struct sockaddr_in bound;
+	socklen_t blen = sizeof(bound);
+	if (getsockname(lfd, (struct sockaddr *)&bound, &blen) == 0)
+		S.port = ntohs(bound.sin_port);
 	S.listen_fd = lfd;
 	signal_started(0);
 	S.stage = 4;
@@ -269,6 +274,7 @@ Java_org_noxylva_lbjconsole_flutter_LbjUsbNative_nativeStart(JNIEnv *env, jclass
 	S.finished = 0;
 	S.dev = NULL;
 	S.listen_fd = -1;
+	S.port = 0;
 	S.client_fd = -1;
 	S.send_failed = 0;
 	S.stage = 0;
@@ -323,6 +329,15 @@ Java_org_noxylva_lbjconsole_flutter_LbjUsbNative_nativeIsRunning(JNIEnv *env, jc
 {
 	(void)env; (void)cls;
 	return ((S.running && !S.finished) || lbj_pluto_running()) ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jint JNICALL
+Java_org_noxylva_lbjconsole_flutter_LbjUsbNative_nativePort(JNIEnv *env, jclass cls)
+{
+	(void)env; (void)cls;
+	if (lbj_pluto_running())
+		return lbj_pluto_port();
+	return S.port;
 }
 
 JNIEXPORT jint JNICALL

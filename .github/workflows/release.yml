@@ -1,0 +1,45 @@
+name: release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: main
+      - uses: actions/checkout@v4
+        with:
+          ref: resources
+          path: res
+      - run: curl -fsSL https://lbj-data.nedifinita.com/manifest.json -o res/manifest.json
+      - run: main/tools/resources/inject.sh res
+      - id: versions
+        run: |
+          echo "loco=$(jq -r '.resources[] | select(.id=="loco_info") | .version' res/manifest.json)" >> "$GITHUB_OUTPUT"
+          echo "loco_type=$(jq -r '.resources[] | select(.id=="loco_type_info") | .version' res/manifest.json)" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: sed -i "s|https://maven.aliyun.com/repository/central|https://repo.maven.apache.org/maven2|" main/android/build.gradle
+      - run: |
+          keytool -genkeypair -keystore main/keystore.jks -alias lbjtemp -keyalg RSA -keysize 2048 -validity 10000 -storepass ci-trial -keypass ci-trial -dname "CN=LBJ Console CI"
+      - working-directory: main
+        env:
+          KEYSTORE_PASSWORD: ci-trial
+          KEY_ALIAS: lbjtemp
+          KEY_PASSWORD: ci-trial
+        run: flutter build apk --release --split-per-abi --target-platform android-arm64 --dart-define=BUNDLED_LOCO_VERSION=${{ steps.versions.outputs.loco }} --dart-define=BUNDLED_LOCO_TYPE_VERSION=${{ steps.versions.outputs.loco_type }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lbj-console-release
+          path: main/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk

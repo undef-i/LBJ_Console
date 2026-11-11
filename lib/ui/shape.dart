@@ -12,7 +12,6 @@ abstract final class AppCorner {
   static const double xl = 24;
   static const double xxl = 28;
 
-  /// UIAlertController's corner on iOS 27, rounder than a sheet's.
   static const double alert = 34;
   static const double full = 1000;
 
@@ -250,60 +249,3 @@ class AppInputBorder extends InputBorder {
   int get hashCode => Object.hash(borderSide, borderRadius, gapPadding);
 }
 
-extension AppShapeThemeExt on ThemeData {
-  ThemeData get withAppShapes => copyWith(
-    cardTheme: cardTheme.copyWith(shape: AppShape.md),
-    dialogTheme: dialogTheme.copyWith(shape: AppShape.all(AppCorner.alert)),
-    bottomSheetTheme: bottomSheetTheme.copyWith(
-      shape: AppShape.top(AppCorner.xxl),
-    ),
-    snackBarTheme: snackBarTheme.copyWith(shape: AppShape.xs),
-    tooltipTheme: tooltipTheme.copyWith(
-      // A decoration replaces Material's tooltip colours too, so restate them.
-      decoration: ShapeDecoration(
-        shape: AppShape.xs,
-        color: switch (brightness) {
-          Brightness.dark => Colors.white.withAlpha(230),
-          Brightness.light => Colors.grey[700]!.withAlpha(230),
-        },
-      ),
-    ),
-    chipTheme: chipTheme.copyWith(shape: AppShape.sm),
-    popupMenuTheme: popupMenuTheme.copyWith(shape: AppShape.md),
-    menuTheme: MenuThemeData(
-      style: (menuTheme.style ?? const MenuStyle()).copyWith(
-        shape: const WidgetStatePropertyAll(AppShape.md),
-      ),
-    ),
-    inputDecorationTheme: inputDecorationTheme.copyWith(border: AppShape.input),
-    floatingActionButtonTheme: floatingActionButtonTheme.copyWith(
-      shape: AppShape.md,
-    ),
-    navigationBarTheme: navigationBarTheme.copyWith(
-      indicatorShape: AppShape.full,
-    ),
-    navigationRailTheme: navigationRailTheme.copyWith(
-      indicatorShape: AppShape.full,
-    ),
-    progressIndicatorTheme: progressIndicatorTheme.copyWith(
-      borderRadius: AppRadius.full,
-    ),
-    filledButtonTheme: FilledButtonThemeData(
-      style: filledButtonTheme.style?.merge(_pillButton) ?? _pillButton,
-    ),
-    textButtonTheme: TextButtonThemeData(
-      style: textButtonTheme.style?.merge(_pillButton) ?? _pillButton,
-    ),
-    outlinedButtonTheme: OutlinedButtonThemeData(
-      style: outlinedButtonTheme.style?.merge(_pillButton) ?? _pillButton,
-    ),
-    elevatedButtonTheme: ElevatedButtonThemeData(
-      style: elevatedButtonTheme.style?.merge(_pillButton) ?? _pillButton,
-    ),
-    iconButtonTheme: IconButtonThemeData(
-      style: iconButtonTheme.style?.merge(_pillButton) ?? _pillButton,
-    ),
-  );
-}
-
-const _pillButton = ButtonStyle(shape: WidgetStatePropertyAll(AppShape.full));

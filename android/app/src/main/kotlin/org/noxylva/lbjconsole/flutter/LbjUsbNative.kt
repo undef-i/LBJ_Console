@@ -9,6 +9,7 @@ object LbjUsbNative {
     external fun nativeStartPluto(fd: Int, ifnum: Int): Int
     external fun nativeStop()
     external fun nativeIsRunning(): Boolean
+    external fun nativePort(): Int
     external fun nativeExitError(): Int
     external fun nativeStage(): String
     external fun nativeReset(fd: Int): Int

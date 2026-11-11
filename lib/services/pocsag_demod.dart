@@ -199,7 +199,6 @@ class PocsagMessage {
   final int address;
   final int function;
   final String content;
-  String get wire => '[MSG]$address|$function|$content';
 }
 
 class PocsagFraming {
@@ -220,7 +219,12 @@ class PocsagFraming {
   var alphaBitBufferBits = 0;
   var parityErrors = 0;
   var bchErrors = 0;
-  var batchNum = 0;
+  var streamEnded = false;
+  final batchLog = <String>[];
+  var _txOpen = false;
+  final _recentBits = <bool>[];
+
+  bool get txOpen => _txOpen;
 
   void resetFraming() {
     gotSC = false;
@@ -228,15 +232,44 @@ class PocsagFraming {
     bits = 0;
     bitCnt = 0;
     wordCnt = 0;
+    _recentBits.clear();
+  }
+
+  int _altRunBeforeSync() {
+    var len = 1;
+    for (var i = _recentBits.length - 33; i > 0; i--) {
+      if (_recentBits[i] == _recentBits[i - 1]) break;
+      len++;
+    }
+    return len;
+  }
+
+  void dryUp() {
+    if (_txOpen) {
+      streamEnded = true;
+      _txOpen = false;
+    }
+    resetFraming();
   }
 
   void _decodeBatch() {
+    final slots = <String>[];
     var i = 1;
     for (var frame = 0; frame < 8; frame++) {
       for (var word = 0; word < 2; word++) {
         final cw = codeWords[i] & 0xFFFFFFFF;
         final addressCodeWord = ((cw >> 31) & 1) == 0;
         final parityError = _xorBits(cw, 1, 31) != (cw & 0x1);
+        final err = codeWordsBchError[i] ? '!' : '';
+        if (cw == _idleCode) {
+          slots.add('idle$err');
+        } else if (addressCodeWord) {
+          slots.add(
+            'addr ${(((cw >> 13) & 0x3FFFF) << 3 | frame)}/${(cw >> 11) & 0x3}$err',
+          );
+        } else {
+          slots.add('msg$err');
+        }
         if (cw == _idleCode) {
         } else if (addressCodeWord) {
           functionBits = (cw >> 11) & 0x3;
@@ -285,10 +318,15 @@ class PocsagFraming {
         i++;
       }
     }
+    batchLog.add('batch: ${slots.join(' ')}');
   }
 
   void feedBit(bool rawData) {
     dataBit = bitInverted ? rawData : !rawData;
+    if (!gotSC) {
+      _recentBits.add(dataBit);
+      if (_recentBits.length > 160) _recentBits.removeAt(0);
+    }
     bits = ((bits << 1) | (dataBit ? 1 : 0)) & 0xFFFFFFFF;
     bitCnt++;
     if (bitCnt > 32) bitCnt = 32;
@@ -314,6 +352,11 @@ class PocsagFraming {
         }
       }
       if (gotSC) {
+        if (_txOpen && _altRunBeforeSync() >= 100) {
+          streamEnded = true;
+          _txOpen = false;
+        }
+        _recentBits.clear();
         bits = 0;
         bitCnt = 0;
         codeWords[0] = _syncCode;
@@ -330,7 +373,7 @@ class PocsagFraming {
       }
       if (wordCnt == _batchWords) {
         _decodeBatch();
-        batchNum++;
+        _txOpen = true;
         wordCnt = 0;
       }
       bits = 0;
@@ -422,7 +465,7 @@ class MicDemod {
               framing.feedBit(atbBit == 1);
               pocbit--;
               if (pocbit == 0) {
-                framing.resetFraming();
+                framing.dryUp();
               }
             }
             watchCtr += _watchStep;
@@ -483,7 +526,7 @@ class MicDemod {
             framing.feedBit(atbBit == 1);
             pocbit--;
             if (pocbit == 0) {
-              framing.resetFraming();
+              framing.dryUp();
             }
           }
           watchCtr += _watchStep;
@@ -514,6 +557,7 @@ class RtlDemod {
 
   final PocsagFraming framing;
   final messages = <PocsagMessage>[];
+  final audioTap = <double>[];
   late FirFilter _lowpassBaud;
   late FirFilter _decimationI;
   late FirFilter _decimationQ;
@@ -521,6 +565,7 @@ class RtlDemod {
   final _preambleMA = _MovingAverage2048();
 
   var magsqRaw = 0.0;
+  var _noiseFloor = 0.0;
   var _dcOffset = 0.0;
   var _prevData = false;
   var _syncCnt = 0;
@@ -542,6 +587,7 @@ class RtlDemod {
     framing.alphaMsg = '';
     framing.isMessageReady = false;
     magsqRaw = 0.0;
+    _noiseFloor = 0.0;
     _dcOffset = 0.0;
     _prevData = false;
     _syncCnt = 0;
@@ -614,6 +660,15 @@ class RtlDemod {
         final fq = _clampToInt8(accQ) / 128.0;
         final (fmDemod, magsq) = _phase.delta(fi, fq);
         magsqRaw = magsq;
+        if (!framing.gotSC) {
+          if (_noiseFloor == 0) {
+            _noiseFloor = magsq;
+          } else if (framing.txOpen) {
+            if (magsq < _noiseFloor * 4) framing.dryUp();
+          } else if (magsq < _noiseFloor * 4) {
+            _noiseFloor += (magsq - _noiseFloor) * 0.001;
+          }
+        }
         sB[pB] = fmDemod;
         sB[pB + nB] = fmDemod;
         final loB = pB + 1;
@@ -623,6 +678,7 @@ class RtlDemod {
           filt += (sB[loB + i] + sB[hiB - i]) * tB[i];
         }
         filt += sB[hiB - pairsB] * tB[pairsB];
+        audioTap.add(filt);
         pB = pB == nB - 1 ? 0 : pB + 1;
         if (!framing.gotSC) {
           _preambleMA(filt);

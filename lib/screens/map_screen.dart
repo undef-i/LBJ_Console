@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math' show sin, cos, sqrt, atan2;
 import 'package:flutter/material.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
@@ -29,7 +28,7 @@ class _MapScreenState extends State<MapScreen> {
   bool _styleFailed = false;
   bool _ormDark = false;
   final List<TrainRecord> _trainRecords = [];
-  bool _isLoading = true;
+  bool _loadFailed = false;
   bool _railwayLayerVisible = true;
   LatLng? _currentLocation;
   LatLng? _lastTrainLocation;
@@ -41,6 +40,7 @@ class _MapScreenState extends State<MapScreen> {
   bool _isLocationPermissionGranted = false;
   Timer? _locationTimer;
   Timer? _settingsSaveTimer;
+  StreamSubscription? _dataInsertSubscription;
 
   String _selectedTimeFilter = 'unlimited';
   MergeSettings _mergeSettings = MergeSettings();
@@ -68,8 +68,13 @@ class _MapScreenState extends State<MapScreen> {
   void initState() {
     super.initState();
     _initializeMap();
+    _dataInsertSubscription =
+        DatabaseService.instance.onDataInserted(() {
+      if (mounted) {
+        _loadTrainRecords();
+      }
+    });
 
-    _checkDatabaseSettings();
 
     _loadSettings().then((_) {
       _loadTrainRecords().then((_) {
@@ -81,54 +86,13 @@ class _MapScreenState extends State<MapScreen> {
     });
   }
 
-  Future<void> _checkDatabaseSettings() async {
-    try {
-      final settings = await DatabaseService.instance.getAllSettings();
-
-      if (settings != null) {
-        final lat = settings['mapCenterLat'];
-        final lon = settings['mapCenterLon'];
-
-        if (lat != null && lon != null) {
-          if (lat == 39.9042 && lon == 116.4074) {
-          } else if (lat == 0.0 && lon == 0.0) {
-          } else {
-            const beijingLat = 39.9042;
-            const beijingLon = 116.4074;
-            final distance =
-                _calculateDistance(lat, lon, beijingLat, beijingLon);
-
-            if (distance < 50) {}
-          }
-        }
-      }
-    // ignore: empty_catches
-    } catch (e) {}
-  }
-
-  double _calculateDistance(
-      double lat1, double lon1, double lat2, double lon2) {
-    const earthRadius = 6371;
-    final dLat = _degreesToRadians(lat2 - lat1);
-    final dLon = _degreesToRadians(lon2 - lon1);
-    final a = sin(dLat / 2) * sin(dLat / 2) +
-        cos(_degreesToRadians(lat1)) *
-            cos(_degreesToRadians(lat2)) *
-            sin(dLon / 2) *
-            sin(dLon / 2);
-    final c = 2 * atan2(sqrt(a), sqrt(1 - a));
-    return earthRadius * c;
-  }
-
-  double _degreesToRadians(double degrees) {
-    return degrees * pi / 180;
-  }
 
   @override
   void dispose() {
     _settingsSaveTimer?.cancel();
     _saveSettings();
     _locationTimer?.cancel();
+    _dataInsertSubscription?.cancel();
     super.dispose();
   }
 
@@ -273,32 +237,25 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   Future<void> _loadTrainRecords() async {
-    if (_trainRecords.isEmpty) {
-      setState(() => _isLoading = true);
-    }
     try {
       final records = await _getFilteredRecords();
       setState(() {
         _trainRecords.clear();
         _trainRecords.addAll(records);
-        _isLoading = false;
+        _loadFailed = false;
 
         if (_trainRecords.isNotEmpty) {
           final lastRecord = _trainRecords.first;
-          final coords = lastRecord.getCoordinates();
-          final dmsCoords = _parseDmsCoordinate(lastRecord.positionInfo);
-
-          if (dmsCoords != null) {
-            _lastTrainLocation = dmsCoords;
-          } else if (coords['lat'] != 0.0 && coords['lng'] != 0.0) {
-            _lastTrainLocation = LatLng(coords['lat']!, coords['lng']!);
+          if (lastRecord.hasGps) {
+            _lastTrainLocation =
+                LatLng(lastRecord.latitude!, lastRecord.longitude!);
           }
         }
 
       });
       _pushMapData();
     } catch (e) {
-      setState(() => _isLoading = false);
+      setState(() => _loadFailed = true);
     }
   }
 
@@ -326,77 +283,16 @@ class _MapScreenState extends State<MapScreen> {
     );
   }
 
-  LatLng? _parseDmsCoordinate(String? positionInfo) {
-    if (positionInfo == null ||
-        positionInfo.isEmpty ||
-        positionInfo == '<NUL>') {
-      return null;
-    }
-
-    try {
-      final parts = positionInfo.trim().split(' ');
-      if (parts.length >= 2) {
-        final latStr = parts[0];
-        final lngStr = parts[1];
-
-        final lat = _parseDmsString(latStr);
-        final lng = _parseDmsString(lngStr);
-
-        if (lat != null &&
-            lng != null &&
-            (lat.abs() > 0.001 || lng.abs() > 0.001)) {
-          return LatLng(lat, lng);
-        }
-      }
-    // ignore: empty_catches
-    } catch (e) {}
-
-    return null;
-  }
-
-  double? _parseDmsString(String dmsStr) {
-    try {
-      final degreeIndex = dmsStr.indexOf('°');
-      if (degreeIndex == -1) return null;
-
-      final degrees = double.tryParse(dmsStr.substring(0, degreeIndex));
-      if (degrees == null) return null;
-
-      final minuteIndex = dmsStr.indexOf('′');
-      if (minuteIndex == -1) return degrees;
-
-      final minutes =
-          double.tryParse(dmsStr.substring(degreeIndex + 1, minuteIndex));
-      if (minutes == null) return degrees;
-
-      return degrees + (minutes / 60.0);
-    } catch (e) {
-      return null;
-    }
-  }
-
   LatLng? _positionForRecord(TrainRecord record) {
-    final dmsPosition = _parseDmsCoordinate(record.positionInfo);
-    if (dmsPosition != null) {
-      return dmsPosition;
+    if (record.hasGps) {
+      return LatLng(record.latitude!, record.longitude!);
     }
-
-    final coords = record.getCoordinates();
-    if (coords['lat'] != 0.0 && coords['lng'] != 0.0) {
-      return LatLng(coords['lat']!, coords['lng']!);
-    }
-
     return null;
   }
 
   String _chipLabel(TrainRecord record) =>
-      record.fullTrainNumber.isEmpty ? '未知列车' : record.fullTrainNumber;
+      record.trainNumber.isEmpty ? '未知列车' : record.trainNumber;
 
-  // The map's data, grouped the way the monitoring map groups: a
-  // merged group's records draw as one black route line through
-  // their positions with the train chip at its end; a single record
-  // keeps its own chip. Every positioned record is also a tap
-  // target (nearest within 28 screen px, resolved in the page).
   void _pushMapData() {
     final lines = <List<LatLng>>[];
     final chips = <MapChip>[];
@@ -528,9 +424,9 @@ class _MapScreenState extends State<MapScreen> {
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
-                        record.fullTrainNumber.isEmpty
+                        record.trainNumber.isEmpty
                             ? "未知列车"
-                            : record.fullTrainNumber,
+                            : record.trainNumber,
                         style:
                             Theme.of(context).textTheme.headlineSmall?.copyWith(
                                   fontWeight: FontWeight.bold,
@@ -560,13 +456,13 @@ class _MapScreenState extends State<MapScreen> {
                         _buildMaterial3DetailRow(
                             context, "类型", record.trainType),
                         _buildMaterial3DetailRow(context, "速度",
-                            "${record.speed.replaceAll(' ', '')} km/h"),
+                            "${record.speedKmh.replaceAll(' ', '')} km/h"),
                         _buildMaterial3DetailRow(
                             context,
                             "位置",
-                            record.position.trim().endsWith('.')
-                                ? '${record.position.trim().substring(0, record.position.trim().length - 1)}K'
-                                : '${record.position.trim()}K'),
+                            record.kilometerMark.trim().endsWith('.')
+                                ? '${record.kilometerMark.trim().substring(0, record.kilometerMark.trim().length - 1)}K'
+                                : '${record.kilometerMark.trim()}K'),
                         _buildMaterial3DetailRow(
                             context,
                             "路线",
@@ -575,7 +471,7 @@ class _MapScreenState extends State<MapScreen> {
                                     0, record.route.trim().length - 1)
                                 : record.route.trim()),
                         _buildMaterial3DetailRow(
-                            context, "机车", "${record.locoType}-${record.loco}"),
+                            context, "机车", record.formattedLocoInfo),
                         _buildMaterial3DetailRow(context, "坐标",
                             "${position.latitude.toStringAsFixed(4)}, ${position.longitude.toStringAsFixed(4)}"),
                       ],
@@ -630,22 +526,13 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   String _getDisplayTime(TrainRecord record) {
-    if (record.time == "<NUL>" || record.time.isEmpty) {
-      final receivedTime = record.receivedTimestamp;
-      return '${receivedTime.hour.toString().padLeft(2, '0')}:${receivedTime.minute.toString().padLeft(2, '0')}:${receivedTime.second.toString().padLeft(2, '0')}';
-    } else {
-      return record.time.split("\n")[0];
-    }
+    final receivedTime = record.receivedTimestamp;
+    return '${receivedTime.hour.toString().padLeft(2, '0')}:${receivedTime.minute.toString().padLeft(2, '0')}:${receivedTime.second.toString().padLeft(2, '0')}';
   }
 
   String _getDisplayDate(TrainRecord record) {
-    if (record.time == "<NUL>" || record.time.isEmpty) {
-      final receivedTime = record.receivedTimestamp;
-      return '${receivedTime.year}-${receivedTime.month.toString().padLeft(2, '0')}-${receivedTime.day.toString().padLeft(2, '0')}';
-    } else {
-      final now = DateTime.now();
-      return '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
-    }
+    final receivedTime = record.receivedTimestamp;
+    return '${receivedTime.year}-${receivedTime.month.toString().padLeft(2, '0')}-${receivedTime.day.toString().padLeft(2, '0')}';
   }
 
   Widget _buildMaterial3DetailRow(
@@ -764,20 +651,34 @@ class _MapScreenState extends State<MapScreen> {
         children: [
           if (isDefaultLocation)
             Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  CircularProgressIndicator(
-                    valueColor:
-                        AlwaysStoppedAnimation<Color>(Theme.of(context).colorScheme.onSurface),
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    '正在加载地图位置...',
-                    style: TextStyle(color: Theme.of(context).colorScheme.onSurface, fontSize: 16),
-                  ),
-                ],
-              ),
+              child: _loadFailed
+                  ? GestureDetector(
+                      onTap: _loadTrainRecords,
+                      child: Text(
+                        '记录加载失败，点按重试',
+                        style: TextStyle(
+                            color:
+                                Theme.of(context).colorScheme.onSurface,
+                            fontSize: 16),
+                      ),
+                    )
+                  : Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        CircularProgressIndicator(
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                              Theme.of(context).colorScheme.onSurface),
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          '正在加载地图位置...',
+                          style: TextStyle(
+                              color:
+                                  Theme.of(context).colorScheme.onSurface,
+                              fontSize: 16),
+                        ),
+                      ],
+                    ),
             )
           else if (_styleFailed)
             Center(
@@ -831,12 +732,6 @@ class _MapScreenState extends State<MapScreen> {
                 ),
               ),
           ],
-          if (_isLoading)
-            Center(
-              child: CircularProgressIndicator(
-                valueColor: AlwaysStoppedAnimation<Color>(Theme.of(context).colorScheme.onSurface),
-              ),
-            ),
         ],
       ),
     );

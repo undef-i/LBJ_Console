@@ -14,7 +14,6 @@ const _glowIn = Duration(milliseconds: 120);
 const _glowOut = Duration(milliseconds: 360);
 const double _glowSpread = 3;
 const double _hairlineWidth = 0.67;
-// In corner radii from the corner of the bounds.
 const _shineAround = [
   (along: 1.53, down: 0.0, lit: 0.68),
   (along: 1.0, down: 0.0, lit: 0.48),
@@ -36,10 +35,8 @@ const _shineBands = [
 ];
 
 
-/// How much of iOS's glass the panes draw (.agents/architecture.md).
 enum LiquidGlassQuality { standard, ultra }
 
-/// Whether the navigation dock and the buttons of a page's bar are glass.
 class LiquidGlassScope extends InheritedWidget {
   const LiquidGlassScope({
     super.key,
@@ -139,8 +136,6 @@ class LiquidGlassStyle {
           );
   }
 
-  /// Thicker than [LiquidGlassStyle.regular], for rows that read over anything.
-  /// It takes its rim from a [LiquidGlassRim].
   factory LiquidGlassStyle.menu(ColorScheme colorScheme) {
     final dark = colorScheme.brightness == Brightness.dark;
     return dark
@@ -214,16 +209,12 @@ class LiquidGlassStyle {
 
   final Color tint;
 
-  /// How far the tint thickens toward opaque over content much darker, or if
-  /// negative much lighter, than it, so what sits on the glass stays legible.
   final double contrast;
   final double blur;
 
-  /// The share of the backdrop seen through [hazeBlur] rather than [blur].
   final double haze;
   final double hazeBlur;
 
-  /// Negative for a raised lens, which reads outward all around its rim.
   final double refraction;
   final double bevel;
   final double saturation;
@@ -234,10 +225,8 @@ class LiquidGlassStyle {
 
   final double rimTail;
 
-  /// 0 dims [rim] round the ends as on iOS's tab bar, 1 as on its controls.
   final double rimFocus;
 
-  /// The share of [rim] added as light rather than screened toward white.
   final double rimAdded;
 
   final double endShade;
@@ -247,7 +236,6 @@ class LiquidGlassStyle {
   final double hairline;
   final double? hairlineSide;
 
-  /// Eases in from bare air, as glass materializes by bending, not fading.
   LiquidGlassStyle scale(double t) {
     final amount = t.clamp(0.0, 1.0);
     return LiquidGlassStyle(
@@ -372,7 +360,6 @@ class LiquidGlassStyle {
 
   double get _hairlineSide => hairlineSide ?? hairline;
 
-  /// The standard tier's: no colors parted, and a haze for the whole frost.
   LiquidGlassStyle get _standard {
     if (haze == 0 && dispersion == 0) {
       return this;
@@ -398,29 +385,8 @@ class LiquidGlassStyle {
   }
 }
 
-/// An iOS 27 menu's or alert's, measured over white.
-List<BoxShadow> glassMenuShadows(ColorScheme colorScheme, [double depth = 1]) {
-  final strength = colorScheme.brightness == Brightness.dark ? 1.5 : 1.0;
-  final alpha = strength * depth;
-  return [
-    BoxShadow(
-      color: colorScheme.shadow.withValues(alpha: 0.09 * alpha),
-      blurRadius: 16.5,
-      offset: const Offset(0, 4),
-    ),
-    BoxShadow(
-      color: colorScheme.shadow.withValues(alpha: 0.045 * alpha),
-      blurRadius: 42,
-      offset: const Offset(0, 8),
-    ),
-  ];
-}
 
-Color glassFillOf(ColorScheme colorScheme) =>
-    (colorScheme.brightness == Brightness.dark ? Colors.white : Colors.black)
-        .withValues(alpha: 0.13);
 
-/// iOS 27's rim around a menu's or an alert's glass (.agents/architecture.md).
 @immutable
 class LiquidGlassRim {
   const LiquidGlassRim({
@@ -444,7 +410,6 @@ class LiquidGlassRim {
   final double corner;
   final double flat;
 
-  /// Added light, not white laid over: iOS lifts dark and light panes alike.
   final double shine;
 
   LiquidGlassRim scale(double t) {
@@ -457,7 +422,6 @@ class LiquidGlassRim {
     );
   }
 
-  /// The line, outside the pane; the pane given this rim draws the highlight.
   void paintLine(Canvas canvas, Rect rect, double radius) {
     if (rect.isEmpty) {
       return;
@@ -495,7 +459,6 @@ class LiquidGlassRim {
     final stops = [for (final (stop, _) in around) stop];
     for (final band in _shineBands) {
       final alpha = shine * band.lit;
-      // A ring, not a stroke: Impeller widens a stroke thinner than a pixel.
       canvas.drawPath(
         Path()
           ..fillType = PathFillType.evenOdd
@@ -556,8 +519,6 @@ class LiquidGlassRim {
   int get hashCode => Object.hash(side, corner, flat, shine);
 }
 
-/// Light a press casts on a pane, in its coordinates: [strength] at [center],
-/// falling off over [reach] to [wash] of it across the rest of the pane.
 @immutable
 class LiquidGlassGlow {
   const LiquidGlassGlow({
@@ -610,15 +571,12 @@ class LiquidGlass extends StatelessWidget {
 
   final bool pressed;
 
-  /// Lights the pane in place of the glow [pressed] lights at its center.
   final LiquidGlassGlow? glow;
 
   final bool bendBackdrop;
 
   final Widget? child;
 
-  /// Builds the scenes of [capture] without panes, for a snapshot: offscreen
-  /// a pane has no backdrop to bend and comes out a flat tint.
   static T withoutPanes<T>(T Function() capture) {
     _LiquidGlassLayer._skipped++;
     try {
@@ -628,19 +586,6 @@ class LiquidGlass extends StatelessWidget {
     }
   }
 
-  /// Replaces a button's fill with glass.
-  static ButtonStyle buttonStyle(
-    LiquidGlassStyle Function(Set<WidgetState> states) styleOf,
-  ) {
-    return ButtonStyle(
-      backgroundColor: const WidgetStatePropertyAll(Colors.transparent),
-      backgroundBuilder: (context, states, child) => LiquidGlass(
-        style: styleOf(states),
-        pressed: states.contains(WidgetState.pressed),
-        child: child,
-      ),
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -817,8 +762,6 @@ class _RenderLiquidGlass extends RenderProxyBox {
     markNeedsPaint();
   }
 
-  // The pane wraps what it is the glass of, so it hears the presses on it and
-  // lights from the finger, as iOS does; a key press lights its center.
   Offset? _touch;
 
   @override
@@ -940,7 +883,6 @@ sealed class LiquidGlassShape {
   const LiquidGlassShape();
 }
 
-/// A rounded rectangle, no corner rounder than half the pane's short side.
 final class LiquidGlassCorners extends LiquidGlassShape {
   const LiquidGlassCorners(this.radius);
 
@@ -950,14 +892,12 @@ final class LiquidGlassCorners extends LiquidGlassShape {
   final BorderRadius radius;
 }
 
-/// A path laid out from the pane's top left, as [LiquidGlass.clipper] gives.
 final class LiquidGlassOutline extends LiquidGlassShape {
   const LiquidGlassOutline(this.path);
 
   final Path path;
 }
 
-/// A pane for a render object that shapes the glass itself, as a morph does.
 class LiquidGlassPane {
   LiquidGlassPane(this.onReady);
 
@@ -1243,7 +1183,6 @@ class _LiquidGlassLayer extends Layer {
         alpha: (style.hairline + style._hairlineSide) / 2 * 0.3,
       );
     if (outline case final outline?) {
-      // The clip keeps the inner half of a stroke twice as wide.
       canvas.drawPath(outline, fill);
       if (!bendBackdrop) {
         canvas

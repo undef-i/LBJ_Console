@@ -1,4 +1,4 @@
-import 'package:flutter/services.dart';
+import 'package:lbjconsole/services/resource_service.dart';
 
 class LocoInfoUtil {
   static final List<LocoInfo> _locoData = [];
@@ -8,7 +8,7 @@ class LocoInfoUtil {
     if (_initialized) return;
 
     try {
-      final csvData = await rootBundle.loadString('assets/loco_info.csv');
+      final csvData = await ResourceService.loadText('loco_info');
       final lines = csvData.split('\n');
 
       for (final line in lines) {
@@ -42,6 +42,12 @@ class LocoInfoUtil {
     }
   }
 
+  static Future<void> reload() async {
+    _locoData.clear();
+    _initialized = false;
+    await initialize();
+  }
+
   static List<String> _parseCsvLine(String line) {
     final fields = <String>[];
     final buffer = StringBuffer();
@@ -64,28 +70,6 @@ class LocoInfoUtil {
     return fields;
   }
 
-  static LocoInfo? findLocoInfo(String model, String number) {
-    if (!_initialized || model.isEmpty || number.isEmpty) {
-      return null;
-    }
-
-    try {
-      final cleanNumber = number.trim().replaceAll('-', '').replaceAll(' ', '');
-      final num = cleanNumber.length > 4
-          ? int.parse(cleanNumber.substring(cleanNumber.length - 4))
-          : int.parse(cleanNumber);
-
-      for (final info in _locoData) {
-        if (info.model == model && num >= info.start && num <= info.end) {
-          return info;
-        }
-      }
-    } catch (e) {
-      return null;
-    }
-
-    return null;
-  }
 
   static String? getLocoInfoDisplay(String model, String number) {
     if (_locoData.isEmpty) return null;
@@ -117,11 +101,11 @@ class LocoInfoUtil {
         buffer.write(info.owner);
 
         if (info.alias.isNotEmpty) {
-          buffer.write(' - ${info.alias}');
+          buffer.write(' / ${info.alias}');
         }
 
         if (info.manufacturer.isNotEmpty) {
-          buffer.write(' - ${info.manufacturer}');
+          buffer.write(' / ${info.manufacturer}');
         }
 
         return buffer.toString();

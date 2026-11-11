@@ -1,18 +1,28 @@
 import 'package:flutter/services.dart';
+import 'package:lbjconsole/services/resource_service.dart';
 
 class TrainTypeUtil {
-  static final List<_TrainTypePattern> _patterns = [];
+  static final Map<String, List<_TrainTypePattern>> _patternsByVersion = {};
   static bool _initialized = false;
+  static String activeVersion = '2014';
 
   static Future<void> initialize() async {
     if (_initialized) return;
+    _patternsByVersion['2014'] =
+        await _load('assets/train_number_info.csv');
+    _patternsByVersion['2026-1'] =
+        await _load('assets/train_number_info_2026_batch1.csv');
+    _patternsByVersion['2026'] =
+        await _load('assets/train_number_info_2026.csv');
+    activeVersion = ResourceService.trainTypeVersion;
+    _initialized = true;
+  }
 
+  static Future<List<_TrainTypePattern>> _load(String asset) async {
+    final patterns = <_TrainTypePattern>[];
     try {
-      final csvData =
-          await rootBundle.loadString('assets/train_number_info.csv');
-      final lines = csvData.split('\n');
-
-      for (final line in lines) {
+      final csvData = await rootBundle.loadString(asset);
+      for (final line in csvData.split('\n')) {
         if (line.trim().isEmpty) continue;
 
         final firstQuoteEnd = line.indexOf('"', 1);
@@ -23,34 +33,42 @@ class TrainTypeUtil {
           if (remainingPart.startsWith(',"') && remainingPart.endsWith('"')) {
             final type = remainingPart.substring(2, remainingPart.length - 1);
             try {
-              _patterns.add(_TrainTypePattern(RegExp(regex), type));
+              patterns.add(_TrainTypePattern(RegExp(regex), type));
             // ignore: empty_catches
             } catch (e) {}
           }
         }
       }
-      _initialized = true;
     } catch (e) {
-      _initialized = true;
+      patterns.clear();
     }
+    return patterns;
   }
 
-  static String? getTrainType(String lbjClass, String train) {
+  static Future<void> setVersion(String version) async {
+    activeVersion = version;
+    await ResourceService.setTrainTypeVersion(version);
+  }
+
+  static String? getTrainType(String trainNumber, {DateTime? at}) {
     if (!_initialized) {
       return null;
     }
 
-    final lbjClassTrimmed = lbjClass.trim();
-    final trainTrimmed = train.trim();
+    final actualTrain = trainNumber.trim();
 
-    if (trainTrimmed.isEmpty || trainTrimmed == "<NUL>") {
+    if (actualTrain.isEmpty || actualTrain == "<NUL>") {
       return null;
     }
 
-    final actualTrain =
-        lbjClassTrimmed == "NA" ? trainTrimmed : lbjClassTrimmed + trainTrimmed;
+    var version = activeVersion;
+    if (version == 'auto') {
+      final t = at ?? DateTime.now();
+      version = t.isBefore(DateTime(2026, 11, 25)) ? '2014' : '2026-1';
+    }
 
-    for (final pattern in _patterns) {
+    for (final pattern in _patternsByVersion[version] ??
+        const <_TrainTypePattern>[]) {
       if (pattern.regex.hasMatch(actualTrain)) {
         return pattern.type;
       }

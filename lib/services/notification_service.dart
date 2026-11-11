@@ -12,10 +12,6 @@ class NotificationService {
   int _notificationId = 1000;
   bool _notificationsEnabled = true;
 
-  final StreamController<bool> _settingsController =
-      StreamController<bool>.broadcast();
-  Stream<bool> get settingsStream => _settingsController.stream;
-
   Future<void> initialize() async {
     const AndroidInitializationSettings initializationSettingsAndroid =
         AndroidInitializationSettings('@mipmap/ic_launcher');
@@ -33,7 +29,6 @@ class NotificationService {
     await _createNotificationChannel();
 
     _notificationsEnabled = await isNotificationEnabled();
-    _settingsController.add(_notificationsEnabled);
   }
 
   Future<void> _createNotificationChannel() async {
@@ -55,14 +50,7 @@ class NotificationService {
   Future<void> showTrainNotification(TrainRecord record) async {
     if (!_notificationsEnabled) return;
 
-    if (!_isValidValue(record.train) ||
-        !_isValidValue(record.route) ||
-        !_isValidValue(record.directionText)) {
-      return;
-    }
-
-    const String title = '列车信息';
-    final String body = _buildNotificationContent(record);
+    final text = buildCardText(record);
 
     final AndroidNotificationDetails androidPlatformChannelSpecifics =
         AndroidNotificationDetails(
@@ -72,7 +60,7 @@ class NotificationService {
       importance: Importance.high,
       priority: Priority.high,
       ticker: 'ticker',
-      styleInformation: BigTextStyleInformation(body),
+      styleInformation: BigTextStyleInformation(text.body),
     );
 
     final NotificationDetails platformChannelSpecifics =
@@ -80,68 +68,49 @@ class NotificationService {
 
     await _notificationsPlugin.show(
       _notificationId++,
-      title,
-      body,
+      text.title,
+      text.body,
       platformChannelSpecifics,
-      payload: 'train_${record.train}',
+      payload: 'train_${record.trainNumber}',
     );
   }
 
-  String _buildNotificationContent(TrainRecord record) {
-    final buffer = StringBuffer();
+  static ({String title, String body}) buildCardText(TrainRecord record) {
+    final rawLoco = record.formattedLocoInfo;
+    final locoText = rawLoco == '<NUL>' ? '' : rawLoco;
+    final direction = record.directionChar;
+    final train = record.trainNumber;
+    final titleParts = <String>[
+      if (train.isNotEmpty)
+        train
+      else if (locoText.isEmpty)
+        '列车',
+      if (direction.isNotEmpty) direction,
+      if (locoText.isNotEmpty) locoText,
+    ];
 
-    buffer.write(record.fullTrainNumber);
-    if (_isValidValue(record.route)) {
-      buffer.write(' ${record.route}');
-    }
-    if (_isValidValue(record.directionText)) {
-      buffer.write(' ${record.directionText}');
-    }
-    if (_isValidValue(record.positionInfo)) {
-      buffer.write(' ${record.positionInfo}');
-    }
-    buffer.writeln();
-    if (_isValidValue(record.locoType) && _isValidValue(record.loco)) {
-      final shortLoco = record.loco.length > 5
-          ? record.loco.substring(record.loco.length - 5)
-          : record.loco;
-      buffer.write('${record.locoType}-$shortLoco');
-    } else if (_isValidValue(record.locoType)) {
-      buffer.write(record.locoType);
-    } else if (_isValidValue(record.loco)) {
-      buffer.write(record.loco);
-    }
+    final lines = <String>[];
+    final positionLine = <String>[
+      if (record.hasValidRoute) record.route.trim(),
+      if (record.hasValidPosition) record.positionText,
+      if (record.hasValidSpeed) record.speedText,
+    ].join(' ');
+    if (positionLine.isNotEmpty) lines.add(positionLine);
 
-    if (_isValidValue(record.speed)) {
-      buffer.write(' ${record.speed}km/h');
+    final locoInfo = record.locoInfo;
+    if (locoInfo != null && locoInfo.isNotEmpty) {
+      lines.add(locoInfo);
     }
 
-    return buffer.toString().trim();
+    final extraLine = record.extrasLine;
+    if (extraLine.isNotEmpty) lines.add(extraLine);
+
+    return (title: titleParts.join(' '), body: lines.join('\n'));
   }
 
-  bool _isValidValue(String? value) {
-    if (value == null || value.isEmpty) return false;
-    final trimmed = value.trim();
-    return trimmed.isNotEmpty &&
-        trimmed != 'NUL' &&
-        trimmed != 'NA' &&
-        trimmed != '*';
-  }
-
-  Future<void> enableNotifications(bool enable) async {
-    _notificationsEnabled = enable;
-    _settingsController.add(_notificationsEnabled);
-  }
 
   Future<bool> isNotificationEnabled() async {
     return _notificationsEnabled;
   }
 
-  Future<void> cancelAllNotifications() async {
-    await _notificationsPlugin.cancelAll();
-  }
-
-  void dispose() {
-    _settingsController.close();
-  }
 }

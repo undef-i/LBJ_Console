@@ -166,3 +166,6 @@ macos/Flutter/ephemeral/flutter_export_environment.sh
 macos/Flutter/ephemeral/Flutter-Generated.xcconfig
 *.py
 PDW
+!/tools/resources/*.py
+
+__pycache__/

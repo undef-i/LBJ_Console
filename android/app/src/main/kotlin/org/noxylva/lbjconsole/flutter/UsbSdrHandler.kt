@@ -266,7 +266,7 @@ class UsbSdrHandler(private val context: Context) :
                     resetUsedInStreak = false
                     connection = conn
                     sessionDeviceName = device.deviceName
-                    emit(mapOf("state" to "ready"))
+                    emit(mapOf("state" to "ready", "port" to LbjUsbNative.nativePort()))
                 } else if (!pluto && r in -2499..-2400 && !resetUsedInStreak) {
                     resetUsedInStreak = true
                     conn.close()
@@ -335,6 +335,7 @@ class UsbSdrHandler(private val context: Context) :
                 result.success(null)
             }
             "isRunning" -> result.success(LbjUsbNative.nativeIsRunning())
+            "port" -> result.success(LbjUsbNative.nativePort())
             "exitError" -> result.success(LbjUsbNative.nativeExitError())
             "opState" -> {
                 val op = currentOp

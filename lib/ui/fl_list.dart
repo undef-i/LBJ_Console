@@ -7,28 +7,14 @@ Color flCardColor(ColorScheme scheme) => scheme.brightness == Brightness.dark
     ? scheme.surfaceContainer
     : scheme.surfaceBright;
 
-/// The surface one level above the card: field and tonal-button fills.
-Color flBlockColor(ColorScheme scheme) => scheme.brightness == Brightness.dark
-    ? scheme.surfaceContainerHigh
-    : scheme.surfaceContainer;
+TextStyle flListTitleStyle(ColorScheme scheme) =>
+    TextStyle(fontSize: 17, height: 22 / 17, color: scheme.onSurface);
 
-TextStyle flListTitleStyle(ColorScheme scheme) => TextStyle(
-      fontSize: 17,
-      height: 22 / 17,
-      color: scheme.onSurface,
-    );
+TextStyle flListSubtitleStyle(ColorScheme scheme) =>
+    TextStyle(fontSize: 15, height: 20 / 15, color: scheme.onSurfaceVariant);
 
-TextStyle flListSubtitleStyle(ColorScheme scheme) => TextStyle(
-      fontSize: 15,
-      height: 20 / 15,
-      color: scheme.onSurfaceVariant,
-    );
-
-TextStyle flCaptionStyle(ColorScheme scheme) => TextStyle(
-      fontSize: 13,
-      height: 18 / 13,
-      color: scheme.onSurfaceVariant,
-    );
+TextStyle flCaptionStyle(ColorScheme scheme) =>
+    TextStyle(fontSize: 13, height: 18 / 13, color: scheme.onSurfaceVariant);
 
 class FlSection extends StatelessWidget {
   const FlSection({super.key, this.title, this.footer, required this.rows});
@@ -54,7 +40,7 @@ class FlSection extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               for (var i = 0; i < rows.length; i++) ...[
-                Container(color: flCardColor(scheme), child: rows[i]),
+                Material(color: flCardColor(scheme), child: rows[i]),
                 if (i < rows.length - 1)
                   Container(
                     color: flCardColor(scheme),
@@ -128,9 +114,12 @@ class FlRow extends StatelessWidget {
       ),
     );
     if (onTap == null) return content;
-    return Material(
-      type: MaterialType.transparency,
-      child: InkWell(onTap: onTap, child: content),
+    return InkWell(
+      onTap: onTap,
+      splashFactory: InkRipple.splashFactory,
+      splashColor: scheme.onSurface.withValues(alpha: 0.14),
+      highlightColor: scheme.onSurface.withValues(alpha: 0.10),
+      child: content,
     );
   }
 }
@@ -141,12 +130,14 @@ class FlTonalButton extends StatelessWidget {
     required this.label,
     required this.onPressed,
     this.icon,
+    this.busy = false,
     this.height = 36,
   });
 
   final String label;
   final VoidCallback? onPressed;
   final IconData? icon;
+  final bool busy;
   final double height;
 
   @override
@@ -161,16 +152,20 @@ class FlTonalButton extends StatelessWidget {
       shape: const StadiumBorder(),
       textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500),
     );
+    final pressed = busy ? null : onPressed;
+    final spinner = SizedBox(
+      width: 16,
+      height: 16,
+      child: CircularProgressIndicator(strokeWidth: 2, color: scheme.onSurface),
+    );
     return ElasticPress(
-      enabled: onPressed != null,
-      child: icon == null
-          ? FilledButton(
-              onPressed: onPressed,
-              style: style,
-              child: Text(label),
-            )
+      enabled: pressed != null,
+      child: busy
+          ? FilledButton(onPressed: null, style: style, child: spinner)
+          : icon == null
+          ? FilledButton(onPressed: pressed, style: style, child: Text(label))
           : FilledButton.icon(
-              onPressed: onPressed,
+              onPressed: pressed,
               style: style,
               icon: Icon(icon, size: 20),
               label: Text(label),

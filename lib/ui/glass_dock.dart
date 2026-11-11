@@ -181,14 +181,6 @@ class _Spring extends ChangeNotifier implements ValueListenable<double> {
   }
 }
 
-List<BoxShadow> dockGlassShadows(ColorScheme colorScheme) => [
-  BoxShadow(
-    color: colorScheme.shadow.withValues(alpha: 0.013),
-    blurRadius: 3.8,
-    offset: const Offset(0, 6.5),
-  ),
-];
-
 LiquidGlassStyle _pillStyle(ColorScheme colorScheme) =>
     colorScheme.brightness == Brightness.dark
     ? LiquidGlassStyle(
@@ -221,10 +213,10 @@ LiquidGlassStyle _lensStyle(ColorScheme colorScheme) {
     brightness: dark ? 1.33 : 1,
     rim: dark ? 0.3 : 0.6,
     rimWidth: 1.1,
-    endShade: 0.045,
+    endShade: 0,
     dispersion: 6.5,
     rimBlur: 1.5,
-    hairline: 0.42,
+    hairline: 0,
   );
 }
 
@@ -328,9 +320,6 @@ class GlassDock extends StatelessWidget {
   final ValueChanged<int> onSelected;
   final List<GlassDockItem> items;
 
-  /// Over a platform view (the map) the capture-based glass has no
-  /// backdrop to refract and renders solid; the bar then falls back
-  /// to a plain translucent surface, which composites normally.
   final bool backdropFallback;
 
   static double heightOf(BuildContext context) {
@@ -342,8 +331,6 @@ class GlassDock extends StatelessWidget {
   static double _bottomMarginOf(BuildContext context) =>
       math.max(_edgeMargin, MediaQuery.paddingOf(context).bottom);
 
-  static double insetOf(BuildContext context) =>
-      heightOf(context) + _bottomMarginOf(context);
 
   @override
   Widget build(BuildContext context) {
@@ -793,7 +780,7 @@ class _FloatingBarState extends State<_FloatingBar>
       glass: glass,
       translucent: widget.backdropFallback,
       style: _pillStyle(colorScheme),
-      shadows: ultra ? dockGlassShadows(colorScheme) : const [],
+      shadows: const [],
       glow: _touchGlow,
       child: Material(
         color: glass || widget.backdropFallback
@@ -933,13 +920,10 @@ class _Lens extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // In glass mode there is no platter: the glass lens itself is the
-    // resting indicator, as in component-library tab bars.
     if (glass) {
       return const SizedBox.shrink();
     }
     final colorScheme = Theme.of(context).colorScheme;
-    final lifted = lift.clamp(0.0, 1.0);
     return PositionedDirectional(
       start: rect.left,
       top: rect.top,
@@ -953,7 +937,7 @@ class _Lens extends StatelessWidget {
           : DecoratedBox(
               decoration: ShapeDecoration(
                 color: Color.alphaBlend(
-                  colorScheme.onSurface.withValues(alpha: 0.08 * lifted),
+                  colorScheme.onSurface.withValues(alpha: 0.08),
                   colorScheme.surfaceContainerHighest,
                 ),
                 shape: AppShape.full,
@@ -1003,24 +987,11 @@ class _GlassLens extends StatelessWidget {
         child: LiquidGlass(
           style: style,
           bendBackdrop: true,
-          shadows: _lensShadows(colorScheme, lift),
+          shadows: const [],
         ),
       ),
     );
   }
-}
-
-List<BoxShadow> _lensShadows(ColorScheme colorScheme, double lift) {
-  final strength = colorScheme.brightness == Brightness.dark ? 3.0 : 1.0;
-  return [
-    BoxShadow(
-      color: colorScheme.shadow.withValues(
-        alpha: 0.055 * strength * lift.clamp(0.0, 1.0),
-      ),
-      blurRadius: 5,
-      offset: const Offset(0, 8),
-    ),
-  ];
 }
 
 class _LensContent extends StatelessWidget {

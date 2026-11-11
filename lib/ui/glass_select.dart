@@ -213,9 +213,8 @@ class _SelectRoute<T> extends PopupRoute<T> {
         textDirection: Directionality.of(context),
       )..layout();
       final checked = item.value == value;
-      final rowWidth = (checked ? 20.0 : 24.0) +
-          painter.width +
-          (checked ? 8 + 16 : 0);
+      final rowWidth =
+          (checked ? 20.0 : 24.0) + painter.width + (checked ? 8 + 16 : 0);
       menuWidth = math.max(menuWidth, rowWidth + 2 * _cardInset);
       painter.dispose();
     }
@@ -228,10 +227,7 @@ class _SelectRoute<T> extends PopupRoute<T> {
         .clamp(insets.left, math.max(insets.left, maxX))
         .toDouble();
     final y0 = anchor.top - _anchorOverlap;
-    final minY = math.max(
-      media.padding.top,
-      math.min(insets.top, y0),
-    );
+    final minY = math.max(media.padding.top, math.min(insets.top, y0));
     final top = y0.clamp(minY, math.max(minY, maxY)).toDouble();
     _finalRect = Rect.fromLTWH(left, top, menuWidth, menuHeight);
     return SizedBox(
@@ -311,9 +307,11 @@ class _SelectRoute<T> extends PopupRoute<T> {
         final width = anchor.width + (_finalRect.width - anchor.width) * grow;
         final height =
             anchor.height + (_finalRect.height - anchor.height) * grow;
-        final centerX = anchor.center.dx +
+        final centerX =
+            anchor.center.dx +
             (_finalRect.center.dx - anchor.center.dx) * _moveX.value;
-        final centerY = anchor.center.dy +
+        final centerY =
+            anchor.center.dy +
             (_finalRect.center.dy - anchor.center.dy) * _moveY.value;
         final rect = Rect.fromCenter(
           center: Offset(centerX, centerY),
@@ -336,11 +334,7 @@ class _SelectRoute<T> extends PopupRoute<T> {
             Positioned.fromRect(
               rect: rect,
               child: LiquidGlass(
-                style: LiquidGlassStyle.lerp(
-                  glassRegularStyle(colorScheme),
-                  glassMenuStyle(colorScheme),
-                  grow.clamp(0.0, 1.0),
-                ),
+                style: glassMenuStyle(colorScheme),
                 shadows: glassMenuShadowsOf(colorScheme),
                 clipper: clipper,
                 child: ClipPath(
@@ -381,8 +375,9 @@ class _SelectRoute<T> extends PopupRoute<T> {
   ) {
     final colorScheme = Theme.of(context).colorScheme;
     final from = _closingFrom;
-    final dismissal =
-        from <= 0 ? 1.0 : (1 - animation.value / from).clamp(0.0, 1.0);
+    final dismissal = from <= 0
+        ? 1.0
+        : (1 - animation.value / from).clamp(0.0, 1.0);
     final shrink = Curves.easeOutCubic.transform(dismissal);
     final rect = Rect.lerp(_finalRect, anchor, shrink)!;
     final radius = math.max(

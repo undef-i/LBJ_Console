@@ -1,29 +1,10 @@
 part of 'liquid_glass.dart';
 
-class LiquidGlassHost extends StatelessWidget {
-  const LiquidGlassHost({
-    super.key,
-    required this.enabled,
-    required this.child,
-  });
-
-  final bool enabled;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    return _LiquidGlassHostBox(enabled: enabled, child: child);
-  }
-}
-
-/// Fades [child] as [FadeTransition] does, but as Core Animation fades a layer:
-/// the panes within still bend what lies behind it, and fade with the rest.
 class LiquidGlassFade extends SingleChildRenderObjectWidget {
   const LiquidGlassFade({super.key, required this.opacity, super.child});
 
   final Animation<double> opacity;
 
-  /// [PaintingContext.pushOpacity] for a render object, fading as this does.
   static void push(
     PaintingContext context,
     Offset offset,
@@ -115,58 +96,3 @@ class _RenderLiquidGlassFade extends RenderProxyBox {
 }
 
 class _LiquidGlassFadeLayer extends OpacityLayer {}
-
-class _LiquidGlassHostBox extends SingleChildRenderObjectWidget {
-  const _LiquidGlassHostBox({required this.enabled, super.child});
-
-  final bool enabled;
-
-  @override
-  _RenderLiquidGlassHost createRenderObject(BuildContext context) {
-    return _RenderLiquidGlassHost(enabled: enabled);
-  }
-
-  @override
-  void updateRenderObject(
-    BuildContext context,
-    _RenderLiquidGlassHost renderObject,
-  ) {
-    renderObject.enabled = enabled;
-  }
-}
-
-class _RenderLiquidGlassHost extends RenderProxyBox {
-  _RenderLiquidGlassHost({required bool enabled}) : _enabled = enabled;
-
-  final _layer = LayerHandle<ContainerLayer>();
-
-  bool _enabled;
-  set enabled(bool value) {
-    if (value == _enabled) {
-      return;
-    }
-    _enabled = value;
-    markNeedsCompositingBitsUpdate();
-    markNeedsPaint();
-  }
-
-  @override
-  bool get alwaysNeedsCompositing => _enabled;
-
-  @override
-  void paint(PaintingContext context, Offset offset) {
-    if (!_enabled) {
-      _layer.layer = null;
-      super.paint(context, offset);
-      return;
-    }
-    final layer = _layer.layer ??= ContainerLayer();
-    context.pushLayer(layer, super.paint, offset);
-  }
-
-  @override
-  void dispose() {
-    _layer.layer = null;
-    super.dispose();
-  }
-}

@@ -3,56 +3,89 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:lbjconsole/services/audio_input_service.dart';
+import 'package:lbjconsole/services/demod_worker.dart';
 
-class _WaterfallCache {
-  static final _WaterfallCache instance = _WaterfallCache._();
-  _WaterfallCache._();
+const int _waterfallTotalWidth = 500;
+const int _waterfallHeight = 500;
 
-  static const int waterfallWidth = 500;
-  static const int waterfallHeight = 500;
+int _intensityToArgb(double intensity) {
+  Color color;
+  if (intensity < 0.2) {
+    color = Color.lerp(
+        const Color(0xFF000033), const Color(0xFF0000FF), intensity / 0.2)!;
+  } else if (intensity < 0.4) {
+    color = Color.lerp(const Color(0xFF0000FF), const Color(0xFF00FFFF),
+        (intensity - 0.2) / 0.2)!;
+  } else if (intensity < 0.6) {
+    color = Color.lerp(const Color(0xFF00FFFF), const Color(0xFF00FF00),
+        (intensity - 0.4) / 0.2)!;
+  } else if (intensity < 0.8) {
+    color = Color.lerp(const Color(0xFF00FF00), const Color(0xFFFFFF00),
+        (intensity - 0.6) / 0.2)!;
+  } else {
+    color = Color.lerp(const Color(0xFFFFFF00), const Color(0xFFFF0000),
+        (intensity - 0.8) / 0.2)!;
+  }
+  return ((color.a * 255.0).round() << 24) |
+      ((color.r * 255.0).round() << 16) |
+      ((color.g * 255.0).round() << 8) |
+      (color.b * 255.0).round();
+}
 
-  Uint32List? pixels;
-  late List<int> colorLUT;
+final List<int> _colorLUT = List.generate(
+    256, (i) => _intensityToArgb(i / 255.0),
+    growable: false);
 
-  void initialize() {
-    if (pixels == null) {
-      pixels = Uint32List(waterfallWidth * waterfallHeight);
-      for (int i = 0; i < pixels!.length; i++) {
-        pixels![i] = 0xFF000033;
-      }
-      _buildColorLUT();
+Float32List poolSpectrumToWidth(Float32List bins, int width) {
+  final out = Float32List(width);
+  if (bins.isEmpty || width <= 0) return out;
+  for (var c = 0; c < width; c++) {
+    var start = c * bins.length ~/ width;
+    var end = (c + 1) * bins.length ~/ width;
+    if (end <= start) end = start + 1;
+    var best = bins[start];
+    for (var i = start + 1; i < end && i < bins.length; i++) {
+      if (bins[i] > best) best = bins[i];
+    }
+    out[c] = best;
+  }
+  return out;
+}
+
+class _Strip {
+  _Strip(this.band, this.width) : pixels = Uint32List(width * _waterfallHeight) {
+    for (var i = 0; i < pixels.length; i++) {
+      pixels[i] = 0xFF000033;
     }
   }
 
-  void _buildColorLUT() {
-    colorLUT = List.filled(256, 0);
-    for (int i = 0; i < 256; i++) {
-      final intensity = i / 255.0;
-      final color = _intensityToColor(intensity);
-      colorLUT[i] = ((color.a * 255.0).round() << 24) |
-          ((color.r * 255.0).round() << 16) |
-          ((color.g * 255.0).round() << 8) |
-          (color.b * 255.0).round();
+  final String band;
+  final int width;
+  final Uint32List pixels;
+  ui.Image? image;
+  Float32List latest = Float32List(0);
+
+  void append(Float32List bins) {
+    latest = bins;
+    final pooled = poolSpectrumToWidth(bins, width);
+    pixels.setRange(width, pixels.length, pixels, 0);
+    for (var i = 0; i < width; i++) {
+      pixels[i] = _colorLUT[(pooled[i].clamp(0.0, 1.0) * 255).toInt()];
     }
   }
 
-  Color _intensityToColor(double intensity) {
-    if (intensity < 0.2) {
-      return Color.lerp(
-          const Color(0xFF000033), const Color(0xFF0000FF), intensity / 0.2)!;
-    } else if (intensity < 0.4) {
-      return Color.lerp(const Color(0xFF0000FF), const Color(0xFF00FFFF),
-          (intensity - 0.2) / 0.2)!;
-    } else if (intensity < 0.6) {
-      return Color.lerp(const Color(0xFF00FFFF), const Color(0xFF00FF00),
-          (intensity - 0.4) / 0.2)!;
-    } else if (intensity < 0.8) {
-      return Color.lerp(const Color(0xFF00FF00), const Color(0xFFFFFF00),
-          (intensity - 0.6) / 0.2)!;
-    } else {
-      return Color.lerp(const Color(0xFFFFFF00), const Color(0xFFFF0000),
-          (intensity - 0.8) / 0.2)!;
-    }
+  Future<void> rebuild() async {
+    final completer = Completer<ui.Image>();
+    ui.decodeImageFromPixels(pixels.buffer.asUint8List(), width,
+        _waterfallHeight, ui.PixelFormat.bgra8888, completer.complete);
+    final newImage = await completer.future;
+    image?.dispose();
+    image = newImage;
+  }
+
+  void dispose() {
+    image?.dispose();
+    image = null;
   }
 }
 
@@ -64,85 +97,76 @@ class AudioWaterfallWidget extends StatefulWidget {
 }
 
 class _AudioWaterfallWidgetState extends State<AudioWaterfallWidget> {
-
-
-  final _cache = _WaterfallCache.instance;
-  ui.Image? _waterfallImage;
-  List<double> _currentSpectrum = [];
-
+  final Map<String, _Strip> _strips = {};
+  List<String> _bandOrder = [];
+  String _signature = '';
+  String _currentBand = '';
   Timer? _updateTimer;
-  bool _imageNeedsUpdate = false;
+  bool _ticking = false;
 
   @override
   void initState() {
     super.initState();
-    _cache.initialize();
-    _startUpdating();
+    _updateTimer =
+        Timer.periodic(const Duration(milliseconds: 50), (_) => _tick());
   }
 
   @override
   void dispose() {
     _updateTimer?.cancel();
-    _waterfallImage?.dispose();
+    for (final strip in _strips.values) {
+      strip.dispose();
+    }
     super.dispose();
   }
 
-  void _startUpdating() {
-    _updateTimer =
-        Timer.periodic(const Duration(milliseconds: 50), (timer) async {
-      try {
-        final result = await AudioInputService().getSpectrum();
-        if (result.isNotEmpty && mounted) {
-          final fftData = result;
-
-          final pixels = _cache.pixels!;
-          pixels.setRange(
-              _WaterfallCache.waterfallWidth, pixels.length, pixels, 0);
-
-          for (int i = 0;
-              i < _WaterfallCache.waterfallWidth && i < fftData.length;
-              i++) {
-            final intensity = (fftData[i].clamp(0.0, 1.0) * 255).toInt();
-            pixels[i] = _cache.colorLUT[intensity];
-          }
-
-          _currentSpectrum = fftData;
-          _imageNeedsUpdate = true;
-
-          if (_imageNeedsUpdate) {
-            _rebuildImage();
-          }
-        }
-      // ignore: empty_catches
-      } catch (e) {}
-    });
+  void _resetStrips(List<String> bands) {
+    for (final strip in _strips.values) {
+      strip.dispose();
+    }
+    _strips.clear();
+    final width = _waterfallTotalWidth ~/ bands.length;
+    for (final band in bands) {
+      _strips[band] = _Strip(band, width);
+    }
+    _bandOrder = bands;
+    _currentBand = '';
   }
 
-  Future<void> _rebuildImage() async {
-    _imageNeedsUpdate = false;
-
-    final completer = Completer<ui.Image>();
-    ui.decodeImageFromPixels(
-      _cache.pixels!.buffer.asUint8List(),
-      _WaterfallCache.waterfallWidth,
-      _WaterfallCache.waterfallHeight,
-      ui.PixelFormat.bgra8888,
-      (image) => completer.complete(image),
-    );
-
-    final newImage = await completer.future;
-    if (mounted) {
-      setState(() {
-        _waterfallImage?.dispose();
-        _waterfallImage = newImage;
-      });
-    } else {
-      newImage.dispose();
+  Future<void> _tick() async {
+    if (_ticking) return;
+    _ticking = true;
+    try {
+      final frame = await AudioInputService().getSpectrum();
+      if (!mounted) return;
+      final bands = frame.band == 'audio'
+          ? const ['audio']
+          : AudioInputService().activeProtocols;
+      final signature = bands.join(',');
+      if (signature != _signature) {
+        _signature = signature;
+        _resetStrips(bands);
+      }
+      final strip = _strips[frame.band] ??
+          (_bandOrder.isNotEmpty ? _strips[_bandOrder.first] : null);
+      if (strip == null) return;
+      strip.append(frame.values);
+      _currentBand = frame.band;
+      await strip.rebuild();
+      if (mounted) setState(() {});
+    } on Exception catch (_) {
+      return;
+    } finally {
+      _ticking = false;
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final strips = _bandOrder.map((b) => _strips[b]!).toList();
+    final multi = strips.length > 1;
+    final anySpectrum = strips.any((s) => s.latest.isNotEmpty);
+    final anyImage = strips.any((s) => s.image != null);
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -157,11 +181,55 @@ class _AudioWaterfallWidgetState extends State<AudioWaterfallWidget> {
               top: BorderSide(color: Colors.cyan.withValues(alpha: 0.3), width: 2),
             ),
           ),
-          child: _currentSpectrum.isEmpty
+          child: !anySpectrum
               ? const Center(
                   child: CircularProgressIndicator(
                       color: Colors.cyan, strokeWidth: 2))
-              : CustomPaint(painter: _SpectrumPainter(_currentSpectrum)),
+              : Row(
+                  children: [
+                    for (var i = 0; i < strips.length; i++)
+                      Expanded(
+                        child: Container(
+                          decoration: BoxDecoration(
+                            border: Border(
+                              left: i == 0
+                                  ? BorderSide.none
+                                  : BorderSide(
+                                      color:
+                                          Colors.cyan.withValues(alpha: 0.3),
+                                      width: 1),
+                            ),
+                          ),
+                          child: Stack(
+                            children: [
+                              Positioned.fill(
+                                child: strips[i].latest.isEmpty
+                                    ? const SizedBox.shrink()
+                                    : CustomPaint(
+                                        painter:
+                                            _SpectrumPainter(strips[i].latest)),
+                              ),
+                              if (multi)
+                                Positioned(
+                                  left: 4,
+                                  top: 2,
+                                  child: Text(
+                                    DemodWorker.protoFreqLabel[strips[i].band] ??
+                                        '',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      color: strips[i].band == _currentBand
+                                          ? Colors.cyan
+                                          : Colors.white60,
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
         ),
         Container(
           height: 100,
@@ -174,10 +242,33 @@ class _AudioWaterfallWidgetState extends State<AudioWaterfallWidget> {
               bottom: BorderSide(color: Colors.cyan.withValues(alpha: 0.3), width: 2),
             ),
           ),
-          child: _waterfallImage == null
+          child: !anyImage
               ? const Center(
                   child: CircularProgressIndicator(color: Colors.cyan))
-              : CustomPaint(painter: _WaterfallImagePainter(_waterfallImage!)),
+              : Row(
+                  children: [
+                    for (var i = 0; i < strips.length; i++)
+                      Expanded(
+                        child: Container(
+                          decoration: BoxDecoration(
+                            border: Border(
+                              left: i == 0
+                                  ? BorderSide.none
+                                  : BorderSide(
+                                      color:
+                                          Colors.cyan.withValues(alpha: 0.3),
+                                      width: 1),
+                            ),
+                          ),
+                          child: strips[i].image == null
+                              ? const SizedBox.shrink()
+                              : CustomPaint(
+                                  painter:
+                                      _WaterfallImagePainter(strips[i].image!)),
+                        ),
+                      ),
+                  ],
+                ),
         ),
       ],
     );

@@ -1,13 +1,5 @@
 import 'package:flutter/material.dart';
 
-/// Geometry-only glass for what floats over a platform view (the
-/// map). The capture glass cannot see a platform view: its backdrop
-/// replay paints the page background and nothing of the map, so a
-/// shader pane over the map can only ever come out solid. This
-/// surface keeps the glass geometry, a translucent gradient tint
-/// with a lit top edge and a hairline rim, and composites it with
-/// plain alpha over the map, so the map genuinely shows through;
-/// there is no refraction because there is no backdrop to refract.
 class FallbackGlass extends StatelessWidget {
   const FallbackGlass({
     super.key,

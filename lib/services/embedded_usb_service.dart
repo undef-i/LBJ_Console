@@ -170,6 +170,14 @@ class EmbeddedUsbService {
     }
   }
 
+  void _connectEmbedded(int? port) {
+    if (port == null || port <= 0) {
+      AppLog.warn('usb-sdr', 'embedded service reported no port');
+      return;
+    }
+    RtlTcpService().connect(host: '127.0.0.1', port: '$port');
+  }
+
   Future<void> _ensureStarted() async {
     if (!_active) {
       _active = true;
@@ -183,7 +191,7 @@ class EmbeddedUsbService {
             _syncConnecting();
             _setStatus('');
             sessionActive.value = true;
-            RtlTcpService().connect(host: '127.0.0.1', port: '14423');
+            _connectEmbedded(event['port'] as int?);
             break;
           case 'no_device':
             _attempting = false;
@@ -235,7 +243,7 @@ class EmbeddedUsbService {
       if (running) {
         devicePresent.value = true;
         sessionActive.value = true;
-        RtlTcpService().connect(host: '127.0.0.1', port: '14423');
+        _connectEmbedded(await _methods.invokeMethod<int>('port'));
       } else {
         _onStartResult(await _methods.invokeMethod<String>('start'));
       }

@@ -4,12 +4,13 @@ import 'package:flutter/rendering.dart';
 import 'package:latlong2/latlong.dart';
 import '../models/merged_record.dart';
 import '../services/database_service.dart';
+import '../models/klw_event.dart';
 import '../models/train_record.dart';
 import '../services/merge_service.dart';
 import 'package:lbjconsole/ui/native_map.dart';
 import 'package:lbjconsole/ui/app_map.dart';
+import 'package:lbjconsole/ui/record_card_builders.dart';
 import 'package:lbjconsole/ui/glass_card.dart';
-import 'package:lbjconsole/ui/glass_dialog.dart';
 
 class RealtimeScreen extends StatefulWidget {
   const RealtimeScreen({
@@ -20,9 +21,11 @@ class RealtimeScreen extends StatefulWidget {
   RealtimeScreenState createState() => RealtimeScreenState();
 }
 
-class RealtimeScreenState extends State<RealtimeScreen> {
+class RealtimeScreenState extends State<RealtimeScreen>
+    with RecordCardBuilders {
 
   final List<Object> _displayItems = [];
+  List<TrainRecord> _poolRecords = [];
   bool _isLoading = true;
   final ScrollController _scrollController = ScrollController();
   bool _isAtTop = true;
@@ -32,6 +35,7 @@ class RealtimeScreenState extends State<RealtimeScreen> {
   MergeSettings _mergeSettings = MergeSettings();
   StreamSubscription? _recordDeleteSubscription;
   StreamSubscription? _settingsSubscription;
+  StreamSubscription? _dataInsertSubscription;
 
   final AppMapController _webMap = AppMapController();
   bool _mapReady = false;
@@ -64,6 +68,8 @@ class RealtimeScreenState extends State<RealtimeScreen> {
     }
     return {(item as TrainRecord).uniqueId};
   }
+
+
 
   GlobalKey _keyForDisplayItem(Object item) {
     final key = _displayItemKey(item);
@@ -162,9 +168,6 @@ class RealtimeScreenState extends State<RealtimeScreen> {
     return true;
   }
 
-  // The selected groups drawn on the map: a black route line per
-  // merged group and the train chip at its end, over the shared
-  // basemap.
   void _pushSelectionData() {
     final lines = <List<LatLng>>[];
     final chips = <MapChip>[];
@@ -317,74 +320,34 @@ class RealtimeScreenState extends State<RealtimeScreen> {
     if (_positionCache.containsKey(id)) {
       return _positionCache[id];
     }
-    final parsed = _parsePositionFromRecord(record);
+    final parsed = record.hasGps
+        ? LatLng(record.latitude!, record.longitude!)
+        : null;
     _positionCache[id] = parsed;
     return parsed;
   }
 
-  LatLng? _parsePositionFromRecord(TrainRecord record) {
-    if (record.positionInfo.isEmpty || record.positionInfo == '<NUL>') {
-      return null;
+  bool _itemHasPosition(Object item) {
+    if (item is MergedTrainRecord) {
+      return item.records.any((r) => _getCachedPosition(r) != null);
     }
-
-    try {
-      final parts = record.positionInfo.trim().split(RegExp(r'\s+'));
-      if (parts.length >= 2) {
-        final lat = _parseDmsCoordinate(parts[0]);
-        final lng = _parseDmsCoordinate(parts[1]);
-        if (_isValidMapCoordinate(lat, lng)) {
-          return LatLng(lat!, lng!);
-        }
-      }
-    } catch (e) {
-      return null;
+    if (item is TrainRecord) {
+      return _getCachedPosition(item) != null;
     }
-    return null;
+    return false;
   }
 
-  bool _isValidMapCoordinate(double? lat, double? lng) {
-    if (lat == null || lng == null || !lat.isFinite || !lng.isFinite) {
-      return false;
-    }
-    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
-      return false;
-    }
-    return lat.abs() > 0.001 || lng.abs() > 0.001;
-  }
-
-  double? _parseDmsCoordinate(String dmsStr) {
-    try {
-      final degreeIndex = dmsStr.indexOf('°');
-      if (degreeIndex == -1) {
-        return null;
-      }
-      final degrees = double.tryParse(dmsStr.substring(0, degreeIndex));
-      if (degrees == null) {
-        return null;
-      }
-      final minuteIndex = dmsStr.indexOf('′');
-      if (minuteIndex == -1) {
-        return degrees;
-      }
-      final minutes =
-          double.tryParse(dmsStr.substring(degreeIndex + 1, minuteIndex));
-      if (minutes == null) {
-        return degrees;
-      }
-      return degrees + (minutes / 60.0);
-    } catch (e) {
-      return null;
-    }
-  }
+  List<Object> _gateItems(List<Object> items) =>
+      items.where(_itemHasPosition).toList();
 
   String _getTrainDisplayName(TrainRecord record) {
-    if (record.fullTrainNumber.isNotEmpty) {
-      return record.fullTrainNumber.length > 8
-          ? record.fullTrainNumber.substring(0, 8)
-          : record.fullTrainNumber;
+    if (record.trainNumber.isNotEmpty) {
+      return record.trainNumber.length > 8
+          ? record.trainNumber.substring(0, 8)
+          : record.trainNumber;
     }
-    if (record.locoType.isNotEmpty && record.loco.isNotEmpty) {
-      return "${record.locoType}-${record.loco.length > 5 ? record.loco.substring(record.loco.length - 5) : record.loco}";
+    if (record.formattedLocoInfo.isNotEmpty) {
+      return record.formattedLocoInfo;
     }
     return "列车";
   }
@@ -419,6 +382,12 @@ class RealtimeScreenState extends State<RealtimeScreen> {
     });
     _setupRecordDeleteListener();
     _setupSettingsListener();
+    _dataInsertSubscription =
+        DatabaseService.instance.onDataInserted(() {
+      if (mounted) {
+        loadRecords(scrollToTop: false);
+      }
+    });
   }
 
   @override
@@ -426,6 +395,7 @@ class RealtimeScreenState extends State<RealtimeScreen> {
     _scrollController.dispose();
     _recordDeleteSubscription?.cancel();
     _settingsSubscription?.cancel();
+    _dataInsertSubscription?.cancel();
     super.dispose();
   }
 
@@ -459,10 +429,6 @@ class RealtimeScreenState extends State<RealtimeScreen> {
       final allRecords = await DatabaseService.instance.getAllRecords();
       final settingsMap = await DatabaseService.instance.getAllSettings() ?? {};
       _mergeSettings = MergeSettings.fromMap(settingsMap);
-      // The railway overlay follows the same persisted switch as
-      // the position map; its FAB writes the setting, the settings
-      // listener reloads records, and this keeps the monitor map
-      // in step.
       final railwayVisible =
           (settingsMap['mapRailwayLayerVisible'] as int?) != 0;
       if (railwayVisible != _railwayLayerVisible) {
@@ -472,70 +438,15 @@ class RealtimeScreenState extends State<RealtimeScreen> {
 
       List<TrainRecord> filteredRecords = allRecords;
 
-      filteredRecords = allRecords.where((record) {
-        final position = _getCachedPosition(record);
-        return position != null;
-      }).toList();
-
       if ((settingsMap['hideTimeOnlyRecords'] ?? 0) == 1) {
-        filteredRecords = filteredRecords.where((record) {
-          bool isFieldMeaningful(String field) {
-            if (field.isEmpty) {
-              return false;
-            }
-            String cleaned = field.replaceAll('<NUL>', '').trim();
-            if (cleaned.isEmpty) {
-              return false;
-            }
-            if (cleaned.runes
-                .every((r) => r == '*'.runes.first || r == ' '.runes.first)) {
-              return false;
-            }
-            return true;
-          }
-
-          final hasTrainNumber = isFieldMeaningful(record.fullTrainNumber) &&
-              !record.fullTrainNumber.contains("-----");
-
-          final hasDirection = record.direction == 1 || record.direction == 3;
-
-          final hasLocoInfo = isFieldMeaningful(record.locoType) ||
-              isFieldMeaningful(record.loco);
-
-          final hasRoute = isFieldMeaningful(record.route);
-
-          final hasPosition = isFieldMeaningful(record.position);
-
-          final hasSpeed =
-              isFieldMeaningful(record.speed) && record.speed != "NUL";
-
-          final hasPositionInfo = isFieldMeaningful(record.positionInfo);
-
-          final hasTrainType =
-              isFieldMeaningful(record.trainType) && record.trainType != "未知";
-
-          final hasLbjClass =
-              isFieldMeaningful(record.lbjClass) && record.lbjClass != "NA";
-
-          final hasTrain = isFieldMeaningful(record.train) &&
-              !record.train.contains("-----");
-
-          final shouldShow = hasTrainNumber ||
-              hasDirection ||
-              hasLocoInfo ||
-              hasRoute ||
-              hasPosition ||
-              hasSpeed ||
-              hasPositionInfo ||
-              hasTrainType ||
-              hasLbjClass ||
-              hasTrain;
-
-          return shouldShow;
-        }).toList();
+        filteredRecords = filteredRecords
+            .where(MergeService.recordPassesFieldFilter)
+            .toList();
       }
-
-      final items = MergeService.getMixedList(filteredRecords, _mergeSettings);
+      klwEvents = await DatabaseService.instance.getKlwEvents();
+      _poolRecords = filteredRecords;
+      final items = _gateItems(
+          MergeService.getMixedList(filteredRecords, _mergeSettings));
 
       if (mounted) {
         final hasDataChanged = _hasDataChanged(items);
@@ -604,35 +515,22 @@ class RealtimeScreenState extends State<RealtimeScreen> {
 
   Future<void> addNewRecord(TrainRecord newRecord) async {
     try {
-      final position = _parsePositionFromRecord(newRecord);
-      if (position == null) {
-        return;
-      }
-
-      final isNewRecord = !_displayItems.any((item) {
-        if (item is TrainRecord) {
-          return item.uniqueId == newRecord.uniqueId;
-        } else if (item is MergedTrainRecord) {
-          return item.records.any((r) => r.uniqueId == newRecord.uniqueId);
-        }
-        return false;
-      });
+      final isNewRecord =
+          !_poolRecords.any((r) => r.uniqueId == newRecord.uniqueId);
       if (!isNewRecord) return;
 
       if (mounted) {
         final renderAnchor =
             _isViewingLatest ? null : _currentRenderViewportAnchor();
-        List<TrainRecord> allRecords = [];
+        List<TrainRecord> allRecords = List.of(_poolRecords);
         Set<String> selectedRecordIds = {};
 
         for (final item in _displayItems) {
           if (item is MergedTrainRecord) {
-            allRecords.addAll(item.records);
             if (_selectedGroupKeys.contains(item.groupKey)) {
               selectedRecordIds.addAll(item.records.map((r) => r.uniqueId));
             }
           } else if (item is TrainRecord) {
-            allRecords.add(item);
             if (_selectedGroupKeys.contains("single:${item.uniqueId}")) {
               selectedRecordIds.add(item.uniqueId);
             }
@@ -640,9 +538,10 @@ class RealtimeScreenState extends State<RealtimeScreen> {
         }
 
         allRecords.insert(0, newRecord);
+        _poolRecords = allRecords;
 
-        final mergedItems =
-            MergeService.getMixedList(allRecords, _mergeSettings);
+        final mergedItems = _gateItems(
+            MergeService.getMixedList(allRecords, _mergeSettings));
 
         setState(() {
           _displayItems.clear();
@@ -672,6 +571,7 @@ class RealtimeScreenState extends State<RealtimeScreen> {
     // ignore: empty_catches
     } catch (e) {}
   }
+
 
   bool _hasDataChanged(List<Object> newItems) {
     if (_displayItems.length != newItems.length) return true;
@@ -806,6 +706,9 @@ class RealtimeScreenState extends State<RealtimeScreen> {
     );
   }
 
+
+
+
   Widget _buildMergedRecordCard(MergedTrainRecord mergedRecord) {
     final isSelected = _selectedGroupKeys.contains(mergedRecord.groupKey);
     return GestureDetector(
@@ -820,13 +723,19 @@ class RealtimeScreenState extends State<RealtimeScreen> {
               child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _buildRecordHeader(mergedRecord.latestRecord,
+                    buildRecordHeader(mergedRecord.latestRecord,
                         isMerged: true),
-                    _buildPositionAndSpeedWithRouteLogic(mergedRecord),
-                    _buildLocoInfo(mergedRecord.latestRecord),
+                    buildPositionAndSpeed(mergedRecord.latestRecord
+                        .copyWith(route: mergedRecord.displayRoute)),
+                    buildExtraInfo(mergedRecord.extrasRecord),
+                    buildLocoInfo(mergedRecord.latestRecord),
+                    buildTailStateRow(KlwState.eventsForRecords(
+                        klwEvents, mergedRecord.records)),
                   ]))),
     );
   }
+
+
 
   Widget _buildRecordCard(TrainRecord record,
       {bool isSubCard = false, Key? key}) {
@@ -844,304 +753,20 @@ class RealtimeScreenState extends State<RealtimeScreen> {
               child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _buildRecordHeader(record),
-                    _buildPositionAndSpeed(record),
-                    _buildLocoInfo(record),
+                    buildRecordHeader(record),
+                    buildPositionAndSpeed(record),
+                    buildExtraInfo(record),
+                    buildLocoInfo(record),
+                    buildTailStateRow(
+                        KlwState.eventsForRecords(klwEvents, [record])),
                   ]))),
     );
   }
 
-  Widget _buildRecordHeader(TrainRecord record, {bool isMerged = false}) {
-    final trainType = record.trainType;
-    String formattedLocoInfo = "";
-    if (record.locoType.isNotEmpty && record.loco.isNotEmpty) {
-      final shortLoco = record.loco.length > 5
-          ? record.loco.substring(record.loco.length - 5)
-          : record.loco;
-      formattedLocoInfo = "${record.locoType}-$shortLoco";
-    } else if (record.locoType.isNotEmpty) {
-      formattedLocoInfo = record.locoType;
-    } else if (record.loco.isNotEmpty) {
-      formattedLocoInfo = record.loco;
-    }
 
-    if (record.fullTrainNumber.isEmpty && formattedLocoInfo.isEmpty) {
-      return Text(
-          (record.time == "<NUL>" || record.time.isEmpty)
-              ? record.receivedTimestamp.toString().split(".")[0]
-              : record.time.split("\n")[0],
-          style: const TextStyle(fontSize: 11, color: Colors.grey),
-          overflow: TextOverflow.ellipsis);
-    }
 
-    final hasTrainNumber = record.fullTrainNumber.isNotEmpty;
-    final hasDirection = record.direction == 1 || record.direction == 3;
-    final hasLocoInfo =
-        formattedLocoInfo.isNotEmpty && formattedLocoInfo != "<NUL>";
-    final shouldShowTrainRow = hasTrainNumber || hasDirection || hasLocoInfo;
 
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-        Flexible(
-            child: Text(
-                (record.time == "<NUL>" || record.time.isEmpty)
-                    ? record.receivedTimestamp.toString().split(".")[0]
-                    : record.time.split("\n")[0],
-                style: const TextStyle(fontSize: 11, color: Colors.grey),
-                overflow: TextOverflow.ellipsis)),
-        if (trainType.isNotEmpty)
-          Flexible(
-              child: Text(trainType,
-                  style: const TextStyle(fontSize: 11, color: Colors.grey),
-                  overflow: TextOverflow.ellipsis))
-      ]),
-      if (shouldShowTrainRow) ...[
-        const SizedBox(height: 2),
-        Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Flexible(
-                  child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: [
-                    if (hasTrainNumber)
-                      Flexible(
-                          child: Text(record.fullTrainNumber,
-                              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.onSurface),
-                              overflow: TextOverflow.ellipsis)),
-                    if (hasTrainNumber && hasDirection)
-                      const SizedBox(width: 6),
-                    if (hasDirection)
-                      Container(
-                          width: 20,
-                          height: 20,
-                          decoration: BoxDecoration(
-                              color:
-                                  Theme.of(context).colorScheme.onSurface,
-                              borderRadius: BorderRadius.circular(2)),
-                          child: Center(
-                              child: Text(record.direction == 1 ? "下" : "上",
-                                  style: TextStyle(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.bold,
-                                      color: Theme.of(context)
-                                          .colorScheme
-                                          .surface))))
-                  ])),
-              if (hasLocoInfo)
-                Text(formattedLocoInfo,
-                    style: TextStyle(fontSize: 14, color: Theme.of(context).colorScheme.onSurfaceVariant))
-            ]),
-        const SizedBox(height: 2)
-      ]
-    ]);
   }
-
-  Widget _buildLocoInfo(TrainRecord record) {
-    final locoInfo = record.locoInfo;
-    if (locoInfo == null || locoInfo.isEmpty) {
-      return const SizedBox.shrink();
-    }
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      const SizedBox(height: 4),
-      Text(locoInfo,
-          style: TextStyle(fontSize: 14, color: Theme.of(context).colorScheme.onSurface),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis)
-    ]);
-  }
-
-  Widget _buildPositionAndSpeed(TrainRecord record) {
-    final routeStr = record.route.trim();
-    final position = record.position.trim();
-    final speed = record.speed.trim();
-    final isValidRoute = routeStr.isNotEmpty &&
-        !routeStr.runes.every((r) => r == '*'.runes.first);
-    final isValidPosition = position.isNotEmpty &&
-        !position.runes
-            .every((r) => r == '-'.runes.first || r == '.'.runes.first) &&
-        position != "<NUL>";
-    final isValidSpeed = speed.isNotEmpty &&
-        !speed.runes
-            .every((r) => r == '*'.runes.first || r == '-'.runes.first) &&
-        speed != "NUL" &&
-        speed != "<NUL>";
-    if (!isValidRoute && !isValidPosition && !isValidSpeed) {
-      return const SizedBox.shrink();
-    }
-    return Padding(
-        padding: const EdgeInsets.only(top: 4.0),
-        child:
-            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-          if (isValidRoute || isValidPosition)
-            Expanded(
-                child: Row(children: [
-              if (isValidRoute)
-                Flexible(
-                    child: Text(routeStr,
-                        style:
-                            TextStyle(fontSize: 16, color: Theme.of(context).colorScheme.onSurface),
-                        overflow: TextOverflow.ellipsis)),
-              if (isValidRoute && isValidPosition) const SizedBox(width: 4),
-              if (isValidPosition)
-                Flexible(
-                    child: Text(
-                        "${position.trim().endsWith('.') ? position.trim().substring(0, position.trim().length - 1) : position.trim()}K",
-                        style:
-                            TextStyle(fontSize: 16, color: Theme.of(context).colorScheme.onSurface),
-                        overflow: TextOverflow.ellipsis))
-            ])),
-          if (isValidSpeed)
-            Text("${speed.replaceAll(' ', '')} km/h",
-                style: TextStyle(fontSize: 16, color: Theme.of(context).colorScheme.onSurface),
-                textAlign: TextAlign.right)
-        ]));
-  }
-
-  Widget _buildPositionAndSpeedWithRouteLogic(MergedTrainRecord mergedRecord) {
-    if (mergedRecord.records.isEmpty) {
-      return const SizedBox.shrink();
-    }
-
-    final latestRecord = mergedRecord.latestRecord;
-
-    String getValidRoute(TrainRecord record) {
-      final routeStr = record.route.trim();
-      if (routeStr.isNotEmpty &&
-          !routeStr.runes.every((r) => r == '*'.runes.first) &&
-          routeStr != "<NUL>") {
-        return routeStr;
-      }
-      return "";
-    }
-
-    final latestRoute = getValidRoute(latestRecord);
-
-    String displayRoute = latestRoute;
-    bool isDisplayingLatestNormal = true;
-
-    if (latestRoute.isEmpty || latestRoute.contains('*')) {
-      for (final record in mergedRecord.records) {
-        final route = getValidRoute(record);
-        if (route.isNotEmpty && !route.contains('*')) {
-          displayRoute = route;
-          isDisplayingLatestNormal = (record == latestRecord);
-          break;
-        }
-      }
-    }
-
-    final bool needsSpecialDisplay = !isDisplayingLatestNormal ||
-        (latestRoute.contains('*') && displayRoute != latestRoute);
-
-    final position = latestRecord.position.trim();
-    final speed = latestRecord.speed.trim();
-
-    final isValidPosition = position.isNotEmpty &&
-        !position.runes
-            .every((r) => r == '-'.runes.first || r == '.'.runes.first) &&
-        position != "<NUL>";
-    final isValidSpeed = speed.isNotEmpty &&
-        !speed.runes
-            .every((r) => r == '*'.runes.first || r == '-'.runes.first) &&
-        speed != "NUL" &&
-        speed != "<NUL>";
-
-    if (latestRoute.isEmpty && !isValidPosition && !isValidSpeed) {
-      return const SizedBox.shrink();
-    }
-
-    return Padding(
-        padding: const EdgeInsets.only(top: 4.0),
-        child:
-            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-          if (latestRoute.isNotEmpty || isValidPosition)
-            Expanded(
-                child: Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                if (displayRoute.isNotEmpty) ...[
-                  if (needsSpecialDisplay) ...[
-                    Flexible(
-                        child: Text(displayRoute,
-                            style: TextStyle(fontSize: 16, color: Theme.of(context).colorScheme.onSurface),
-                            overflow: TextOverflow.ellipsis)),
-                    const SizedBox(width: 4),
-                    GestureDetector(
-                      onTap: () {
-                        showGlassDialog(
-                          context: context,
-                          builder: (context) => GlassDialog(
-                            title: Text("路线信息",
-                                style: TextStyle(color: Theme.of(context).colorScheme.onSurface)),
-                            content: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                if (!isDisplayingLatestNormal) ...[
-                                  Text("显示路线: $displayRoute",
-                                      style:
-                                          TextStyle(color: Theme.of(context).colorScheme.onSurface)),
-                                  const SizedBox(height: 8),
-                                ],
-                                Text(
-                                    "最新路线: ${latestRoute.isNotEmpty ? latestRoute : '无效路线'}",
-                                    style: TextStyle(
-                                      color: latestRoute.isNotEmpty
-                                          ? Theme.of(context).colorScheme.onSurfaceVariant
-                                          : Colors.red,
-                                    )),
-                              ],
-                            ),
-                            actions: [
-                              TextButton(
-                                onPressed: () => Navigator.pop(context),
-                                child: const Text('关闭'),
-                              ),
-                            ],
-                          ),
-                        );
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.all(4),
-                        decoration: BoxDecoration(
-                          color: Colors.orange.withValues(alpha: 0.2),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: Colors.orange, width: 1),
-                        ),
-                        child: const Icon(
-                          Icons.question_mark,
-                          size: 16,
-                          color: Colors.orange,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 4),
-                  ] else
-                    Flexible(
-                        child: Text(displayRoute,
-                            style: TextStyle(fontSize: 16, color: Theme.of(context).colorScheme.onSurface),
-                            overflow: TextOverflow.ellipsis)),
-                ],
-                if (latestRoute.isNotEmpty && isValidPosition)
-                  const SizedBox(width: 4),
-                if (isValidPosition)
-                  Flexible(
-                      child: Text(
-                          "${position.trim().endsWith('.') ? position.trim().substring(0, position.trim().length - 1) : position.trim()}K",
-                          style: TextStyle(fontSize: 16, color: Theme.of(context).colorScheme.onSurface),
-                          overflow: TextOverflow.ellipsis))
-              ],
-            )),
-          if (isValidSpeed)
-            Text("${speed.replaceAll(' ', '')} km/h",
-                style: TextStyle(fontSize: 16, color: Theme.of(context).colorScheme.onSurface),
-                textAlign: TextAlign.right)
-        ]));
-  }
-}
 
 class _RenderViewportAnchor {
   final String itemKey;
