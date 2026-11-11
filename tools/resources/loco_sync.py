@@ -2,6 +2,7 @@
 import argparse
 import csv
 import importlib.util
+from concurrent.futures import ThreadPoolExecutor
 import json
 import re
 import sys
@@ -214,12 +215,19 @@ def main():
     hubs = dict(loco_hubs)
     hubs.update(emu_hubs)
 
-    for series, hub in hubs.items():
-        if args.series and series != args.series:
-            continue
+    def crawl_series(item):
+        series, hub = item
         try:
-            rows = fetch_list_pages(list_url(series, hub))
+            return series, fetch_list_pages(list_url(series, hub))
         except RuntimeError:
+            return series, None
+
+    items = [(s, h) for s, h in hubs.items()
+             if not args.series or s == args.series]
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        crawled = list(pool.map(crawl_series, items))
+    for series, rows in crawled:
+        if rows is None:
             continue
         stats['pages'] += 1
         stats['seen'] += len(rows)
@@ -231,19 +239,28 @@ def main():
                         stats['pro_filled'] += 1
             else:
                 add_sighting(series, veh, alloc, pro_id)
-        time.sleep(0.2)
 
     if not args.skip_emu:
-        for model in emu_hubs:
-            if args.series and model != args.series:
-                continue
+        def crawl_emu(model):
             url = f'{EMU}{model}'
-            text = fetch(url, encoding='utf-8')
-            rows = parse_emu_table(text)
-            n = total_pages(text)
-            for i in range(2, n + 1):
-                rows += parse_emu_table(fetch(f'{url}&pagenum={i}', encoding='utf-8'))
-                time.sleep(0.2)
+            try:
+                text = fetch(url, encoding='utf-8')
+                rows = parse_emu_table(text)
+                n = total_pages(text)
+                for i in range(2, n + 1):
+                    rows += parse_emu_table(fetch(f'{url}&pagenum={i}', encoding='utf-8'))
+                    time.sleep(0.2)
+            except RuntimeError:
+                return None
+            return rows
+
+        models = [m for m in emu_hubs
+                  if not args.series or m == args.series]
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            emu_crawled = list(pool.map(crawl_emu, models))
+        for rows in emu_crawled:
+            if rows is None:
+                continue
             stats['pages'] += 1
             stats['emu_seen'] += len(rows)
             for row in rows:
@@ -269,7 +286,6 @@ def main():
                             changed = True
                     if changed:
                         stats['emu_changed'] += 1
-            time.sleep(0.2)
 
     if not args.skip_detail:
         todo = []
@@ -277,13 +293,22 @@ def main():
             for v in vehicles:
                 if v.get('pro_id') and (not v.get('manufacturer') or not v.get('photo_date')):
                     todo.append(v)
-        for v in todo[:args.limit_detail]:
+
+        def crawl_detail(v):
             try:
                 html = fetch(f"{XG}ProView.asp?ProId={v['pro_id']}")
             except RuntimeError:
+                return None
+            got = parse_detail(html)
+            time.sleep(0.2)
+            return got
+
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            details = list(pool.map(crawl_detail, todo[:args.limit_detail]))
+        for v, got in zip(todo, details):
+            if got is None:
                 continue
             stats['detail_fetched'] += 1
-            got = parse_detail(html)
             filled = False
             for f in ('manufacturer', 'photo_date', 'photo_author', 'photo_url'):
                 if got[f] and not v.get(f):
@@ -291,7 +316,6 @@ def main():
                     filled = True
             if filled:
                 stats['detail_filled'] += 1
-            time.sleep(0.2)
 
     if not args.dry_run:
         (rdir / 'loco_base.json').write_text(
