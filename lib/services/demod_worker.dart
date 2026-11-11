@@ -2,7 +2,9 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:isolate';
 import 'dart:math' as math;
-import 'dart:typed_data';
+
+import 'package:flutter/foundation.dart';
+import 'package:path_provider/path_provider.dart';
 
 import '../models/ffsk_alarm_event.dart';
 import '../models/klw_event.dart';
@@ -28,6 +30,17 @@ void _workerMain(SendPort mainPort) {
   final mic = MicDemod();
   final fft = AudioFft(4096);
   final iqFft = IqFft(4096);
+  IOSink? iqSink;
+  var iqBytes = 0;
+  var iqLastReport = 0;
+
+  void stopIq() {
+    final sink = iqSink;
+    if (sink == null) return;
+    iqSink = null;
+    sink.close();
+    mainPort.send(['iqState', false, iqBytes]);
+  }
   final rtl = RtlDemod();
   final micFfsk = FfskDecoder();
   final rtlFfsk = FfskDecoder();
@@ -87,8 +100,13 @@ void _workerMain(SendPort mainPort) {
     s.add(cmds.buffer.asUint8List());
   }
 
+  var sweepPhaseMs = 0;
+
   void tuneAt(int idx) {
     if (cycle.isEmpty) return;
+    if (idx >= cycle.length) {
+      sweepPhaseMs = (sweepPhaseMs + 50) % 250;
+    }
     cycleIdx = idx % cycle.length;
     sendFreq(_protoFreq[cycle[cycleIdx]]!);
     rtl.reset();
@@ -178,10 +196,12 @@ void _workerMain(SendPort mainPort) {
       if (now - syncStartMs >= 600) tuneAt(cycleIdx + 1);
       return;
     }
-    if (now - dwellStartMs >= 250) tuneAt(cycleIdx + 1);
+    final dwellLimit = 250 + (cycleIdx == 0 ? sweepPhaseMs : 0);
+    if (now - dwellStartMs >= dwellLimit) tuneAt(cycleIdx + 1);
   });
 
   Future<void> teardownSocket() async {
+    stopIq();
     await socketSub?.cancel();
     socketSub = null;
     socket?.destroy();
@@ -244,6 +264,15 @@ void _workerMain(SendPort mainPort) {
               : Float32List(0);
           (msg[1] as SendPort).send([band, values]);
           break;
+        case 'iqStart':
+          stopIq();
+          iqBytes = 0;
+          iqSink = File(msg[1] as String).openWrite();
+          mainPort.send(['iqState', true, 0]);
+          break;
+        case 'iqStop':
+          stopIq();
+          break;
         case 'rtlConnect':
           if (connected || connecting) return;
           mainPort.send(['rtlDiag', '正在建立数据连接']);
@@ -296,7 +325,7 @@ void _workerMain(SendPort mainPort) {
                     cmds.setUint8(0, 0x02);
                     cmds.setUint32(1, 240000, Endian.big);
                     cmds.setUint8(5, 0x03);
-                    cmds.setUint32(6, 1, Endian.big);
+                    cmds.setUint32(6, 0, Endian.big);
                     cmds.setUint8(10, 0x08);
                     cmds.setUint32(11, 1, Endian.big);
                     s.add(cmds.buffer.asUint8List());
@@ -309,6 +338,16 @@ void _workerMain(SendPort mainPort) {
                     data = Uint8List.fromList(rest);
                   }
                   bytesIn += data.length;
+                  final sink = iqSink;
+                  if (sink != null) {
+                    sink.add(data);
+                    iqBytes += data.length;
+                    final t = nowMs();
+                    if (t - iqLastReport > 1000) {
+                      iqLastReport = t;
+                      mainPort.send(['iqState', true, iqBytes]);
+                    }
+                  }
                   iqFft.pushBytes(data);
                   rtl.pushBytes(data);
                   if (rtl.messages.isNotEmpty) {
@@ -459,6 +498,20 @@ class DemodWorker {
     _diag.add(message);
   }
 
+  final iqState = ValueNotifier<(bool, int)>((false, 0));
+  String? iqPath;
+
+  Future<void> startIqRecording() async {
+    await ensureStarted();
+    final dir = await getApplicationDocumentsDirectory();
+    iqPath = '${dir.path}/iq_capture.raw';
+    _port?.send(['iqStart', iqPath]);
+  }
+
+  void stopIqRecording() {
+    _port?.send(['iqStop']);
+  }
+
   Future<void> ensureStarted() {
     if (_port != null) return Future.value();
     return _starting ??= _start().whenComplete(() {
@@ -526,6 +579,9 @@ class DemodWorker {
             (list[2] as num).toDouble(),
             (list[3] as num).toInt(),
           ));
+          break;
+        case 'iqState':
+          iqState.value = (list[1] as bool, (list[2] as num).toInt());
           break;
         case 'rtlDiag':
           AppLog.error('rtl-tcp', list[1] as String);

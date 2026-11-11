@@ -5,6 +5,7 @@ import 'dart:ui';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:lbjconsole/services/ble_service.dart';
+import 'package:lbjconsole/services/keep_alive.dart';
 
 const String _notificationChannelId = 'lbj_console_channel';
 const String _notificationChannelName = 'LBJ Console 后台服务';
@@ -35,7 +36,8 @@ class BackgroundService {
 
       await flutterLocalNotificationsPlugin
           .resolvePlatformSpecificImplementation<
-              AndroidFlutterLocalNotificationsPlugin>()
+            AndroidFlutterLocalNotificationsPlugin
+          >()
           ?.createNotificationChannel(channel);
     }
 
@@ -111,6 +113,7 @@ class BackgroundService {
       } else {
         service.startService();
       }
+      await KeepAliveNative.acquireWakeLock();
     } else if (Platform.isIOS) {
       service.startService();
     }
@@ -126,6 +129,7 @@ class BackgroundService {
   }
 
   static Future<void> stopService() async {
+    await KeepAliveNative.releaseWakeLock();
     final service = FlutterBackgroundService();
     service.invoke('stopService');
   }
@@ -134,5 +138,4 @@ class BackgroundService {
     final service = FlutterBackgroundService();
     return await service.isRunning();
   }
-
 }

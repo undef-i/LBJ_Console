@@ -13,6 +13,7 @@ class MainActivity: FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
         AudioInputHandler.registerWith(flutterEngine, applicationContext)
         UsbSdrHandler.registerWith(flutterEngine, applicationContext)
+        KeepAliveHandler.registerWith(flutterEngine, applicationContext)
         UsbSdrHandler.handleIntent(intent)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "lbj/debug")
             .setMethodCallHandler { call, result ->

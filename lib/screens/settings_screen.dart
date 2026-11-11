@@ -11,7 +11,8 @@ import 'package:lbjconsole/screens/resource_screen.dart';
 import 'package:lbjconsole/screens/licenses_screen.dart';
 import 'package:lbjconsole/services/database_service.dart';
 import 'package:lbjconsole/services/raw_log_service.dart';
-import 'package:lbjconsole/services/background_service.dart';
+import 'package:lbjconsole/services/demod_worker.dart';
+import 'package:lbjconsole/screens/keep_alive_screen.dart';
 import 'package:lbjconsole/services/audio_input_service.dart';
 import 'package:lbjconsole/services/rtl_tcp_service.dart';
 import 'package:lbjconsole/services/embedded_usb_service.dart';
@@ -56,7 +57,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _settingsLoaded = false;
 
   String _deviceName = '';
-  bool _backgroundServiceEnabled = false;
   bool _notificationsEnabled = true;
   bool _mergeRecordsEnabled = false;
   bool _hideTimeOnlyRecords = false;
@@ -95,8 +95,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       setState(() {
         _deviceName = settingsMap['deviceName'] ?? 'LBJReceiver';
         _deviceNameController.text = _deviceName;
-        _backgroundServiceEnabled =
-            (settingsMap['backgroundServiceEnabled'] ?? 0) == 1;
         _notificationsEnabled = (settingsMap['notificationEnabled'] ?? 1) == 1;
         _mergeRecordsEnabled = settings.enabled;
         _hideTimeOnlyRecords = (settingsMap['hideTimeOnlyRecords'] ?? 0) == 1;
@@ -142,7 +140,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     final values = <String, dynamic>{
       'deviceName': _deviceName,
-      'backgroundServiceEnabled': _backgroundServiceEnabled ? 1 : 0,
       'notificationEnabled': _notificationsEnabled ? 1 : 0,
       'mergeRecordsEnabled': _mergeRecordsEnabled ? 1 : 0,
       'hideTimeOnlyRecords': _hideTimeOnlyRecords ? 1 : 0,
@@ -395,17 +392,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return FlSection(
       title: '应用设置',
       rows: [
-        _toggleRow('后台保活服务', _backgroundServiceEnabled, (value) async {
-          setState(() {
-            _backgroundServiceEnabled = value;
-          });
-          await _saveSettings();
-          if (value) {
-            await BackgroundService.startService();
-          } else {
-            await BackgroundService.stopService();
-          }
-        }),
+        FlRow(
+          title: const Text('后台运行管理'),
+          trailing: Icon(
+            Icons.arrow_forward_ios,
+            size: 18,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+          onTap: () {
+            Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (context) => const KeepAliveScreen(),
+              ),
+            );
+          },
+        ),
         _toggleRow('通知服务', _notificationsEnabled, (value) {
           setState(() {
             _notificationsEnabled = value;
@@ -684,6 +685,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await Share.shareXFiles([XFile(path)], subject: 'LBJ Console 原始日志');
   }
 
+  Future<void> _shareIq() async {
+    if (DemodWorker.instance.iqState.value.$1) {
+      DemodWorker.instance.stopIqRecording();
+      await Future.delayed(const Duration(milliseconds: 400));
+    }
+    final path = DemodWorker.instance.iqPath;
+    if (path == null) return;
+    final file = File(path);
+    if (!await file.exists() || await file.length() == 0) return;
+    await Share.shareXFiles([XFile(path)], subject: 'LBJ Console 原始 IQ');
+  }
+
   void _showSampleRecordsPanel() {
     final exitFuture = _lastExitText();
     final dbFuture = _databaseService.diagnoseDatabase();
@@ -825,6 +838,86 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                     Text('导出原始日志', style: AppTheme.bodyLarge),
                                     SizedBox(height: 2),
                                     Text('分享原始日志文件', style: AppTheme.caption),
+                                  ],
+                                ),
+                              ),
+                              Icon(Icons.arrow_forward_ios, size: 18),
+                            ],
+                          ),
+                        ),
+                        StreamBuilder<void>(
+                          stream: RawLogService.instance.changes,
+                          builder: (context, _) {
+                            final all = RawLogService.instance.lines;
+                            final tail = all.length > 8
+                                ? all.sublist(all.length - 8)
+                                : all;
+                            return SizedBox(
+                              width: double.infinity,
+                              child: Text(
+                                tail.isEmpty ? '暂无日志' : tail.join('\n'),
+                                style: AppTheme.caption.copyWith(
+                                  fontFamily: 'monospace',
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                        const SizedBox(height: 16),
+                        ValueListenableBuilder<(bool, int)>(
+                          valueListenable: DemodWorker.instance.iqState,
+                          builder: (context, iq, _) {
+                            return Row(
+                              children: [
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      const Text(
+                                        '记录原始 IQ',
+                                        style: AppTheme.bodyLarge,
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        iq.$1
+                                            ? '录制中 ${(iq.$2 / 1000000).toStringAsFixed(1)} MB'
+                                            : '录制 RTL 与 USB 输入的原始 IQ 数据',
+                                        style: AppTheme.caption,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                GlassSwitch(
+                                  value: iq.$1,
+                                  onChanged: (value) {
+                                    if (value) {
+                                      DemodWorker.instance.startIqRecording();
+                                    } else {
+                                      DemodWorker.instance.stopIqRecording();
+                                    }
+                                  },
+                                ),
+                              ],
+                            );
+                          },
+                        ),
+                        const SizedBox(height: 16),
+                        GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: () {
+                            Navigator.pop(context);
+                            _shareIq();
+                          },
+                          child: const Row(
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text('导出原始 IQ', style: AppTheme.bodyLarge),
+                                    SizedBox(height: 2),
+                                    Text('分享原始 IQ 文件', style: AppTheme.caption),
                                   ],
                                 ),
                               ),

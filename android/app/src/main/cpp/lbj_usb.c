@@ -9,6 +9,7 @@
 #include <sys/ioctl.h>
 #include <linux/usbdevice_fs.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <arpa/inet.h>
 
 #include "rtl-sdr.h"
@@ -24,6 +25,8 @@ void lbj_pluto_stop(void);
 
 #define LBJ_FREQ_HZ 821237500
 #define LBJ_RATE_HZ 240000
+#define LBJ_XFER_NUM 64
+#define LBJ_XFER_LEN 4096
 
 static struct {
 	pthread_mutex_t lock;
@@ -214,6 +217,7 @@ static void *session_main(void *arg)
 			continue;
 		S.client_fd = cfd;
 		S.send_failed = 0;
+		setsockopt(cfd, IPPROTO_TCP, TCP_NODELAY, &on, sizeof(on));
 
 		uint32_t header[3];
 		memcpy(header, "RTL0", 4);
@@ -228,7 +232,8 @@ static void *session_main(void *arg)
 		pthread_t cmd_thread;
 		pthread_create(&cmd_thread, NULL, command_main, NULL);
 		S.stage = 5;
-		r = rtlsdr_read_async(dev, stream_cb, NULL, 0, 0);
+		r = rtlsdr_read_async(dev, stream_cb, NULL, LBJ_XFER_NUM,
+				      LBJ_XFER_LEN);
 		S.stage = 4;
 		if (S.client_fd >= 0)
 			shutdown(S.client_fd, SHUT_RDWR);

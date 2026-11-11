@@ -65,8 +65,9 @@ class _ConnectionStatusWidgetState extends State<_ConnectionStatusWidget> {
   @override
   void initState() {
     super.initState();
-    _connectionSubscription =
-        widget.bleService.connectionStream.listen((connected) {
+    _connectionSubscription = widget.bleService.connectionStream.listen((
+      connected,
+    ) {
       if (mounted) {
         setState(() {
           _deviceStatus = connected ? "已连接" : "未连接";
@@ -333,8 +334,8 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         orElse: () => InputSource.bluetooth,
       );
 
-      final launchedByUsb =
-          await EmbeddedUsbService.instance.consumeAttachLaunch();
+      final launchedByUsb = await EmbeddedUsbService.instance
+          .consumeAttachLaunch();
       if (launchedByUsb && newSource != InputSource.usb) {
         newSource = InputSource.usb;
         await _databaseService.updateSettings({'inputSource': 'usb'});
@@ -374,8 +375,9 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   }
 
   void _setupLastReceivedTimeListener() {
-    _lastReceivedTimeSubscription =
-        _bleService.lastReceivedTimeStream.listen((time) {
+    _lastReceivedTimeSubscription = _bleService.lastReceivedTimeStream.listen((
+      time,
+    ) {
       if (mounted) {
         setState(() {
           _lastReceivedTime = time;
@@ -383,30 +385,33 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       }
     });
 
-    _rtlTcpLastReceivedTimeSubscription =
-        _rtlTcpService.lastReceivedTimeStream.listen((time) {
-      if (mounted) {
-        setState(() {
-          _rtlTcpLastReceivedTime = time;
+    _rtlTcpLastReceivedTimeSubscription = _rtlTcpService.lastReceivedTimeStream
+        .listen((time) {
+          if (mounted) {
+            setState(() {
+              _rtlTcpLastReceivedTime = time;
+            });
+          }
         });
-      }
-    });
 
-    _audioLastReceivedTimeSubscription =
-        AudioInputService().lastReceivedTimeStream.listen((time) {
-      if (mounted) {
-        setState(() {
-          _audioLastReceivedTime = time;
+    _audioLastReceivedTimeSubscription = AudioInputService()
+        .lastReceivedTimeStream
+        .listen((time) {
+          if (mounted) {
+            setState(() {
+              _audioLastReceivedTime = time;
+            });
+          }
         });
-      }
-    });
   }
 
   void _setupSettingsListener() {
-    _settingsSubscription =
-        DatabaseService.instance.onSettingsChanged((settings) {
-      DemodWorker.instance
-          .setProtocols(DemodWorker.protocolsFromSettings(settings));
+    _settingsSubscription = DatabaseService.instance.onSettingsChanged((
+      settings,
+    ) {
+      DemodWorker.instance.setProtocols(
+        DemodWorker.protocolsFromSettings(settings),
+      );
       if (mounted) {
         final sourceStr = settings['inputSource'] as String? ?? 'bluetooth';
         final newInputSource = InputSource.values.firstWhere(
@@ -452,8 +457,9 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       }
     });
 
-    _rtlTcpConnectionSubscription =
-        _rtlTcpService.connectionStream.listen((connected) {
+    _rtlTcpConnectionSubscription = _rtlTcpService.connectionStream.listen((
+      connected,
+    ) {
       if (mounted) {
         setState(() {
           _rtlTcpConnected = connected;
@@ -461,8 +467,9 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       }
     });
 
-    _audioConnectionSubscription =
-        AudioInputService().connectionStream.listen((listening) {
+    _audioConnectionSubscription = AudioInputService().connectionStream.listen((
+      listening,
+    ) {
       if (mounted) {
         setState(() {});
       }
@@ -521,10 +528,8 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
   Future<void> _insertSampleRecord() async {
     final now = DateTime.now();
-    final latStep =
-        (_sampleRandom.nextDouble() - 0.5) * _sampleMaxStepDegrees;
-    final lngStep =
-        (_sampleRandom.nextDouble() - 0.5) * _sampleMaxStepDegrees;
+    final latStep = (_sampleRandom.nextDouble() - 0.5) * _sampleMaxStepDegrees;
+    final lngStep = (_sampleRandom.nextDouble() - 0.5) * _sampleMaxStepDegrees;
 
     _sampleLat = ((_sampleLat ?? 35.0) + latStep)
         .clamp(_sampleMinLat, _sampleMaxLat)
@@ -547,7 +552,8 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       case 7:
       case 11:
         await _pushSamplePcm(
-            ffskSamplePcm(alarmSampleFrame(_sampleAlarmSerial++ % 8, now)));
+          ffskSamplePcm(alarmSampleFrame(_sampleAlarmSerial++ % 8, now)),
+        );
       default:
         await _pushSamplePcm(_sampleLbjPcm(now));
     }
@@ -557,8 +563,9 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     final bytes = pcm.buffer.asUint8List();
     const chunkBytes = 4800 * 2;
     for (var at = 0; at < bytes.length; at += chunkBytes) {
-      final end =
-          at + chunkBytes > bytes.length ? bytes.length : at + chunkBytes;
+      final end = at + chunkBytes > bytes.length
+          ? bytes.length
+          : at + chunkBytes;
       await DemodWorker.instance.pushPcm(Uint8List.sublistView(bytes, at, end));
     }
   }
@@ -577,30 +584,56 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
   Int16List _sampleTdcsPcm() {
     _sampleTdcsSerial += 1;
-    return ffskSamplePcm(tdcsSampleFrame(
-      shared: _sampleTdcsSerial.isOdd,
-      serial: _sampleTdcsSerial,
-      speed: 55 + _sampleRandom.nextInt(85),
-      weight: 3800 + _sampleRandom.nextInt(1400),
-      length: (520 + _sampleRandom.nextInt(180)) / 10,
-      cars: 48 + _sampleRandom.nextInt(14),
-      test: _sampleTdcsSerial % 5 == 4,
-    ));
+    return ffskSamplePcm(
+      tdcsSampleFrame(
+        shared: _sampleTdcsSerial.isOdd,
+        serial: _sampleTdcsSerial,
+        speed: 55 + _sampleRandom.nextInt(85),
+        weight: 3800 + _sampleRandom.nextInt(1400),
+        length: (520 + _sampleRandom.nextInt(180)) / 10,
+        cars: 48 + _sampleRandom.nextInt(14),
+        test: _sampleTdcsSerial % 5 == 4,
+      ),
+    );
   }
 
   static const _sampleKlwCommands = [
-    0x91, 0x92, 0x93, 0x94, 0x30, 0x31, 0xB0, 0xB1, 0x24, 0x25,
-    0x83, 0x84, 0xB5, 0xB6, 0x5B, 0xA3, 0xA4, 0xA1, 0xA2,
+    0x91,
+    0x92,
+    0x93,
+    0x94,
+    0x30,
+    0x31,
+    0xB0,
+    0xB1,
+    0x24,
+    0x25,
+    0x83,
+    0x84,
+    0xB5,
+    0xB6,
+    0x5B,
+    0xA3,
+    0xA4,
+    0xA1,
+    0xA2,
   ];
   static const _sampleKlwPressureCommands = {
-    0x91, 0x92, 0x30, 0x31, 0x93, 0x94, 0xA3, 0xA4,
+    0x91,
+    0x92,
+    0x30,
+    0x31,
+    0x93,
+    0x94,
+    0xA3,
+    0xA4,
   };
 
   Int16List _sampleKlwPcm(DateTime now) {
     _sampleKlwSerial += 1;
     final pairA = _sampleKlwSerial.isOdd;
-    final command = _sampleKlwCommands[
-        (_sampleKlwSerial - 1) % _sampleKlwCommands.length];
+    final command =
+        _sampleKlwCommands[(_sampleKlwSerial - 1) % _sampleKlwCommands.length];
     int? eventPressure;
     if (_sampleKlwPressureCommands.contains(command)) {
       if (command == 0x30 || command == 0x31) {
@@ -628,13 +661,15 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     } else {
       layout = 11;
     }
-    return ffskSamplePcm(klwSampleFrame(
-      pairA: pairA,
-      command: command,
-      pressure: eventPressure,
-      layout: layout,
-      now: now,
-    ));
+    return ffskSamplePcm(
+      klwSampleFrame(
+        pairA: pairA,
+        command: command,
+        pressure: eventPressure,
+        layout: layout,
+        now: now,
+      ),
+    );
   }
 
   double _sampleStartOffset() {
@@ -768,8 +803,9 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
     final settings = await DatabaseService.instance.getAllSettings();
     if (settings != null) {
-      DemodWorker.instance
-          .setProtocols(DemodWorker.protocolsFromSettings(settings));
+      DemodWorker.instance.setProtocols(
+        DemodWorker.protocolsFromSettings(settings),
+      );
     }
   }
 
@@ -880,25 +916,25 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
           behavior: HitTestBehavior.opaque,
           onTap: toggle,
           child: _glassPill([
-          _ConnectionStatusWidget(
-            bleService: _bleService,
-            rtlTcpService: _rtlTcpService,
-            lastReceivedTime: _lastReceivedTime,
-            rtlTcpLastReceivedTime: _rtlTcpLastReceivedTime,
-            audioLastReceivedTime: _audioLastReceivedTime,
-            inputSource: _inputSource,
-            rtlTcpConnected: _rtlTcpConnected,
-          ),
-          IconButton(
-            icon: Icon(statusIcon, size: 24),
-            color: colorScheme.onSurface,
-            style: IconButton.styleFrom(
-              minimumSize: const Size(40, 40),
-              maximumSize: const Size(40, 40),
-              padding: EdgeInsets.zero,
+            _ConnectionStatusWidget(
+              bleService: _bleService,
+              rtlTcpService: _rtlTcpService,
+              lastReceivedTime: _lastReceivedTime,
+              rtlTcpLastReceivedTime: _rtlTcpLastReceivedTime,
+              audioLastReceivedTime: _audioLastReceivedTime,
+              inputSource: _inputSource,
+              rtlTcpConnected: _rtlTcpConnected,
             ),
-            onPressed: toggle,
-          ),
+            IconButton(
+              icon: Icon(statusIcon, size: 24),
+              color: colorScheme.onSurface,
+              style: IconButton.styleFrom(
+                minimumSize: const Size(40, 40),
+                maximumSize: const Size(40, 40),
+                padding: EdgeInsets.zero,
+              ),
+              onPressed: toggle,
+            ),
           ]),
         ),
         menuBuilder: (context, close) => _PixelPerfectBluetoothDialog(
@@ -911,10 +947,12 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
     final morphing = editing || _topBarWasEditing;
     _topBarWasEditing = editing;
-    final slotDuration =
-        morphing ? const Duration(milliseconds: 240) : Duration.zero;
-    final slotReverseDuration =
-        morphing ? const Duration(milliseconds: 180) : Duration.zero;
+    final slotDuration = morphing
+        ? const Duration(milliseconds: 240)
+        : Duration.zero;
+    final slotReverseDuration = morphing
+        ? const Duration(milliseconds: 180)
+        : Duration.zero;
 
     Widget slot(Widget child, bool edit, Alignment alignment) {
       return AnimatedSize(
@@ -1015,8 +1053,9 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         content: Text('确定要删除选中的 ${historyState.getSelectedCount()} 条记录吗？'),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('取消')),
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
             child: const Text('删除'),
@@ -1030,9 +1069,11 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       await DatabaseService.instance.deleteRecords(idsToDelete);
       final eventIds = historyState.getSelectedEventIds();
       await DatabaseService.instance.deleteAlarmEvents(
-          eventIds.where((id) => id.startsWith('alarm_')).toList());
+        eventIds.where((id) => id.startsWith('alarm_')).toList(),
+      );
       await DatabaseService.instance.deleteSyncEvents(
-          eventIds.where((id) => id.startsWith('sync_')).toList());
+        eventIds.where((id) => id.startsWith('sync_')).toList(),
+      );
 
       historyState.setEditMode(false);
 
@@ -1043,16 +1084,18 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     final brightness = Theme.of(context).brightness;
-    SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
-      statusBarColor: Colors.transparent,
-      systemNavigationBarColor: Theme.of(context).scaffoldBackgroundColor,
-      statusBarIconBrightness: brightness == Brightness.dark
-          ? Brightness.light
-          : Brightness.dark,
-      systemNavigationBarIconBrightness: brightness == Brightness.dark
-          ? Brightness.light
-          : Brightness.dark,
-    ));
+    SystemChrome.setSystemUIOverlayStyle(
+      SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        systemNavigationBarColor: Theme.of(context).scaffoldBackgroundColor,
+        statusBarIconBrightness: brightness == Brightness.dark
+            ? Brightness.light
+            : Brightness.dark,
+        systemNavigationBarIconBrightness: brightness == Brightness.dark
+            ? Brightness.light
+            : Brightness.dark,
+      ),
+    );
 
     final pages = [
       HistoryScreen(
@@ -1060,9 +1103,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         onEditModeChanged: _handleHistoryEditModeChanged,
         onSelectionChanged: _handleSelectionChanged,
       ),
-      RealtimeScreen(
-        key: _realtimeScreenKey,
-      ),
+      RealtimeScreen(key: _realtimeScreenKey),
       const MapScreen(),
       SettingsScreen(
         sampleRecordsEnabled: _sampleRecordsEnabled,
@@ -1074,10 +1115,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       extendBody: true,
       body: Stack(
         children: [
-          IndexedStack(
-            index: _currentIndex,
-            children: pages,
-          ),
+          IndexedStack(index: _currentIndex, children: pages),
           const ScrollEdgeFade(),
           Positioned(
             top: MediaQuery.paddingOf(context).top,
@@ -1138,10 +1176,11 @@ class _PixelPerfectBluetoothDialog extends StatefulWidget {
   final BLEService bleService;
   final InputSource inputSource;
   final VoidCallback onClose;
-  const _PixelPerfectBluetoothDialog(
-      {required this.bleService,
-      required this.inputSource,
-      required this.onClose});
+  const _PixelPerfectBluetoothDialog({
+    required this.bleService,
+    required this.inputSource,
+    required this.onClose,
+  });
   @override
   State<_PixelPerfectBluetoothDialog> createState() =>
       _PixelPerfectBluetoothDialogState();
@@ -1166,8 +1205,9 @@ class _PixelPerfectBluetoothDialogState
         });
       }
     });
-    _debugSettingsSubscription =
-        DatabaseService.instance.onSettingsChanged((settings) {
+    _debugSettingsSubscription = DatabaseService.instance.onSettingsChanged((
+      settings,
+    ) {
       if (mounted) {
         setState(() {
           _debugMode = (settings['debugMode'] ?? 0) == 1;
@@ -1178,12 +1218,15 @@ class _PixelPerfectBluetoothDialogState
       if (mounted) setState(() {});
     });
 
-    _rtlTcpConnectionSubscription =
-        widget.bleService.rtlTcpService?.connectionStream.listen((connected) {
-      if (mounted) {
-        setState(() {});
-      }
-    });
+    _rtlTcpConnectionSubscription = widget
+        .bleService
+        .rtlTcpService
+        ?.connectionStream
+        .listen((connected) {
+          if (mounted) {
+            setState(() {});
+          }
+        });
 
     if (!widget.bleService.isConnected &&
         widget.inputSource == InputSource.bluetooth) {
@@ -1233,11 +1276,11 @@ class _PixelPerfectBluetoothDialogState
       InputSource.usb => ('USB 设备', _buildUsbView(context)),
       InputSource.audioInput => ('音频设备', _buildAudioInputView(context)),
       InputSource.bluetooth => (
-          '蓝牙设备',
-          widget.bleService.isConnected
-              ? _buildConnectedView(context, widget.bleService.connectedDevice)
-              : _buildDisconnectedView(context)
-        ),
+        '蓝牙设备',
+        widget.bleService.isConnected
+            ? _buildConnectedView(context, widget.bleService.connectedDevice)
+            : _buildDisconnectedView(context),
+      ),
     };
 
     final colorScheme = Theme.of(context).colorScheme;
@@ -1285,89 +1328,115 @@ class _PixelPerfectBluetoothDialogState
   }
 
   Widget _buildConnectedView(BuildContext context, BluetoothDevice? device) {
-    return Column(mainAxisSize: MainAxisSize.min, children: [
-      const Icon(Icons.bluetooth_connected, size: 48, color: Colors.green),
-      const SizedBox(height: 16),
-      Text('设备已连接',
-          style: Theme.of(context)
-              .textTheme
-              .titleMedium
-              ?.copyWith(fontWeight: FontWeight.bold)),
-      const SizedBox(height: 4),
-      Text(device?.platformName ?? '未知设备', textAlign: TextAlign.center),
-      Text(device?.remoteId.str ?? '',
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Icon(Icons.bluetooth_connected, size: 48, color: Colors.green),
+        const SizedBox(height: 16),
+        Text(
+          '设备已连接',
+          style: Theme.of(
+            context,
+          ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 4),
+        Text(device?.platformName ?? '未知设备', textAlign: TextAlign.center),
+        Text(
+          device?.remoteId.str ?? '',
           style: Theme.of(context).textTheme.bodySmall,
-          textAlign: TextAlign.center),
-      const SizedBox(height: 16),
-      ElevatedButton.icon(
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 16),
+        ElevatedButton.icon(
           onPressed: _disconnect,
           icon: const Icon(Icons.bluetooth_disabled),
           label: const Text('断开连接'),
           style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red, foregroundColor: Colors.white))
-    ]);
+            backgroundColor: Colors.red,
+            foregroundColor: Colors.white,
+          ),
+        ),
+      ],
+    );
   }
 
   Widget _buildDisconnectedView(BuildContext context) {
-    return Column(mainAxisSize: MainAxisSize.min, children: [
-      ElevatedButton.icon(
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        ElevatedButton.icon(
           onPressed: _scanState == _ScanState.scanning ? null : _startScan,
           icon: _scanState == _ScanState.scanning
               ? SizedBox(
                   width: 16,
                   height: 16,
                   child: CircularProgressIndicator(
-                      strokeWidth: 2, color: Theme.of(context).colorScheme.onSurface))
+                    strokeWidth: 2,
+                    color: Theme.of(context).colorScheme.onSurface,
+                  ),
+                )
               : const Icon(Icons.search),
           label: Text(_scanState == _ScanState.scanning ? '扫描中...' : '扫描设备'),
           style: ElevatedButton.styleFrom(
-              minimumSize: const Size(double.infinity, 40))),
-      const SizedBox(height: 16),
-      if (_scanState == _ScanState.finished && _devices.isNotEmpty)
-        _buildDeviceListView()
-    ]);
+            minimumSize: const Size(double.infinity, 40),
+          ),
+        ),
+        const SizedBox(height: 16),
+        if (_scanState == _ScanState.finished && _devices.isNotEmpty)
+          _buildDeviceListView(),
+      ],
+    );
   }
 
   Widget _buildRtlTcpView(BuildContext context) {
-    return const Column(mainAxisSize: MainAxisSize.min, children: [
-      SizedBox(height: 8),
-      AudioWaterfallWidget(),
-    ]);
+    return const Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        SizedBox(height: 8),
+        AudioWaterfallWidget(source: 'rtl'),
+      ],
+    );
   }
 
   Widget _buildUsbView(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Column(mainAxisSize: MainAxisSize.min, children: [
-      const SizedBox(height: 8),
-      const AudioWaterfallWidget(),
-      if (_debugMode)
-        ValueListenableBuilder<String>(
-          valueListenable: EmbeddedUsbService.instance.statusText,
-        builder: (context, text, _) => text.isEmpty
-            ? const SizedBox.shrink()
-            : Align(
-                alignment: Alignment.centerLeft,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-                  child: Text(
-                    text,
-                    style: TextStyle(
-                      fontSize: 13,
-                      height: 18 / 13,
-                      color: scheme.onSurfaceVariant,
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const SizedBox(height: 8),
+        const AudioWaterfallWidget(source: 'usb'),
+        if (_debugMode)
+          ValueListenableBuilder<String>(
+            valueListenable: EmbeddedUsbService.instance.statusText,
+            builder: (context, text, _) => text.isEmpty
+                ? const SizedBox.shrink()
+                : Align(
+                    alignment: Alignment.centerLeft,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                      child: Text(
+                        text,
+                        style: TextStyle(
+                          fontSize: 13,
+                          height: 18 / 13,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
                     ),
                   ),
-                ),
-              ),
-      ),
-    ]);
+          ),
+      ],
+    );
   }
 
   Widget _buildAudioInputView(BuildContext context) {
-    return const Column(mainAxisSize: MainAxisSize.min, children: [
-      SizedBox(height: 8),
-      AudioWaterfallWidget(),
-    ]);
+    return const Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        SizedBox(height: 8),
+        AudioWaterfallWidget(source: 'audio'),
+      ],
+    );
   }
 
   Widget _buildDeviceListView() {
@@ -1383,9 +1452,9 @@ class _PixelPerfectBluetoothDialogState
             radius: 16,
             child: ListTile(
               leading: const Icon(Icons.bluetooth),
-              title: Text(device.platformName.isNotEmpty
-                  ? device.platformName
-                  : '未知设备'),
+              title: Text(
+                device.platformName.isNotEmpty ? device.platformName : '未知设备',
+              ),
               subtitle: Text(device.remoteId.str),
               onTap: () => _connectToDevice(device),
             ),
@@ -1395,5 +1464,3 @@ class _PixelPerfectBluetoothDialogState
     );
   }
 }
-
-

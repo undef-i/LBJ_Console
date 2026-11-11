@@ -1,23 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
-import 'package:lbjconsole/ui/scroll_edge_fade.dart';
-
-AppBar _licensesAppBar(BuildContext context, String title) {
-  final theme = Theme.of(context);
-  final dark = theme.brightness == Brightness.dark;
-  return AppBar(
-    title: Text(title),
-    backgroundColor: Colors.transparent,
-    elevation: 0,
-    scrolledUnderElevation: 0,
-    titleTextStyle: theme.textTheme.titleLarge?.copyWith(
-      color: dark ? Colors.white : null,
-    ),
-    iconTheme: IconThemeData(color: dark ? Colors.white : null),
-  );
-}
-
 class LicensesScreen extends StatelessWidget {
   const LicensesScreen({super.key});
 
@@ -39,81 +22,50 @@ class LicensesScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      extendBodyBehindAppBar: true,
-      appBar: _licensesAppBar(context, '开放源代码许可'),
-      body: Stack(
-        children: [
-          SafeArea(
-            child: FutureBuilder<Map<String, String>>(
-              future: _load(),
-              builder: (context, snapshot) {
-                final licenses = snapshot.data ?? const <String, String>{};
-                final names = licenses.keys.toList()..sort();
-                return MediaQuery.removePadding(
-                  context: context,
-                  removeTop: true,
-                  child: ListView(
-                    padding: const EdgeInsets.only(top: 56),
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'LBJ Console',
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w600,
-                                color:
-                                    Theme.of(context).brightness ==
-                                        Brightness.dark
-                                    ? Colors.white
-                                    : null,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              '本程序是 GNU 通用公共许可证第 3 版下的自由软件。',
-                              style: TextStyle(
-                                fontSize: 13,
-                                color:
-                                    Theme.of(context).brightness ==
-                                        Brightness.dark
-                                    ? Colors.white
-                                    : null,
-                              ),
-                            ),
-                          ],
+      appBar: AppBar(title: const Text('开放源代码许可')),
+      body: FutureBuilder<Map<String, String>>(
+        future: _load(),
+        builder: (context, snapshot) {
+          final licenses = snapshot.data ?? const <String, String>{};
+          final names = licenses.keys.toList()..sort();
+          return ListView(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'LBJ Console',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '本程序是 GNU 通用公共许可证第 3 版下的自由软件。',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(),
+              for (final name in names)
+                ListTile(
+                  title: Text(name),
+                  trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (context) => _LicenseDetailScreen(
+                          package: name,
+                          text: licenses[name]!,
                         ),
                       ),
-                      const Divider(),
-                      for (final name in names)
-                        ListTile(
-                          title: Text(name),
-                          trailing: const Icon(
-                            Icons.arrow_forward_ios,
-                            size: 16,
-                          ),
-                          onTap: () {
-                            Navigator.of(context).push(
-                              MaterialPageRoute<void>(
-                                builder: (context) => _LicenseDetailScreen(
-                                  package: name,
-                                  text: licenses[name]!,
-                                ),
-                              ),
-                            );
-                          },
-                        ),
-                    ],
-                  ),
-                );
-              },
-            ),
-          ),
-          const ScrollEdgeFade(),
-        ],
+                    );
+                  },
+                ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -128,25 +80,13 @@ class _LicenseDetailScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      extendBodyBehindAppBar: true,
-      appBar: _licensesAppBar(context, package),
-      body: Stack(
-        children: [
-          SafeArea(
-            child: MediaQuery.removePadding(
-              context: context,
-              removeTop: true,
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(16, 56 + 16, 16, 16),
-                child: SelectableText(
-                  text,
-                  style: const TextStyle(fontSize: 13, height: 1.5),
-                ),
-              ),
-            ),
-          ),
-          const ScrollEdgeFade(),
-        ],
+      appBar: AppBar(title: Text(package)),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+        child: SelectableText(
+          text,
+          style: const TextStyle(fontSize: 13, height: 1.5),
+        ),
       ),
     );
   }

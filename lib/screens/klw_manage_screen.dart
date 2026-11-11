@@ -48,8 +48,9 @@ class _KlwManageScreenState extends State<KlwManageScreen> {
   }
 
   void _toggleGroup(List<KlwEvent> events) {
-    final allSelected =
-        events.every((event) => _selected.contains(event.uniqueId));
+    final allSelected = events.every(
+      (event) => _selected.contains(event.uniqueId),
+    );
     setState(() {
       for (final event in events) {
         if (allSelected) {
@@ -78,8 +79,9 @@ class _KlwManageScreenState extends State<KlwManageScreen> {
         content: Text('确定要删除选中的 $count 条 KLW 事件吗？'),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('取消')),
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
             child: const Text('删除'),
@@ -100,8 +102,6 @@ class _KlwManageScreenState extends State<KlwManageScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final dark = theme.brightness == Brightness.dark;
     return Scaffold(
       appBar: AppBar(
         leading: _selecting
@@ -111,10 +111,7 @@ class _KlwManageScreenState extends State<KlwManageScreen> {
               )
             : null,
         title: Text(_selecting ? '已选择 ${_selected.length} 条' : 'KLW 数据管理'),
-        titleTextStyle: theme.textTheme.titleLarge?.copyWith(
-          color: dark ? Colors.white : null,
-        ),
-        iconTheme: IconThemeData(color: dark ? Colors.white : null),
+
         actions: [
           if (_selecting)
             IconButton(
@@ -126,21 +123,22 @@ class _KlwManageScreenState extends State<KlwManageScreen> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _groups.isEmpty
-              ? const Center(child: Text('暂无 KLW 事件'))
-              : ListView(
-                  children: [
-                    for (final entry in _groups.entries)
-                      _buildGroup(entry.key, entry.value),
-                  ],
-                ),
+          ? const Center(child: Text('暂无 KLW 事件'))
+          : ListView(
+              children: [
+                for (final entry in _groups.entries)
+                  _buildGroup(entry.key, entry.value),
+              ],
+            ),
     );
   }
 
   Widget _buildGroup(String key, List<KlwEvent> events) {
     final colorScheme = Theme.of(context).colorScheme;
     final expanded = _expanded.contains(key);
-    final selectedCount =
-        events.where((event) => _selected.contains(event.uniqueId)).length;
+    final selectedCount = events
+        .where((event) => _selected.contains(event.uniqueId))
+        .length;
     final loco = events.first.locoDisplay;
     return Column(
       children: [
@@ -180,11 +178,11 @@ class _KlwManageScreenState extends State<KlwManageScreen> {
           onLongPress: _selecting
               ? null
               : () => setState(() {
-                    _selecting = true;
-                    for (final event in events) {
-                      _selected.add(event.uniqueId);
-                    }
-                  }),
+                  _selecting = true;
+                  for (final event in events) {
+                    _selected.add(event.uniqueId);
+                  }
+                }),
         ),
         if (expanded)
           for (final event in events) _buildEventRow(event),
@@ -206,19 +204,25 @@ class _KlwManageScreenState extends State<KlwManageScreen> {
       title: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(event.timestamp.toString().substring(0, 19),
-              style: const TextStyle(fontSize: 12)),
-          Text('KLW ${event.tailNumber}',
-              style: TextStyle(fontSize: 12, color: colorScheme.onSurface)),
+          Text(
+            event.timestamp.toString().substring(0, 19),
+            style: const TextStyle(fontSize: 12),
+          ),
+          Text(
+            'KLW ${event.tailNumber}',
+            style: TextStyle(fontSize: 12, color: colorScheme.onSurface),
+          ),
         ],
       ),
       subtitle: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Flexible(
-            child: Text(event.commandName,
-                style: const TextStyle(fontSize: 13),
-                overflow: TextOverflow.ellipsis),
+            child: Text(
+              event.commandName,
+              style: const TextStyle(fontSize: 13),
+              overflow: TextOverflow.ellipsis,
+            ),
           ),
           Text(
             event.pressureKpa != null
@@ -233,9 +237,9 @@ class _KlwManageScreenState extends State<KlwManageScreen> {
       onLongPress: _selecting
           ? null
           : () => setState(() {
-                _selecting = true;
-                _selected.add(event.uniqueId);
-              }),
+              _selecting = true;
+              _selected.add(event.uniqueId);
+            }),
     );
   }
 }

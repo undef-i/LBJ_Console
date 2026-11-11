@@ -31,8 +31,7 @@ class _ClearDataScreenState extends State<ClearDataScreen> {
       context: context,
       builder: (context) => GlassDialog(
         title: const Text('清空数据'),
-        content: Text(
-            '$scope${_resetSettings ? '，并将设置重置为默认' : ''}，无法撤销。是否继续？'),
+        content: Text('$scope${_resetSettings ? '，并将设置重置为默认' : ''}，无法撤销。是否继续？'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -67,8 +66,9 @@ class _ClearDataScreenState extends State<ClearDataScreen> {
       if (retention == null) {
         await database.deleteAllRecords();
       } else {
-        await database
-            .deleteRecordsOlderThan(DateTime.now().subtract(retention));
+        await database.deleteRecordsOlderThan(
+          DateTime.now().subtract(retention),
+        );
       }
       if (_resetSettings) {
         await database.updateSettings({
@@ -88,24 +88,16 @@ class _ClearDataScreenState extends State<ClearDataScreen> {
       if (!mounted) return;
       Navigator.pop(context);
       setState(() => _working = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('清空错误：$e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('清空错误：$e')));
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final dark = theme.brightness == Brightness.dark;
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('清空数据'),
-        titleTextStyle: theme.textTheme.titleLarge?.copyWith(
-          color: dark ? Colors.white : null,
-        ),
-        iconTheme: IconThemeData(color: dark ? Colors.white : null),
-      ),
+      appBar: AppBar(title: const Text('清空数据')),
       body: ListView(
         children: [
           ListTile(
@@ -114,10 +106,7 @@ class _ClearDataScreenState extends State<ClearDataScreen> {
               value: _selected,
               items: [
                 for (var i = 0; i < _options.length; i++)
-                  DropdownMenuItem(
-                    value: i,
-                    child: Text(_options[i].$1),
-                  ),
+                  DropdownMenuItem(value: i, child: Text(_options[i].$1)),
               ],
               onChanged: (value) {
                 if (value != null) {

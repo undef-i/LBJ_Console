@@ -69,8 +69,8 @@ Float32List poolSpectrumToWidth(Float32List bins, int width) {
   return out;
 }
 
-class _Strip {
-  _Strip(this.band, this.width)
+class SpectrumStrip {
+  SpectrumStrip(this.band, this.width)
     : pixels = Uint32List(width * _waterfallHeight) {
     for (var i = 0; i < pixels.length; i++) {
       pixels[i] = 0xFF000033;
@@ -112,20 +112,37 @@ class _Strip {
   }
 }
 
+class SpectrumStore {
+  SpectrumStore._();
+  static final SpectrumStore instance = SpectrumStore._();
+
+  final Map<String, SpectrumStrip> strips = {};
+  String currentBand = '';
+
+  SpectrumStrip stripFor(String band) {
+    return strips.putIfAbsent(
+      band,
+      () => SpectrumStrip(
+        band,
+        band == 'audio' ? _waterfallTotalWidth : _waterfallTotalWidth ~/ 3,
+      ),
+    );
+  }
+}
+
 class AudioWaterfallWidget extends StatefulWidget {
-  const AudioWaterfallWidget({super.key});
+  const AudioWaterfallWidget({super.key, required this.source});
+
+  final String source;
 
   @override
   State<AudioWaterfallWidget> createState() => _AudioWaterfallWidgetState();
 }
 
 class _AudioWaterfallWidgetState extends State<AudioWaterfallWidget> {
-  final Map<String, _Strip> _strips = {};
-  List<String> _bandOrder = [];
-  String _signature = '';
-  String _currentBand = '';
   Timer? _updateTimer;
   bool _ticking = false;
+  String _signature = '';
 
   @override
   void initState() {
@@ -139,23 +156,7 @@ class _AudioWaterfallWidgetState extends State<AudioWaterfallWidget> {
   @override
   void dispose() {
     _updateTimer?.cancel();
-    for (final strip in _strips.values) {
-      strip.dispose();
-    }
     super.dispose();
-  }
-
-  void _resetStrips(List<String> bands) {
-    for (final strip in _strips.values) {
-      strip.dispose();
-    }
-    _strips.clear();
-    final width = _waterfallTotalWidth ~/ bands.length;
-    for (final band in bands) {
-      _strips[band] = _Strip(band, width);
-    }
-    _bandOrder = bands;
-    _currentBand = '';
   }
 
   Future<void> _tick() async {
@@ -164,20 +165,29 @@ class _AudioWaterfallWidgetState extends State<AudioWaterfallWidget> {
     try {
       final frame = await AudioInputService().getSpectrum();
       if (!mounted) return;
-      final bands = frame.band == 'audio'
+      final store = SpectrumStore.instance;
+      if (widget.source != 'audio' && frame.band == 'audio') {
+        return;
+      }
+      if (frame.band == 'audio') {
+        store.stripFor('audio');
+      } else {
+        for (final band in AudioInputService().activeProtocols) {
+          store.stripFor(band);
+        }
+      }
+      final enabled = frame.band == 'audio'
           ? const ['audio']
           : AudioInputService().activeProtocols;
-      final signature = bands.join(',');
+      final signature = enabled.join(',');
       if (signature != _signature) {
         _signature = signature;
-        _resetStrips(bands);
+        setState(() {});
       }
-      final strip =
-          _strips[frame.band] ??
-          (_bandOrder.isNotEmpty ? _strips[_bandOrder.first] : null);
+      final strip = store.strips[frame.band];
       if (strip == null) return;
       strip.append(frame.values);
-      _currentBand = frame.band;
+      store.currentBand = frame.band;
       await strip.rebuild();
       if (mounted) setState(() {});
     } on Exception catch (_) {
@@ -189,7 +199,13 @@ class _AudioWaterfallWidgetState extends State<AudioWaterfallWidget> {
 
   @override
   Widget build(BuildContext context) {
-    final strips = _bandOrder.map((b) => _strips[b]!).toList();
+    final store = SpectrumStore.instance;
+    final shown = _signature.split(',');
+    final strips = [
+      for (final band in const ['audio', 'lbj', 'klw', 'tdcs'])
+        if (shown.contains(band) && store.strips[band] != null)
+          store.strips[band]!,
+    ];
     final multi = strips.length > 1;
     final anySpectrum = strips.any((s) => s.latest.isNotEmpty);
     final anyImage = strips.any((s) => s.image != null);
@@ -217,12 +233,7 @@ class _AudioWaterfallWidgetState extends State<AudioWaterfallWidget> {
             ),
           ),
           child: !anySpectrum
-              ? const Center(
-                  child: CircularProgressIndicator(
-                    color: Colors.cyan,
-                    strokeWidth: 2,
-                  ),
-                )
+              ? const SizedBox.shrink()
               : Row(
                   children: [
                     for (var i = 0; i < strips.length; i++)
@@ -251,15 +262,17 @@ class _AudioWaterfallWidgetState extends State<AudioWaterfallWidget> {
                               ),
                               if (multi)
                                 Positioned(
-                                  left: 4,
+                                  left: 0,
+                                  right: 0,
                                   top: 2,
                                   child: Text(
                                     DemodWorker.protoFreqLabel[strips[i]
                                             .band] ??
                                         '',
+                                    textAlign: TextAlign.center,
                                     style: TextStyle(
                                       fontSize: 10,
-                                      color: strips[i].band == _currentBand
+                                      color: strips[i].band == store.currentBand
                                           ? Colors.cyan
                                           : Colors.white60,
                                     ),
@@ -293,9 +306,7 @@ class _AudioWaterfallWidgetState extends State<AudioWaterfallWidget> {
             ),
           ),
           child: !anyImage
-              ? const Center(
-                  child: CircularProgressIndicator(color: Colors.cyan),
-                )
+              ? const SizedBox.shrink()
               : Row(
                   children: [
                     for (var i = 0; i < strips.length; i++)

@@ -550,8 +550,6 @@ class MicDemod {
 class RtlDemod {
   RtlDemod() : framing = PocsagFraming() {
     _lowpassBaud = FirFilter(301, 48000.0, 6000.0);
-    _decimationI = FirFilter(151, 240000.0, 20000.0);
-    _decimationQ = FirFilter(151, 240000.0, 20000.0);
     _phase.setFMScaling(48000.0 / (2.0 * 4500.0));
   }
 
@@ -559,8 +557,8 @@ class RtlDemod {
   final messages = <PocsagMessage>[];
   final audioTap = <double>[];
   late FirFilter _lowpassBaud;
-  late FirFilter _decimationI;
-  late FirFilter _decimationQ;
+  var _sumI = 0.0;
+  var _sumQ = 0.0;
   final _phase = _PhaseDiscriminator();
   final _preambleMA = _MovingAverage2048();
 
@@ -577,8 +575,8 @@ class RtlDemod {
 
   void reset() {
     _lowpassBaud = FirFilter(301, 48000.0, 6000.0);
-    _decimationI = FirFilter(151, 240000.0, 20000.0);
-    _decimationQ = FirFilter(151, 240000.0, 20000.0);
+    _sumI = 0.0;
+    _sumQ = 0.0;
     _phase._prevArg = 0.0;
     _preambleMA.reset();
     framing.resetFraming();
@@ -598,26 +596,13 @@ class RtlDemod {
     _carry = null;
   }
 
-  static int _clampToInt8(double value) {
-    var v = value >= 0 ? (value + 0.5).floor() : (value - 0.5).ceil();
-    if (v > 127) v = 127;
-    if (v < -128) v = -128;
-    return v;
-  }
-
   void pushBytes(Uint8List bytes) {
-    final sI = _decimationI._samples;
-    final tI = _decimationI._taps;
-    final sQ = _decimationQ._samples;
-    final tQ = _decimationQ._taps;
-    final n = _decimationI._n;
-    final pairs = tI.length - 1;
     final sB = _lowpassBaud._samples;
     final tB = _lowpassBaud._taps;
     final nB = _lowpassBaud._n;
     final pairsB = tB.length - 1;
-    var pI = _decimationI._ptr;
-    var pQ = _decimationQ._ptr;
+    var sumI = _sumI;
+    var sumQ = _sumQ;
     var pB = _lowpassBaud._ptr;
     var carry = _carry;
     var decim = _decimCounter;
@@ -634,30 +619,14 @@ class RtlDemod {
         continue;
       }
       carry = null;
-      final vI = c - 128.0;
-      sI[pI] = vI;
-      sI[pI + n] = vI;
-      final vQ = bytes[j] - 128.0;
-      sQ[pQ] = vQ;
-      sQ[pQ + n] = vQ;
+      sumI += c - 128.0;
+      sumQ += bytes[j] - 128.0;
       if (++decim == 5) {
         decim = 0;
-        final loI = pI + 1;
-        final hiI = pI + n;
-        var accI = 0.0;
-        for (var i = 0; i < pairs; i++) {
-          accI += (sI[loI + i] + sI[hiI - i]) * tI[i];
-        }
-        accI += sI[hiI - pairs] * tI[pairs];
-        final loQ = pQ + 1;
-        final hiQ = pQ + n;
-        var accQ = 0.0;
-        for (var i = 0; i < pairs; i++) {
-          accQ += (sQ[loQ + i] + sQ[hiQ - i]) * tQ[i];
-        }
-        accQ += sQ[hiQ - pairs] * tQ[pairs];
-        final fi = _clampToInt8(accI) / 128.0;
-        final fq = _clampToInt8(accQ) / 128.0;
+        final fi = sumI / 5 / 128.0;
+        final fq = sumQ / 5 / 128.0;
+        sumI = 0.0;
+        sumQ = 0.0;
         final (fmDemod, magsq) = _phase.delta(fi, fq);
         magsqRaw = magsq;
         if (!framing.gotSC) {
@@ -716,11 +685,9 @@ class RtlDemod {
         final msg = framing.takeMessage();
         if (msg != null) messages.add(msg);
       }
-      pI = pI == n - 1 ? 0 : pI + 1;
-      pQ = pQ == n - 1 ? 0 : pQ + 1;
     }
-    _decimationI._ptr = pI;
-    _decimationQ._ptr = pQ;
+    _sumI = sumI;
+    _sumQ = sumQ;
     _lowpassBaud._ptr = pB;
     _carry = carry;
     _decimCounter = decim;

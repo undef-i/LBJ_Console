@@ -7,14 +7,15 @@
 #include <sys/socket.h>
 #include <sys/select.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <arpa/inet.h>
 
 #include "libusb.h"
 
 #define PLUTO_FREQ_HZ 821237500
 #define PLUTO_RATE_HZ 2400000
-#define PLUTO_BUF_SAMPLES 8192
-#define PLUTO_READ_SAMPLES 4100
+#define PLUTO_BUF_SAMPLES 262144
+#define PLUTO_READ_SAMPLES 65540
 #define PLUTO_READ_BYTES (PLUTO_READ_SAMPLES * 4)
 #define PLUTO_DECIM 10
 
@@ -494,6 +495,7 @@ static void *pluto_session_main(void *arg)
 			continue;
 		P.client_fd = cfd;
 		P.send_failed = 0;
+		setsockopt(cfd, IPPROTO_TCP, TCP_NODELAY, &on, sizeof(on));
 
 		uint32_t header[3];
 		memcpy(header, "RTL0", 4);
