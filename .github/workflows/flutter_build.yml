@@ -14,6 +14,22 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
+      - name: Checkout resources
+        uses: actions/checkout@v3
+        with:
+          ref: resources
+          path: res
+
+      - name: Inject latest resources
+        run: |
+          curl -fsSL https://lbj-data.nedifinita.com/manifest.json -o res/manifest.json
+          tools/resources/inject.sh res
+
+      - id: versions
+        run: |
+          echo "loco=$(jq -r '.resources[] | select(.id=="loco_info") | .version' res/manifest.json)" >> "$GITHUB_OUTPUT"
+          echo "loco_type=$(jq -r '.resources[] | select(.id=="loco_type_info") | .version' res/manifest.json)" >> "$GITHUB_OUTPUT"
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -37,7 +53,7 @@ jobs:
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > keystore.jks
 
       - name: Build APK
-        run: flutter build apk --release --split-per-abi
+        run: flutter build apk --release --split-per-abi --dart-define=BUNDLED_LOCO_VERSION=${{ steps.versions.outputs.loco }} --dart-define=BUNDLED_LOCO_TYPE_VERSION=${{ steps.versions.outputs.loco_type }}
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
