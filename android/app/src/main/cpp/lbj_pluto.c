@@ -14,8 +14,8 @@
 
 #define PLUTO_FREQ_HZ 821237500
 #define PLUTO_RATE_HZ 2400000
-#define PLUTO_BUF_SAMPLES 262144
-#define PLUTO_READ_SAMPLES 65540
+#define PLUTO_BUF_SAMPLES 65536
+#define PLUTO_READ_SAMPLES 65536
 #define PLUTO_READ_BYTES (PLUTO_READ_SAMPLES * 4)
 #define PLUTO_DECIM 10
 
@@ -51,10 +51,15 @@ static struct {
 	int send_failed;
 	int finished;
 	int stage;
+	int rate_hz;
+	int decim;
+	int rb_calls;
+	int rb_errors;
 } P = {
 	PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER,
 	PTHREAD_MUTEX_INITIALIZER,
 	0, NULL, NULL, {0}, {0}, "", "", 0, 0, 0, 0, 0, 0, -1, 0, -1, 0, 0, 0,
+	0, PLUTO_DECIM, 0, 0,
 };
 
 static int pio_fill(struct pio *p)
@@ -291,6 +296,8 @@ static int pluto_configure(void)
 	if (iiod_write_attr(&P.p0, P.phy_id, "INPUT", "voltage0",
 			"rf_bandwidth", "2000000") < 0)
 		return -3108;
+	P.rate_hz = PLUTO_RATE_HZ;
+	P.decim = PLUTO_DECIM;
 	P.stage = 3109;
 	if (iiod_write_attr(&P.p0, P.phy_id, "INPUT", "voltage0",
 			"gain_control_mode", "slow_attack") < 0)
@@ -319,24 +326,148 @@ static int pluto_readbuf(unsigned char *out, int want)
 	while (got < want) {
 		long v;
 		if (iiod_value(&P.p1, &v) < 0)
-			return -1;
+			return got > 0 ? got : -1;
 		if (v < 0)
-			return -1;
+			return got > 0 ? got : -1;
 		if (v == 0)
 			break;
 		if (first) {
 			char mask[64];
 			if (pio_read_line(&P.p1, mask, (int)sizeof(mask)) < 0)
-				return -1;
+				return got > 0 ? got : -1;
 			first = 0;
 		}
-		if (v > want - got)
-			v = want - got;
-		if (pio_read_exact(&P.p1, out + got, (int)v) < 0)
-			return -1;
-		got += (int)v;
+		long take = v;
+		if (take > want - got)
+			take = want - got;
+		if (pio_read_exact(&P.p1, out + got, (int)take) < 0)
+			return got > 0 ? got : -1;
+		got += (int)take;
+		long rest = v - take;
+		while (rest > 0) {
+			unsigned char scratch[4096];
+			int step = rest > (long)sizeof(scratch)
+				? (int)sizeof(scratch) : (int)rest;
+			if (pio_read_exact(&P.p1, scratch, step) < 0)
+				return got > 0 ? got : -1;
+			rest -= step;
+		}
 	}
 	return got;
+}
+
+#define PLUTO_RING_SIZE (4 * 1024 * 1024)
+
+static struct {
+	pthread_mutex_t lock;
+	pthread_cond_t cond;
+	unsigned char *buf;
+	size_t head;
+	size_t len;
+	int done;
+} RB = { PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, NULL, 0, 0, 0 };
+
+static void ring_reset(void)
+{
+	pthread_mutex_lock(&RB.lock);
+	free(RB.buf);
+	RB.buf = malloc(PLUTO_RING_SIZE);
+	RB.head = 0;
+	RB.len = 0;
+	RB.done = 0;
+	pthread_mutex_unlock(&RB.lock);
+}
+
+static void ring_push(const unsigned char *data, int n)
+{
+	pthread_mutex_lock(&RB.lock);
+	if (!RB.buf) {
+		pthread_mutex_unlock(&RB.lock);
+		return;
+	}
+	if (n > PLUTO_RING_SIZE) {
+		data += n - PLUTO_RING_SIZE;
+		n = PLUTO_RING_SIZE;
+	}
+	size_t tail = (RB.head + RB.len) % PLUTO_RING_SIZE;
+	size_t first = PLUTO_RING_SIZE - tail;
+	if (first > (size_t)n)
+		first = (size_t)n;
+	memcpy(RB.buf + tail, data, first);
+	memcpy(RB.buf, data + first, (size_t)n - first);
+	RB.len += (size_t)n;
+	if (RB.len > PLUTO_RING_SIZE) {
+		RB.head = (RB.head + RB.len - PLUTO_RING_SIZE) % PLUTO_RING_SIZE;
+		RB.len = PLUTO_RING_SIZE;
+	}
+	pthread_cond_signal(&RB.cond);
+	pthread_mutex_unlock(&RB.lock);
+}
+
+static int ring_pop(unsigned char *out, int cap)
+{
+	pthread_mutex_lock(&RB.lock);
+	while (RB.len == 0 && !RB.done && !P.stop)
+		pthread_cond_wait(&RB.cond, &RB.lock);
+	int n = 0;
+	if (RB.len > 0 && RB.buf) {
+		n = RB.len < (size_t)cap ? (int)RB.len : cap;
+		size_t first = PLUTO_RING_SIZE - RB.head;
+		if (first > (size_t)n)
+			first = (size_t)n;
+		memcpy(out, RB.buf + RB.head, first);
+		memcpy(out + first, RB.buf, (size_t)n - first);
+		RB.head = (RB.head + (size_t)n) % PLUTO_RING_SIZE;
+		RB.len -= (size_t)n;
+	}
+	pthread_mutex_unlock(&RB.lock);
+	return n;
+}
+
+static void ring_finish(void)
+{
+	pthread_mutex_lock(&RB.lock);
+	RB.done = 1;
+	pthread_cond_signal(&RB.cond);
+	pthread_mutex_unlock(&RB.lock);
+}
+
+static void *pluto_producer_main(void *arg)
+{
+	(void)arg;
+	static unsigned char raw[PLUTO_READ_BYTES];
+	static unsigned char conv[PLUTO_READ_SAMPLES / 5 * 2];
+	const int decim = P.decim > 0 ? P.decim : PLUTO_DECIM;
+	int consec_err = 0;
+	while (!P.stop && !P.send_failed) {
+		int got = pluto_readbuf(raw, PLUTO_READ_BYTES);
+		P.rb_calls++;
+		if (got <= 0) {
+			P.rb_errors++;
+			if (++consec_err >= 30) {
+				P.exit_err = got < 0 ? got : -3201;
+				break;
+			}
+			continue;
+		}
+		consec_err = 0;
+		P.exit_err = 0;
+		int frames = got / 4;
+		int groups = frames / decim;
+		const int16_t *s = (const int16_t *)raw;
+		for (int g = 0; g < groups; g++) {
+			int si = 0, sq = 0;
+			for (int k = 0; k < decim; k++) {
+				si += s[(g * decim + k) * 2];
+				sq += s[(g * decim + k) * 2 + 1];
+			}
+			conv[g * 2] = (unsigned char)((si / decim) / 16 + 128);
+			conv[g * 2 + 1] = (unsigned char)((sq / decim) / 16 + 128);
+		}
+		ring_push(conv, groups * 2);
+	}
+	ring_finish();
+	return NULL;
 }
 
 struct pcmd {
@@ -478,8 +609,6 @@ static void *pluto_session_main(void *arg)
 	pluto_signal_started(0);
 	P.stage = 4;
 
-	static unsigned char raw[PLUTO_READ_BYTES];
-	static unsigned char conv[PLUTO_READ_SAMPLES / PLUTO_DECIM * 2];
 	while (!P.stop) {
 		fd_set rfds;
 		struct timeval tv;
@@ -510,38 +639,28 @@ static void *pluto_session_main(void *arg)
 
 		pthread_t cmd_thread;
 		pthread_create(&cmd_thread, NULL, pluto_command_main, NULL);
+		ring_reset();
+		pthread_t prod_thread;
+		pthread_create(&prod_thread, NULL, pluto_producer_main, NULL);
 		P.stage = 5;
+		static unsigned char out[65536];
 		while (!P.stop && !P.send_failed) {
-			int got = pluto_readbuf(raw, PLUTO_READ_BYTES);
-			if (got <= 0) {
-				P.exit_err = got < 0 ? got : -3201;
+			int n = ring_pop(out, (int)sizeof(out));
+			if (n <= 0)
 				break;
-			}
-			P.exit_err = 0;
-			int frames = got / 4;
-			int groups = frames / PLUTO_DECIM;
-			const int16_t *s = (const int16_t *)raw;
-			for (int g = 0; g < groups; g++) {
-				int si = 0, sq = 0;
-				for (int k = 0; k < PLUTO_DECIM; k++) {
-					si += s[(g * PLUTO_DECIM + k) * 2];
-					sq += s[(g * PLUTO_DECIM + k) * 2 + 1];
-				}
-				conv[g * 2] = (unsigned char)((si / PLUTO_DECIM) / 16 + 128);
-				conv[g * 2 + 1] = (unsigned char)((sq / PLUTO_DECIM) / 16 + 128);
-			}
-			int out_len = groups * 2;
 			int off = 0;
-			while (off < out_len && !P.stop) {
-				ssize_t n = send(cfd, conv + off,
-					(size_t)(out_len - off), MSG_NOSIGNAL);
-				if (n <= 0) {
+			while (off < n && !P.stop) {
+				ssize_t sn = send(cfd, out + off,
+					(size_t)(n - off), MSG_NOSIGNAL);
+				if (sn <= 0) {
 					P.send_failed = 1;
 					break;
 				}
-				off += (int)n;
+				off += (int)sn;
 			}
 		}
+		ring_finish();
+		pthread_join(prod_thread, NULL);
 		if (P.client_fd >= 0)
 			shutdown(P.client_fd, SHUT_RDWR);
 		pthread_join(cmd_thread, NULL);
@@ -594,6 +713,13 @@ int lbj_pluto_stage(void)
 int lbj_pluto_exit_error(void)
 {
 	return P.exit_err;
+}
+
+void lbj_pluto_stats(int *calls, int *errors, int *rate)
+{
+	*calls = P.rb_calls;
+	*errors = P.rb_errors;
+	*rate = P.rate_hz;
 }
 
 void lbj_pluto_stop(void)
@@ -651,6 +777,10 @@ Java_org_noxylva_lbjconsole_flutter_LbjUsbNative_nativeStartPluto(JNIEnv *env, j
 	P.client_fd = -1;
 	P.send_failed = 0;
 	P.stage = 0;
+	P.rate_hz = 0;
+	P.decim = PLUTO_DECIM;
+	P.rb_calls = 0;
+	P.rb_errors = 0;
 	P.ifnum = (int)ifnum;
 	if (pthread_create(&P.thread, NULL, pluto_session_main,
 			(void *)(intptr_t)fd) != 0) {

@@ -21,6 +21,7 @@ class EmbeddedUsbService {
       EventChannel('org.noxylva.lbjconsole/usb_sdr_event');
 
   final ValueNotifier<String> statusText = ValueNotifier<String>('');
+  final ValueNotifier<String> plutoRateText = ValueNotifier<String>('');
   final ValueNotifier<bool> sessionActive = ValueNotifier<bool>(false);
   final ValueNotifier<bool> connecting = ValueNotifier<bool>(false);
   final ValueNotifier<bool> devicePresent = ValueNotifier<bool>(false);
@@ -51,6 +52,7 @@ class EmbeddedUsbService {
   Timer? _watchdog;
   int _noDataTicks = 0;
   int _lastStreamError = 0;
+  int _lastPlutoErrors = -1;
   int _watchBytesIn = 0;
 
   void _startWatchdog() {
@@ -101,6 +103,7 @@ class EmbeddedUsbService {
       }
       if (!running) {
         sessionActive.value = false;
+        plutoRateText.value = '';
         _syncConnecting();
         if (err != 0) {
           _setStatus('会话已停止，错误码 $err');
@@ -115,6 +118,29 @@ class EmbeddedUsbService {
         return;
       }
       _lastStreamError = 0;
+      try {
+        final stats = await _methods.invokeMethod<String>('plutoStats');
+        if (stats != null && stats.isNotEmpty) {
+          final parts = stats.split(',');
+          if (parts.length == 3) {
+            final rate = int.tryParse(parts[2]) ?? 0;
+            if (rate > 0) {
+              final label = rate == 2400000
+                  ? 'Pluto 采样率 2.4 MHz'
+                  : 'Pluto 采样率 $rate Hz';
+              if (plutoRateText.value != label) plutoRateText.value = label;
+            }
+            final errors = int.tryParse(parts[1]) ?? -1;
+            if (errors >= 0 && errors != _lastPlutoErrors) {
+              _lastPlutoErrors = errors;
+              DemodWorker.instance.logRaw(
+                'pluto',
+                'Pluto 读取 ${parts[0]} 次，失败 $errors 次，采样率 ${parts[2]}',
+              );
+            }
+          }
+        }
+      } catch (_) {}
       final rtl = RtlTcpService();
       final grew = rtl.lastBytesIn != _watchBytesIn;
       var diag = '';

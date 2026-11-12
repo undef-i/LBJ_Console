@@ -26,22 +26,27 @@ import 'package:lbjconsole/ui/app_map.dart';
 import 'package:lbjconsole/ui/pmtiles_local.dart';
 import 'package:lbjconsole/ui/fl_list.dart';
 import 'package:lbjconsole/ui/glass_dialog.dart';
-import 'package:lbjconsole/ui/glass_styles.dart';
 import 'package:lbjconsole/ui/glass_select.dart';
 import 'package:lbjconsole/ui/glass_switch.dart';
-import 'package:lbjconsole/ui/glass_clipper.dart';
-import 'package:lbjconsole/ui/liquid_glass.dart';
 
 class SettingsScreen extends StatefulWidget {
   final VoidCallback? onSettingsChanged;
   final bool sampleRecordsEnabled;
   final ValueChanged<bool>? onSampleRecordsChanged;
+  final int sampleIntervalSeconds;
+  final ValueChanged<int>? onSampleIntervalChanged;
+  final bool splitOnPreamble;
+  final ValueChanged<bool>? onSplitOnPreambleChanged;
 
   const SettingsScreen({
     super.key,
     this.onSettingsChanged,
     this.sampleRecordsEnabled = false,
     this.onSampleRecordsChanged,
+    this.sampleIntervalSeconds = 5,
+    this.onSampleIntervalChanged,
+    this.splitOnPreamble = false,
+    this.onSplitOnPreambleChanged,
   });
 
   @override
@@ -75,6 +80,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _protoTdcs = false;
   int _aboutTapCount = 0;
   Timer? _aboutTapTimer;
+  bool _debugUnlocked = false;
+  Future<String>? _exitFuture;
+  Future<String>? _dbFuture;
   late final Future<String> _appVersion;
 
   @override
@@ -383,6 +391,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _buildAppSettings(),
         _buildMergeSettings(),
         _buildDataManagement(),
+        if (_debugUnlocked) _buildDebugSection(),
         _buildAboutSection(),
       ],
     );
@@ -629,7 +638,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     _aboutTapCount = 0;
     _aboutTapTimer?.cancel();
-    _showSampleRecordsPanel();
+    setState(() {
+      _debugUnlocked = true;
+      _exitFuture = _lastExitText();
+      _dbFuture = _databaseService.diagnoseDatabase();
+    });
   }
 
   static const _debugChannel = MethodChannel('lbj/debug');
@@ -697,297 +710,163 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await Share.shareXFiles([XFile(path)], subject: 'LBJ Console 原始 IQ');
   }
 
-  void _showSampleRecordsPanel() {
-    final exitFuture = _lastExitText();
-    final dbFuture = _databaseService.diagnoseDatabase();
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      barrierColor: Colors.black.withValues(
-        alpha: Theme.of(context).brightness == Brightness.dark ? 0.48 : 0.2,
-      ),
-      isScrollControlled: true,
-      enableDrag: true,
-      isDismissible: true,
-      builder: (context) {
-        bool enabled = widget.sampleRecordsEnabled;
-        bool debug = _debugMode;
-        bool rawLog = RawLogService.instance.enabled;
-
-        return StatefulBuilder(
-          builder: (context, setSheetState) {
-            return Stack(
-              children: [
-                Positioned.fill(
-                  child: LiquidGlass(
-                    style: glassMenuStyle(Theme.of(context).colorScheme),
-                    clipper: const SuperellipseClipper(
-                      BorderRadius.vertical(top: Radius.circular(24)),
-                    ),
-                    child: const SizedBox.expand(),
+  Widget _buildDebugSection() {
+    final scheme = Theme.of(context).colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        FlSection(
+          title: '调试',
+          rows: [
+            FlRow(
+              title: const Text('显示设备状态'),
+              subtitle: const Text('连接弹窗显示状态'),
+              trailing: GlassSwitch(
+                value: _debugMode,
+                onChanged: _setDebugMode,
+              ),
+              onTap: () => _setDebugMode(!_debugMode),
+            ),
+            FlRow(
+              title: const Text('生成示例记录'),
+              trailing: GlassSwitch(
+                value: widget.sampleRecordsEnabled,
+                onChanged: (value) =>
+                    widget.onSampleRecordsChanged?.call(value),
+              ),
+              onTap: () => widget.onSampleRecordsChanged?.call(
+                !widget.sampleRecordsEnabled,
+              ),
+            ),
+            FlRow(
+              title: const Text('生成间隔'),
+              trailing: GlassSelect<int>(
+                value: widget.sampleIntervalSeconds,
+                items: const [
+                  DropdownMenuItem(value: 1, child: Text('1 秒')),
+                  DropdownMenuItem(value: 2, child: Text('2 秒')),
+                  DropdownMenuItem(value: 5, child: Text('5 秒')),
+                  DropdownMenuItem(value: 10, child: Text('10 秒')),
+                  DropdownMenuItem(value: 30, child: Text('30 秒')),
+                  DropdownMenuItem(value: 60, child: Text('60 秒')),
+                ],
+                onChanged: (value) {
+                  if (value != null) {
+                    widget.onSampleIntervalChanged?.call(value);
+                  }
+                },
+              ),
+            ),
+            FlRow(
+              title: const Text('按前导码分组'),
+              subtitle: const Text('开启后新前导码到达时结算上一组'),
+              trailing: GlassSwitch(
+                value: widget.splitOnPreamble,
+                onChanged: (value) =>
+                    widget.onSplitOnPreambleChanged?.call(value),
+              ),
+              onTap: () => widget.onSplitOnPreambleChanged?.call(
+                !widget.splitOnPreamble,
+              ),
+            ),
+            FlRow(
+              title: const Text('记录原始日志'),
+              subtitle: const Text('POCSAG 批次与 FFSK 原始帧'),
+              trailing: GlassSwitch(
+                value: RawLogService.instance.enabled,
+                onChanged: (value) {
+                  _setRawLog(value);
+                  setState(() {});
+                },
+              ),
+              onTap: () {
+                _setRawLog(!RawLogService.instance.enabled);
+                setState(() {});
+              },
+            ),
+            FlRow(
+              title: const Text('导出原始日志'),
+              trailing: Icon(
+                Icons.arrow_forward_ios,
+                size: 18,
+                color: scheme.onSurfaceVariant,
+              ),
+              onTap: _shareRawLog,
+            ),
+            ValueListenableBuilder<(bool, int)>(
+              valueListenable: DemodWorker.instance.iqState,
+              builder: (context, iq, _) {
+                return FlRow(
+                  title: const Text('记录原始 IQ'),
+                  subtitle: iq.$1
+                      ? Text(
+                          '录制中 ${(iq.$2 / 1000000).toStringAsFixed(1)} MB',
+                        )
+                      : null,
+                  trailing: GlassSwitch(
+                    value: iq.$1,
+                    onChanged: (value) {
+                      if (value) {
+                        DemodWorker.instance.startIqRecording();
+                      } else {
+                        DemodWorker.instance.stopIqRecording();
+                      }
+                    },
                   ),
-                ),
-                SafeArea(
-                  child: Padding(
-                    padding: const EdgeInsets.all(20.0),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Icon(
-                              Icons.science,
-                              color: Theme.of(context).colorScheme.primary,
-                            ),
-                            const SizedBox(width: 12),
-                            const Text('调试', style: AppTheme.titleMedium),
-                          ],
-                        ),
-                        const SizedBox(height: 16),
-                        Row(
-                          children: [
-                            const Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text('调试模式', style: AppTheme.bodyLarge),
-                                  SizedBox(height: 2),
-                                  Text('在连接弹窗中显示状态信息', style: AppTheme.caption),
-                                ],
-                              ),
-                            ),
-                            GlassSwitch(
-                              value: debug,
-                              onChanged: (value) {
-                                setSheetState(() {
-                                  debug = value;
-                                });
-                                _setDebugMode(value);
-                              },
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 16),
-                        Row(
-                          children: [
-                            const Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text('生成示例记录', style: AppTheme.bodyLarge),
-                                  SizedBox(height: 2),
-                                  Text(
-                                    '每 5 秒新增一条，轮流生成 LBJ 记录、TDCS 车次记录与 KLW 事件',
-                                    style: AppTheme.caption,
-                                  ),
-                                ],
-                              ),
-                            ),
-                            GlassSwitch(
-                              value: enabled,
-                              onChanged: (value) {
-                                setSheetState(() {
-                                  enabled = value;
-                                });
-                                widget.onSampleRecordsChanged?.call(value);
-                              },
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 16),
-                        Row(
-                          children: [
-                            const Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text('记录原始日志', style: AppTheme.bodyLarge),
-                                  SizedBox(height: 2),
-                                  Text(
-                                    '记录收到的 POCSAG 批次与 FFSK 原始帧',
-                                    style: AppTheme.caption,
-                                  ),
-                                ],
-                              ),
-                            ),
-                            GlassSwitch(
-                              value: rawLog,
-                              onChanged: (value) {
-                                setSheetState(() {
-                                  rawLog = value;
-                                });
-                                _setRawLog(value);
-                              },
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 16),
-                        GestureDetector(
-                          behavior: HitTestBehavior.opaque,
-                          onTap: () {
-                            Navigator.pop(context);
-                            _shareRawLog();
-                          },
-                          child: const Row(
-                            children: [
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text('导出原始日志', style: AppTheme.bodyLarge),
-                                    SizedBox(height: 2),
-                                    Text('分享原始日志文件', style: AppTheme.caption),
-                                  ],
-                                ),
-                              ),
-                              Icon(Icons.arrow_forward_ios, size: 18),
-                            ],
-                          ),
-                        ),
-                        StreamBuilder<void>(
-                          stream: RawLogService.instance.changes,
-                          builder: (context, _) {
-                            final all = RawLogService.instance.lines;
-                            final tail = all.length > 8
-                                ? all.sublist(all.length - 8)
-                                : all;
-                            return SizedBox(
-                              width: double.infinity,
-                              child: Text(
-                                tail.isEmpty ? '暂无日志' : tail.join('\n'),
-                                style: AppTheme.caption.copyWith(
-                                  fontFamily: 'monospace',
-                                ),
-                              ),
-                            );
-                          },
-                        ),
-                        const SizedBox(height: 16),
-                        ValueListenableBuilder<(bool, int)>(
-                          valueListenable: DemodWorker.instance.iqState,
-                          builder: (context, iq, _) {
-                            return Row(
-                              children: [
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      const Text(
-                                        '记录原始 IQ',
-                                        style: AppTheme.bodyLarge,
-                                      ),
-                                      const SizedBox(height: 2),
-                                      Text(
-                                        iq.$1
-                                            ? '录制中 ${(iq.$2 / 1000000).toStringAsFixed(1)} MB'
-                                            : '录制 RTL 与 USB 输入的原始 IQ 数据',
-                                        style: AppTheme.caption,
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                GlassSwitch(
-                                  value: iq.$1,
-                                  onChanged: (value) {
-                                    if (value) {
-                                      DemodWorker.instance.startIqRecording();
-                                    } else {
-                                      DemodWorker.instance.stopIqRecording();
-                                    }
-                                  },
-                                ),
-                              ],
-                            );
-                          },
-                        ),
-                        const SizedBox(height: 16),
-                        GestureDetector(
-                          behavior: HitTestBehavior.opaque,
-                          onTap: () {
-                            Navigator.pop(context);
-                            _shareIq();
-                          },
-                          child: const Row(
-                            children: [
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text('导出原始 IQ', style: AppTheme.bodyLarge),
-                                    SizedBox(height: 2),
-                                    Text('分享原始 IQ 文件', style: AppTheme.caption),
-                                  ],
-                                ),
-                              ),
-                              Icon(Icons.arrow_forward_ios, size: 18),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        GestureDetector(
-                          behavior: HitTestBehavior.opaque,
-                          onTap: () {
-                            Navigator.pop(context);
-                            _showTileLog();
-                          },
-                          child: const Row(
-                            children: [
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text('瓦片请求日志', style: AppTheme.bodyLarge),
-                                    SizedBox(height: 2),
-                                    Text(
-                                      '本地瓦片服务的请求记录',
-                                      style: AppTheme.caption,
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              Icon(Icons.arrow_forward_ios, size: 18),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        const Text('上次退出', style: AppTheme.bodyLarge),
-                        const SizedBox(height: 2),
-                        FutureBuilder<String>(
-                          future: exitFuture,
-                          builder: (context, snapshot) => Text(
-                            snapshot.data ?? '读取中',
-                            style: AppTheme.caption,
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        const Text('数据库状态', style: AppTheme.bodyLarge),
-                        const SizedBox(height: 2),
-                        FutureBuilder<String>(
-                          future: dbFuture,
-                          builder: (context, snapshot) => Text(
-                            snapshot.data ?? '读取中',
-                            style: AppTheme.caption,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Align(
-                          alignment: Alignment.centerRight,
-                          child: TextButton(
-                            onPressed: () => Navigator.pop(context),
-                            child: const Text('关闭'),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            );
-          },
-        );
-      },
+                );
+              },
+            ),
+            FlRow(
+              title: const Text('导出原始 IQ'),
+              trailing: Icon(
+                Icons.arrow_forward_ios,
+                size: 18,
+                color: scheme.onSurfaceVariant,
+              ),
+              onTap: _shareIq,
+            ),
+            FlRow(
+              title: const Text('瓦片请求日志'),
+              trailing: Icon(
+                Icons.arrow_forward_ios,
+                size: 18,
+                color: scheme.onSurfaceVariant,
+              ),
+              onTap: _showTileLog,
+            ),
+            FlRow(
+              title: const Text('上次退出'),
+              subtitle: FutureBuilder<String>(
+                future: _exitFuture,
+                builder: (context, snapshot) =>
+                    Text(snapshot.data ?? '读取中'),
+              ),
+            ),
+            FlRow(
+              title: const Text('数据库状态'),
+              subtitle: FutureBuilder<String>(
+                future: _dbFuture,
+                builder: (context, snapshot) =>
+                    Text(snapshot.data ?? '读取中'),
+              ),
+            ),
+          ],
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+          child: StreamBuilder<void>(
+            stream: RawLogService.instance.changes,
+            builder: (context, _) {
+              final all = RawLogService.instance.lines;
+              final tail = all.length > 8 ? all.sublist(all.length - 8) : all;
+              return Text(
+                tail.isEmpty ? '暂无日志' : tail.join('\n'),
+                style: AppTheme.caption.copyWith(fontFamily: 'monospace'),
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 

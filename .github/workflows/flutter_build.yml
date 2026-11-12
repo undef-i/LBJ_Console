@@ -6,10 +6,8 @@ on:
       - 'v*'
 
 jobs:
-  build:
+  build-split:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -59,13 +57,92 @@ jobs:
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
 
-
       - name: Rename APK with tag
         run: |
           TAG_NAME=${GITHUB_REF#refs/tags/}
           for abi in arm64-v8a armeabi-v7a x86_64; do
             cp build/app/outputs/flutter-apk/app-$abi-release.apk LBJ_Console_${TAG_NAME}_$abi.apk
           done
+
+      - name: Upload split APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: apks-split
+          path: LBJ_Console_*.apk
+
+  build-universal:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Checkout resources
+        uses: actions/checkout@v3
+        with:
+          ref: resources
+          path: res
+
+      - name: Inject latest resources
+        run: |
+          curl -fsSL https://lbj-data.nedifinita.com/manifest.json -o res/manifest.json
+          tools/resources/inject.sh res
+
+      - id: versions
+        run: |
+          echo "loco=$(jq -r '.resources[] | select(.id=="loco_info") | .version' res/manifest.json)" >> "$GITHUB_OUTPUT"
+          echo "loco_type=$(jq -r '.resources[] | select(.id=="loco_type_info") | .version' res/manifest.json)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.7'
+          channel: 'stable'
+
+      - name: Update compileSdkVersion
+        run: |
+          sed -i 's/compileSdk = 35/compileSdk = 36/g' android/app/build.gradle
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Create keystore
+        run: |
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > keystore.jks
+
+      - name: Build universal APK
+        run: flutter build apk --release --dart-define=BUNDLED_LOCO_VERSION=${{ steps.versions.outputs.loco }} --dart-define=BUNDLED_LOCO_TYPE_VERSION=${{ steps.versions.outputs.loco_type }}
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+
+      - name: Rename APK with tag
+        run: |
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          cp build/app/outputs/flutter-apk/app-release.apk LBJ_Console_${TAG_NAME}_universal.apk
+
+      - name: Upload universal APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: apks-universal
+          path: LBJ_Console_*.apk
+
+  release:
+    needs: [build-split, build-universal]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download APKs
+        uses: actions/download-artifact@v4
+        with:
+          pattern: apks-*
+          merge-multiple: true
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
@@ -74,6 +151,7 @@ jobs:
             LBJ_Console_${{ github.ref_name }}_arm64-v8a.apk
             LBJ_Console_${{ github.ref_name }}_armeabi-v7a.apk
             LBJ_Console_${{ github.ref_name }}_x86_64.apk
+            LBJ_Console_${{ github.ref_name }}_universal.apk
           name: ${{ github.ref_name }}
           draft: false
           prerelease: false

@@ -337,6 +337,7 @@ class UsbSdrHandler(private val context: Context) :
             "isRunning" -> result.success(LbjUsbNative.nativeIsRunning())
             "port" -> result.success(LbjUsbNative.nativePort())
             "exitError" -> result.success(LbjUsbNative.nativeExitError())
+            "plutoStats" -> result.success(LbjUsbNative.nativePlutoStats())
             "opState" -> {
                 val op = currentOp
                 if (op.isEmpty()) {

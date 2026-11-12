@@ -295,6 +295,8 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   double? _sampleLng;
   int _sampleRecordSerial = 0;
   bool _sampleRecordsEnabled = false;
+  int _sampleIntervalSeconds = 5;
+  bool _splitOnPreamble = false;
   bool _isHistoryEditMode = false;
   bool _topBarWasEditing = false;
 
@@ -358,6 +360,15 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         setState(() {});
       }
 
+      final savedInterval = settings?['sampleIntervalSeconds'];
+      if (savedInterval is int && savedInterval > 0) {
+        _sampleIntervalSeconds = savedInterval;
+      }
+      if ((settings?['splitOnPreamble'] ?? 0) == 1) {
+        _splitOnPreamble = true;
+        DemodWorker.instance.setSplitOnPreamble(true);
+        _bleService.splitOnPreamble = true;
+      }
       if ((settings?['sampleRecordsEnabled'] ?? 0) == 1) {
         _setSampleRecordsEnabled(true);
       }
@@ -498,7 +509,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
     _sampleRecordTimer?.cancel();
     _sampleRecordTimer = Timer.periodic(
-      const Duration(seconds: 5),
+      Duration(seconds: _sampleIntervalSeconds),
       (_) => _insertSampleRecord(),
     );
   }
@@ -518,6 +529,30 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       _sampleRecordTimer?.cancel();
       _sampleRecordTimer = null;
     }
+  }
+
+  void _setSampleIntervalSeconds(int seconds) {
+    if (_sampleIntervalSeconds == seconds) return;
+
+    setState(() {
+      _sampleIntervalSeconds = seconds;
+    });
+    _databaseService.setSetting('sampleIntervalSeconds', seconds);
+
+    if (_sampleRecordsEnabled) {
+      _startSampleRecords();
+    }
+  }
+
+  void _setSplitOnPreamble(bool value) {
+    if (_splitOnPreamble == value) return;
+
+    setState(() {
+      _splitOnPreamble = value;
+    });
+    _databaseService.setSetting('splitOnPreamble', value ? 1 : 0);
+    DemodWorker.instance.setSplitOnPreamble(value);
+    _bleService.splitOnPreamble = value;
   }
 
   int _sampleTdcsSerial = 0;
@@ -1108,6 +1143,10 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       SettingsScreen(
         sampleRecordsEnabled: _sampleRecordsEnabled,
         onSampleRecordsChanged: _setSampleRecordsEnabled,
+        sampleIntervalSeconds: _sampleIntervalSeconds,
+        onSampleIntervalChanged: _setSampleIntervalSeconds,
+        splitOnPreamble: _splitOnPreamble,
+        onSplitOnPreambleChanged: _setSplitOnPreamble,
       ),
     ];
 
@@ -1414,6 +1453,26 @@ class _PixelPerfectBluetoothDialogState
                     alignment: Alignment.centerLeft,
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                      child: Text(
+                        text,
+                        style: TextStyle(
+                          fontSize: 13,
+                          height: 18 / 13,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                  ),
+          ),
+        if (_debugMode)
+          ValueListenableBuilder<String>(
+            valueListenable: EmbeddedUsbService.instance.plutoRateText,
+            builder: (context, text, _) => text.isEmpty
+                ? const SizedBox.shrink()
+                : Align(
+                    alignment: Alignment.centerLeft,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
                       child: Text(
                         text,
                         style: TextStyle(

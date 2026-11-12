@@ -12,7 +12,7 @@ class LbjState {
   int direction = -1;
   String speed = "NUL";
   String positionKm = " <NUL>";
-  String time = "<NUL>";
+  String time = "";
   String lbjClass = "NA";
   String loco = "<NUL>";
   String route = "********";
@@ -29,7 +29,7 @@ class LbjState {
     direction = -1;
     speed = "NUL";
     positionKm = " <NUL>";
-    time = "<NUL>";
+    time = "";
     lbjClass = "NA";
     loco = "<NUL>";
     route = "********";
@@ -70,20 +70,18 @@ class LbjState {
     }
     switch (addr) {
       case lbjInfoAddr:
-        final RegExp infoRegex = RegExp(r'^\s*(\S+)\s+(\S+)\s+(\S+)');
+        final RegExp infoRegex = RegExp(r'^\s*(\S+)(?:\s+(\S+))?(?:\s+(\S+))?');
         final match = infoRegex.firstMatch(numeric);
         if (match != null) {
           train = match.group(1) ?? "<NUL>";
-          speed = match.group(2) ?? "NUL";
+          final spd = match.group(2);
+          if (spd != null) speed = spd;
 
-          String pos = match.group(3)?.trim() ?? "";
-
-          if (pos.isEmpty) {
-            positionKm = " <NUL>";
-          } else if (pos.length > 1) {
+          final pos = match.group(3) ?? "";
+          if (pos.length > 1) {
             positionKm =
                 "${pos.substring(0, pos.length - 1)}.${pos.substring(pos.length - 1)}";
-          } else {
+          } else if (pos.length == 1) {
             positionKm = "0.$pos";
           }
         }
@@ -91,7 +89,6 @@ class LbjState {
 
       case lbjInfo2Addr:
         String buffer = numeric;
-        if (buffer.length < 50) return;
         _info2Hex = _recodeBCD(buffer);
 
         if (_info2Hex.length >= 4) {
@@ -147,9 +144,9 @@ class LbjState {
         break;
 
       case lbjSyncAddr:
-        if (numeric.length >= 5) {
-          time = "${numeric.substring(1, 3)}:${numeric.substring(3, 5)}";
-        }
+        time = numeric.length >= 5
+            ? "${numeric.substring(1, 3)}:${numeric.substring(3, 5)}"
+            : "";
         break;
     }
   }

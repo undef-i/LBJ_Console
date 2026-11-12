@@ -22,6 +22,7 @@ int lbj_pluto_port(void);
 int lbj_pluto_exit_error(void);
 int lbj_pluto_stage(void);
 void lbj_pluto_stop(void);
+void lbj_pluto_stats(int *calls, int *errors, int *rate);
 
 #define LBJ_FREQ_HZ 821237500
 #define LBJ_RATE_HZ 240000
@@ -360,6 +361,20 @@ Java_org_noxylva_lbjconsole_flutter_LbjUsbNative_nativeStage(JNIEnv *env, jclass
 	(void)cls;
 	char buf[64];
 	snprintf(buf, sizeof(buf), "rtl%d/pluto%d", S.stage, lbj_pluto_stage());
+	return (*env)->NewStringUTF(env, buf);
+}
+
+JNIEXPORT jstring JNICALL
+Java_org_noxylva_lbjconsole_flutter_LbjUsbNative_nativePlutoStats(JNIEnv *env, jclass cls)
+{
+	(void)cls;
+	char buf[64];
+	buf[0] = 0;
+	if (lbj_pluto_running()) {
+		int calls = 0, errors = 0, rate = 0;
+		lbj_pluto_stats(&calls, &errors, &rate);
+		snprintf(buf, sizeof(buf), "%d,%d,%d", calls, errors, rate);
+	}
 	return (*env)->NewStringUTF(env, buf);
 }
 

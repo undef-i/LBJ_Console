@@ -101,6 +101,12 @@ void _workerMain(SendPort mainPort) {
   }
 
   var sweepPhaseMs = 0;
+  var corrOffsetHz = 0;
+  var corrBaseFreq = 0;
+  var corrAdjusts = 0;
+  var corrPending = 0.0;
+  var corrHasPending = false;
+  var corrApplyPending = false;
 
   void tuneAt(int idx) {
     if (cycle.isEmpty) return;
@@ -108,7 +114,12 @@ void _workerMain(SendPort mainPort) {
       sweepPhaseMs = (sweepPhaseMs + 50) % 250;
     }
     cycleIdx = idx % cycle.length;
-    sendFreq(_protoFreq[cycle[cycleIdx]]!);
+    final baseFreq = _protoFreq[cycle[cycleIdx]]!;
+    sendFreq(
+      corrBaseFreq > 0
+          ? baseFreq + (corrOffsetHz * baseFreq) ~/ corrBaseFreq
+          : baseFreq,
+    );
     rtl.reset();
     rtlFfsk.reset();
     iqFft.reset();
@@ -200,8 +211,53 @@ void _workerMain(SendPort mainPort) {
     if (now - dwellStartMs >= dwellLimit) tuneAt(cycleIdx + 1);
   });
 
+  Timer.periodic(const Duration(milliseconds: 200), (_) {
+    if (!connected || cycle.isEmpty) return;
+    if (corrApplyPending) {
+      if (cycle[cycleIdx] == 'lbj' && rtl.framing.txOpen) return;
+      corrApplyPending = false;
+      tuneAt(cycleIdx);
+      return;
+    }
+    if (corrAdjusts >= 4) return;
+    final offset = iqFft.measureOffsetHz(240000.0);
+    if (offset == null || offset.abs() > 100000) return;
+    if (corrBaseFreq == 0) {
+      if (offset.abs() < 3000) {
+        corrAdjusts = 4;
+        return;
+      }
+      if (!corrHasPending || (offset - corrPending).abs() > 2000) {
+        corrPending = offset;
+        corrHasPending = true;
+        return;
+      }
+      corrOffsetHz = ((offset + corrPending) / 2).round();
+      corrBaseFreq = _protoFreq[cycle[cycleIdx]]!;
+      corrHasPending = false;
+    } else {
+      if (offset.abs() < 1500) {
+        corrAdjusts = 4;
+        return;
+      }
+      corrOffsetHz +=
+          (offset * corrBaseFreq / _protoFreq[cycle[cycleIdx]]!).round();
+    }
+    corrAdjusts++;
+    if (cycle[cycleIdx] == 'lbj' && rtl.framing.txOpen) {
+      corrApplyPending = true;
+    } else {
+      tuneAt(cycleIdx);
+    }
+  });
+
   Future<void> teardownSocket() async {
     stopIq();
+    corrOffsetHz = 0;
+    corrBaseFreq = 0;
+    corrAdjusts = 0;
+    corrHasPending = false;
+    corrApplyPending = false;
     await socketSub?.cancel();
     socketSub = null;
     socket?.destroy();
@@ -433,6 +489,10 @@ void _workerMain(SendPort mainPort) {
           cycle = buildCycle(enabledProtos);
           if (connected) tuneAt(0);
           break;
+        case 'splitSet':
+          mic.framing.splitOnPreamble = msg[1] as bool;
+          rtl.framing.splitOnPreamble = msg[1] as bool;
+          break;
         case 'rtlDisconnect':
           generation++;
           connecting = false;
@@ -659,6 +719,11 @@ class DemodWorker {
     _protocols = ids;
     await ensureStarted();
     _port!.send(['protoSet', ids]);
+  }
+
+  Future<void> setSplitOnPreamble(bool value) async {
+    await ensureStarted();
+    _port!.send(['splitSet', value]);
   }
 
   Future<void> rtlConnect(String host, String port) async {

@@ -12,5 +12,6 @@ object LbjUsbNative {
     external fun nativePort(): Int
     external fun nativeExitError(): Int
     external fun nativeStage(): String
+    external fun nativePlutoStats(): String
     external fun nativeReset(fd: Int): Int
 }

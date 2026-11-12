@@ -70,6 +70,8 @@ class BLEService {
   StreamSubscription<List<int>>? _v2DataSubscription;
   StreamSubscription<List<int>>? _v2StatusSubscription;
   final _v2Framing = PocsagFraming();
+
+  set splitOnPreamble(bool value) => _v2Framing.splitOnPreamble = value;
   final _v2State = LbjState();
   final _ffskBuf = <int>[];
   var _v2HasPending = false;

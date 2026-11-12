@@ -178,14 +178,6 @@ int _bchEncode(int cw) {
   return (result, true);
 }
 
-int _xorBits(int word, int firstBit, int lastBit) {
-  var x = 0;
-  for (var i = firstBit; i <= lastBit; i++) {
-    x ^= (word >> i) & 1;
-  }
-  return x;
-}
-
 int _reverse32(int x) {
   x = ((x & 0xAAAAAAAA) >> 1) | ((x & 0x55555555) << 1);
   x = ((x & 0xCCCCCCCC) >> 2) | ((x & 0x33333333) << 2);
@@ -217,10 +209,10 @@ class PocsagFraming {
   var functionBits = 0;
   var alphaBitBuffer = 0;
   var alphaBitBufferBits = 0;
-  var parityErrors = 0;
-  var bchErrors = 0;
   var streamEnded = false;
   final batchLog = <String>[];
+  var splitOnPreamble = false;
+  var batchesInGroup = 0;
   var _txOpen = false;
   final _recentBits = <bool>[];
 
@@ -249,26 +241,30 @@ class PocsagFraming {
       streamEnded = true;
       _txOpen = false;
     }
+    batchesInGroup = 0;
     resetFraming();
   }
 
   void _decodeBatch() {
     final slots = <String>[];
     var i = 1;
+    batchLoop:
     for (var frame = 0; frame < 8; frame++) {
       for (var word = 0; word < 2; word++) {
         final cw = codeWords[i] & 0xFFFFFFFF;
+        if (codeWordsBchError[i]) {
+          slots.add('bad!');
+          break batchLoop;
+        }
         final addressCodeWord = ((cw >> 31) & 1) == 0;
-        final parityError = _xorBits(cw, 1, 31) != (cw & 0x1);
-        final err = codeWordsBchError[i] ? '!' : '';
         if (cw == _idleCode) {
-          slots.add('idle$err');
+          slots.add('idle');
         } else if (addressCodeWord) {
           slots.add(
-            'addr ${(((cw >> 13) & 0x3FFFF) << 3 | frame)}/${(cw >> 11) & 0x3}$err',
+            'addr ${(((cw >> 13) & 0x3FFFF) << 3 | frame)}/${(cw >> 11) & 0x3}',
           );
         } else {
-          slots.add('msg$err');
+          slots.add('msg');
         }
         if (cw == _idleCode) {
         } else if (addressCodeWord) {
@@ -279,12 +275,8 @@ class PocsagFraming {
           alphaMsg = '';
           alphaBitBufferBits = 0;
           alphaBitBuffer = 0;
-          parityErrors = parityError ? 1 : 0;
-          bchErrors = codeWordsBchError[i] ? 1 : 0;
         } else {
           final messageBits = (cw >> 11) & 0xFFFFF;
-          if (parityError) parityErrors++;
-          if (codeWordsBchError[i]) bchErrors++;
           const numericChars = [
             '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '.', 'U', ' ', '-',
             ')', '(',
@@ -352,7 +344,7 @@ class PocsagFraming {
         }
       }
       if (gotSC) {
-        if (_txOpen && _altRunBeforeSync() >= 100) {
+        if (splitOnPreamble && _txOpen && _altRunBeforeSync() >= 100) {
           streamEnded = true;
           _txOpen = false;
         }
@@ -374,6 +366,7 @@ class PocsagFraming {
       if (wordCnt == _batchWords) {
         _decodeBatch();
         _txOpen = true;
+        batchesInGroup++;
         wordCnt = 0;
       }
       bits = 0;
@@ -550,6 +543,8 @@ class MicDemod {
 class RtlDemod {
   RtlDemod() : framing = PocsagFraming() {
     _lowpassBaud = FirFilter(301, 48000.0, 6000.0);
+    _decimationI = FirFilter(151, 240000.0, 20000.0);
+    _decimationQ = FirFilter(151, 240000.0, 20000.0);
     _phase.setFMScaling(48000.0 / (2.0 * 4500.0));
   }
 
@@ -557,13 +552,15 @@ class RtlDemod {
   final messages = <PocsagMessage>[];
   final audioTap = <double>[];
   late FirFilter _lowpassBaud;
-  var _sumI = 0.0;
-  var _sumQ = 0.0;
+  late FirFilter _decimationI;
+  late FirFilter _decimationQ;
   final _phase = _PhaseDiscriminator();
   final _preambleMA = _MovingAverage2048();
 
   var magsqRaw = 0.0;
   var _noiseFloor = 0.0;
+  var _powAvg = 0.0;
+  var _drySamples = 0;
   var _dcOffset = 0.0;
   var _prevData = false;
   var _syncCnt = 0;
@@ -575,8 +572,8 @@ class RtlDemod {
 
   void reset() {
     _lowpassBaud = FirFilter(301, 48000.0, 6000.0);
-    _sumI = 0.0;
-    _sumQ = 0.0;
+    _decimationI = FirFilter(151, 240000.0, 20000.0);
+    _decimationQ = FirFilter(151, 240000.0, 20000.0);
     _phase._prevArg = 0.0;
     _preambleMA.reset();
     framing.resetFraming();
@@ -586,6 +583,8 @@ class RtlDemod {
     framing.isMessageReady = false;
     magsqRaw = 0.0;
     _noiseFloor = 0.0;
+    _powAvg = 0.0;
+    _drySamples = 0;
     _dcOffset = 0.0;
     _prevData = false;
     _syncCnt = 0;
@@ -596,13 +595,26 @@ class RtlDemod {
     _carry = null;
   }
 
+  static int _clampToInt8(double value) {
+    var v = value >= 0 ? (value + 0.5).floor() : (value - 0.5).ceil();
+    if (v > 127) v = 127;
+    if (v < -128) v = -128;
+    return v;
+  }
+
   void pushBytes(Uint8List bytes) {
+    final sI = _decimationI._samples;
+    final tI = _decimationI._taps;
+    final sQ = _decimationQ._samples;
+    final tQ = _decimationQ._taps;
+    final n = _decimationI._n;
+    final pairs = tI.length - 1;
     final sB = _lowpassBaud._samples;
     final tB = _lowpassBaud._taps;
     final nB = _lowpassBaud._n;
     final pairsB = tB.length - 1;
-    var sumI = _sumI;
-    var sumQ = _sumQ;
+    var pI = _decimationI._ptr;
+    var pQ = _decimationQ._ptr;
     var pB = _lowpassBaud._ptr;
     var carry = _carry;
     var decim = _decimCounter;
@@ -619,23 +631,52 @@ class RtlDemod {
         continue;
       }
       carry = null;
-      sumI += c - 128.0;
-      sumQ += bytes[j] - 128.0;
+      final vI = c - 128.0;
+      sI[pI] = vI;
+      sI[pI + n] = vI;
+      final vQ = bytes[j] - 128.0;
+      sQ[pQ] = vQ;
+      sQ[pQ + n] = vQ;
       if (++decim == 5) {
         decim = 0;
-        final fi = sumI / 5 / 128.0;
-        final fq = sumQ / 5 / 128.0;
-        sumI = 0.0;
-        sumQ = 0.0;
+        final loI = pI + 1;
+        final hiI = pI + n;
+        var accI = 0.0;
+        for (var i = 0; i < pairs; i++) {
+          accI += (sI[loI + i] + sI[hiI - i]) * tI[i];
+        }
+        accI += sI[hiI - pairs] * tI[pairs];
+        final loQ = pQ + 1;
+        final hiQ = pQ + n;
+        var accQ = 0.0;
+        for (var i = 0; i < pairs; i++) {
+          accQ += (sQ[loQ + i] + sQ[hiQ - i]) * tQ[i];
+        }
+        accQ += sQ[hiQ - pairs] * tQ[pairs];
+        final fi = _clampToInt8(accI) / 128.0;
+        final fq = _clampToInt8(accQ) / 128.0;
         final (fmDemod, magsq) = _phase.delta(fi, fq);
         magsqRaw = magsq;
         if (!framing.gotSC) {
-          if (_noiseFloor == 0) {
+          if (_powAvg == 0) {
+            _powAvg = magsq;
             _noiseFloor = magsq;
-          } else if (framing.txOpen) {
-            if (magsq < _noiseFloor * 4) framing.dryUp();
-          } else if (magsq < _noiseFloor * 4) {
-            _noiseFloor += (magsq - _noiseFloor) * 0.001;
+          } else {
+            _powAvg += (magsq - _powAvg) * 0.0020833;
+            if (_powAvg < _noiseFloor * 16) {
+              _noiseFloor += (_powAvg - _noiseFloor) * 0.001;
+            }
+          }
+          if (framing.txOpen && _powAvg < _noiseFloor * 4) {
+            if (framing.splitOnPreamble || framing.batchesInGroup >= 2) {
+              _drySamples = 0;
+              framing.dryUp();
+            } else if (++_drySamples >= 21760) {
+              _drySamples = 0;
+              framing.dryUp();
+            }
+          } else {
+            _drySamples = 0;
           }
         }
         sB[pB] = fmDemod;
@@ -685,9 +726,11 @@ class RtlDemod {
         final msg = framing.takeMessage();
         if (msg != null) messages.add(msg);
       }
+      pI = pI == n - 1 ? 0 : pI + 1;
+      pQ = pQ == n - 1 ? 0 : pQ + 1;
     }
-    _sumI = sumI;
-    _sumQ = sumQ;
+    _decimationI._ptr = pI;
+    _decimationQ._ptr = pQ;
     _lowpassBaud._ptr = pB;
     _carry = carry;
     _decimCounter = decim;
@@ -976,6 +1019,39 @@ class IqFft {
     for (var i = 0; i < n; i++) {
       _power[i] = re[i] * re[i] + im[i] * im[i];
     }
+  }
+
+  double? measureOffsetHz(double sampleRate) {
+    final n = fftSize;
+    final half = n ~/ 2;
+    var peak = 0.0;
+    var peakBin = -1;
+    for (var i = 0; i < n; i++) {
+      final f = (i < half ? i : i - n) * sampleRate / n;
+      if (f.abs() < 2000) continue;
+      if (_power[i] > peak) {
+        peak = _power[i];
+        peakBin = i;
+      }
+    }
+    if (peakBin < 0) return null;
+    final sorted = List<double>.from(_power)..sort();
+    final median = sorted[n ~/ 2];
+    if (peak < median * 100) return null;
+    final peakFreq = (peakBin < half ? peakBin : peakBin - n) * sampleRate / n;
+    var wSum = 0.0;
+    var fSum = 0.0;
+    for (var i = 0; i < n; i++) {
+      final f = (i < half ? i : i - n) * sampleRate / n;
+      if (f.abs() < 3000) continue;
+      if ((f - peakFreq).abs() > 30000) continue;
+      final w = _power[i] - median;
+      if (w <= 0) continue;
+      wSum += w;
+      fSum += f * w;
+    }
+    if (wSum <= 0) return null;
+    return fSum / wSum;
   }
 
   Float32List spectrum500() {
