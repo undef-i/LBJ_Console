@@ -304,7 +304,7 @@ class BLEService {
             if (char.uuid == capCharUuid) cap = char;
           }
           if (v2 != null) {
-            await device.requestMtu(512);
+            await device.requestMtu(517);
             if (cap != null) {
               final capValue = await cap.read();
               if (capValue.length >= 2) {
@@ -321,7 +321,7 @@ class BLEService {
             return;
           }
           if (v1 != null) {
-            await device.requestMtu(512);
+            await device.requestMtu(517);
             await v1.setNotifyValue(true);
             _valueSubscription = v1.lastValueStream.listen(_onDataReceived);
             _updateConnectionState(true, "已连接");
