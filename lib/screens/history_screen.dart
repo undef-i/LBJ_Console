@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import 'package:latlong2/latlong.dart';
 import '../models/merged_record.dart';
 import '../services/database_service.dart';
@@ -12,6 +11,7 @@ import '../models/train_record.dart';
 import '../services/merge_service.dart';
 import '../models/map_state.dart';
 import '../services/map_state_service.dart';
+import 'package:lbjconsole/ui/anchored_sliver.dart';
 import 'package:lbjconsole/ui/native_map.dart';
 import 'package:lbjconsole/ui/app_map.dart';
 import 'package:lbjconsole/ui/glass_card.dart';
@@ -38,6 +38,7 @@ class HistoryScreenState extends State<HistoryScreen> with RecordCardBuilders {
   static const double _singlePointMapZoom = 17.0;
 
   final List<Object> _displayItems = [];
+  String? _enteringHeadKey;
   bool _isLoading = true;
   bool _isEditMode = false;
   final Set<String> _selectedRecords = {};
@@ -46,12 +47,7 @@ class HistoryScreenState extends State<HistoryScreen> with RecordCardBuilders {
   final Map<String, (String, Brightness, GroupBy, Widget)> _subItemsCache = {};
   late final ScrollController _scrollController;
   bool _isAtTop = true;
-  final GlobalKey _listViewportKey = GlobalKey();
-  final Map<String, GlobalKey> _itemKeys = {};
-  _RenderViewportAnchor? _pendingRenderViewportAnchor;
-  int _pendingAnchorPasses = 0;
   final Map<String, GlobalKey> _subKeys = {};
-  final Map<String, double> _itemHeights = {};
 
   MergeSettings _mergeSettings = MergeSettings();
 
@@ -117,6 +113,51 @@ class HistoryScreenState extends State<HistoryScreen> with RecordCardBuilders {
       return 'sync:${item.uniqueId}';
     }
     return 'record:${(item as TrainRecord).uniqueId}';
+  }
+
+  void _noteHeadEntrance(List<Object> newItems) {
+    _enteringHeadKey = null;
+    if (newItems.isEmpty || _displayItems.isEmpty || !_isViewingLatest) {
+      return;
+    }
+    final head = newItems.first;
+    final headIds = _displayItemRecordIds(head);
+    if (headIds.isEmpty) {
+      final known = _displayItems.map(_displayItemKey).toSet();
+      if (known.contains(_displayItemKey(head))) return;
+    } else {
+      final prevIds = <String>{};
+      for (final item in _displayItems) {
+        prevIds.addAll(_displayItemRecordIds(item));
+      }
+      if (headIds.any(prevIds.contains)) return;
+    }
+    final key = _displayItemKey(head);
+    _enteringHeadKey = key;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_enteringHeadKey == key) {
+        _enteringHeadKey = null;
+      }
+    });
+  }
+
+  Widget _enterWrap(Widget child, Object item, int index) {
+    if (index != 0 || _enteringHeadKey == null) return child;
+    if (_displayItemKey(item) != _enteringHeadKey) return child;
+    return TweenAnimationBuilder<double>(
+      key: ValueKey('enter:$_enteringHeadKey'),
+      tween: Tween<double>(begin: 0, end: 1),
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOutCubic,
+      builder: (context, t, inner) => ClipRect(
+        child: Align(
+          alignment: Alignment.topCenter,
+          heightFactor: t,
+          child: Opacity(opacity: t, child: inner),
+        ),
+      ),
+      child: child,
+    );
   }
 
   List<FfskAlarmEvent> _alarmEvents = [];
@@ -196,219 +237,8 @@ class HistoryScreenState extends State<HistoryScreen> with RecordCardBuilders {
       ..addAll(nextStates);
   }
 
-  GlobalKey _keyForDisplayItem(Object item) {
-    final key = _displayItemKey(item);
-    return _itemKeys.putIfAbsent(key, GlobalKey.new);
-  }
-
   GlobalKey _subKeyFor(String subId) {
     return _subKeys.putIfAbsent(subId, GlobalKey.new);
-  }
-
-  RenderBox? _liveBox(GlobalKey? key) {
-    final context = key?.currentContext;
-    if (context == null) return null;
-    final box = context.findRenderObject() as RenderBox?;
-    if (box == null || !box.hasSize) return null;
-    return box;
-  }
-
-  _RenderViewportAnchor? _currentRenderViewportAnchor() {
-    final viewportContext = _listViewportKey.currentContext;
-    if (viewportContext == null || !_scrollController.hasClients) {
-      return null;
-    }
-
-    final viewportBox = viewportContext.findRenderObject() as RenderBox?;
-    if (viewportBox == null || !viewportBox.hasSize) {
-      return null;
-    }
-    final viewportTop = viewportBox.localToGlobal(Offset.zero).dy;
-    final viewportHeight = viewportBox.size.height;
-
-    for (var index = 0; index < _displayItems.length; index++) {
-      final item = _displayItems[index];
-      final itemKey = _displayItemKey(item);
-      final box = _liveBox(_itemKeys[itemKey]);
-      if (box == null) continue;
-
-      final dy = box.localToGlobal(Offset.zero).dy - viewportTop;
-      final bottom = dy + box.size.height;
-      if (bottom <= 0 || dy >= viewportHeight) continue;
-
-      if (item is MergedTrainRecord && (_expandedStates[itemKey] ?? false)) {
-        final subIds = <String>[
-          'map:${item.groupKey}',
-          for (final record in item.records) 'sub:${record.uniqueId}',
-        ];
-        for (final subId in subIds) {
-          final subBox = _liveBox(_subKeys[subId]);
-          if (subBox == null) continue;
-          final subDy = subBox.localToGlobal(Offset.zero).dy - viewportTop;
-          final subBottom = subDy + subBox.size.height;
-          if (subBottom <= 0 || subDy >= viewportHeight) continue;
-          return _RenderViewportAnchor(
-            itemKey: itemKey,
-            recordIds: _displayItemRecordIds(item),
-            dy: subDy,
-            subId: subId,
-            index: index,
-          );
-        }
-      }
-
-      return _RenderViewportAnchor(
-        itemKey: itemKey,
-        recordIds: _displayItemRecordIds(item),
-        dy: dy,
-        index: index,
-      );
-    }
-
-    return null;
-  }
-
-  String? _fallbackItemKeyForAnchor(_RenderViewportAnchor anchor) {
-    for (final item in _displayItems) {
-      final recordIds = _displayItemRecordIds(item);
-      if (recordIds.intersection(anchor.recordIds).isNotEmpty) {
-        return _displayItemKey(item);
-      }
-    }
-    return null;
-  }
-
-  void _queueRenderViewportAnchorRestore(_RenderViewportAnchor? anchor) {
-    if (anchor == null) return;
-    _pendingRenderViewportAnchor = anchor;
-    _pendingAnchorPasses = 0;
-  }
-
-  void _sweepItemHeights() {
-    for (final item in _displayItems) {
-      final itemKey = _displayItemKey(item);
-      final box = _liveBox(_itemKeys[itemKey]);
-      if (box != null) _itemHeights[itemKey] = box.size.height;
-    }
-  }
-
-  double _estimatedItemHeight(String itemKey) {
-    final known = _itemHeights[itemKey];
-    if (known != null) return known;
-    if (_itemHeights.isEmpty) return 120;
-    var sum = 0.0;
-    for (final height in _itemHeights.values) {
-      sum += height;
-    }
-    return sum / _itemHeights.length;
-  }
-
-  bool _correctScrollBy(double delta) {
-    final position = _scrollController.position;
-    final targetPixels = (position.pixels + delta).clamp(
-      position.minScrollExtent,
-      position.maxScrollExtent,
-    );
-    final correction = targetPixels - position.pixels;
-    if (correction.abs() <= 0.5) return false;
-    position.correctBy(correction);
-    return true;
-  }
-
-  bool _applyPendingRenderViewportAnchorCorrection() {
-    _sweepItemHeights();
-    final anchor = _pendingRenderViewportAnchor;
-    if (anchor == null || !mounted || !_scrollController.hasClients) {
-      return false;
-    }
-
-    final viewportContext = _listViewportKey.currentContext;
-    final viewportBox = viewportContext?.findRenderObject() as RenderBox?;
-    if (viewportBox == null || !viewportBox.hasSize) return false;
-    final viewportTop = viewportBox.localToGlobal(Offset.zero).dy;
-
-    var itemKey = anchor.itemKey;
-    var subId = anchor.subId;
-    final itemSurvives = _displayItems.any(
-      (item) => _displayItemKey(item) == itemKey,
-    );
-    if (!itemSurvives) {
-      final fallback = _fallbackItemKeyForAnchor(anchor);
-      if (fallback != null) {
-        itemKey = fallback;
-        subId = null;
-      } else if (_displayItems.isNotEmpty) {
-        final clamped = anchor.index.clamp(0, _displayItems.length - 1);
-        itemKey = _displayItemKey(_displayItems[clamped]);
-        subId = null;
-      } else {
-        _pendingRenderViewportAnchor = null;
-        return false;
-      }
-    }
-
-    RenderBox? targetBox;
-    if (subId != null) targetBox = _liveBox(_subKeys[subId]);
-    targetBox ??= _liveBox(_itemKeys[itemKey]);
-
-    if (targetBox != null) {
-      final newDy = targetBox.localToGlobal(Offset.zero).dy - viewportTop;
-      final delta = newDy - anchor.dy;
-      _pendingRenderViewportAnchor = null;
-      _pendingAnchorPasses = 0;
-      if (delta.abs() <= 0.5) return false;
-      return _correctScrollBy(delta);
-    }
-
-    _pendingAnchorPasses++;
-    if (_pendingAnchorPasses > 15) {
-      _pendingRenderViewportAnchor = null;
-      _pendingAnchorPasses = 0;
-      return false;
-    }
-    final seek = _seekCorrection(itemKey, anchor.dy, viewportTop);
-    if (seek == null || seek.abs() <= 0.5) return false;
-    return _correctScrollBy(seek);
-  }
-
-  double? _seekCorrection(
-    String targetItemKey,
-    double targetDy,
-    double viewportTop,
-  ) {
-    int? targetIndex;
-    for (var i = 0; i < _displayItems.length; i++) {
-      if (_displayItemKey(_displayItems[i]) == targetItemKey) {
-        targetIndex = i;
-        break;
-      }
-    }
-    if (targetIndex == null) return null;
-
-    int? refIndex;
-    var refDy = 0.0;
-    for (var i = 0; i < _displayItems.length; i++) {
-      final box = _liveBox(_itemKeys[_displayItemKey(_displayItems[i])]);
-      if (box == null) continue;
-      if (refIndex == null ||
-          (i - targetIndex).abs() < (refIndex - targetIndex).abs()) {
-        refIndex = i;
-        refDy = box.localToGlobal(Offset.zero).dy - viewportTop;
-      }
-    }
-    if (refIndex == null) return null;
-
-    var estimatedDy = refDy;
-    if (targetIndex > refIndex) {
-      for (var i = refIndex; i < targetIndex; i++) {
-        estimatedDy += _estimatedItemHeight(_displayItemKey(_displayItems[i]));
-      }
-    } else if (targetIndex < refIndex) {
-      for (var i = targetIndex; i < refIndex; i++) {
-        estimatedDy -= _estimatedItemHeight(_displayItemKey(_displayItems[i]));
-      }
-    }
-    return estimatedDy - targetDy;
   }
 
   @override
@@ -453,10 +283,6 @@ class HistoryScreenState extends State<HistoryScreen> with RecordCardBuilders {
   }
 
   Future<void> loadRecords({bool scrollToTop = true}) async {
-    final renderAnchor = scrollToTop || _isViewingLatest
-        ? null
-        : _currentRenderViewportAnchor();
-
     try {
       final allRecords = await DatabaseService.instance.getAllRecords();
       final settingsMap = await DatabaseService.instance.getAllSettings() ?? {};
@@ -481,6 +307,7 @@ class HistoryScreenState extends State<HistoryScreen> with RecordCardBuilders {
         if (hasDataChanged) {
           final expandedRecordIdGroups = _expandedRecordIdGroups();
           final shouldRevealAfterJump = _isLoading && scrollToTop;
+          _noteHeadEntrance(items);
           setState(() {
             _displayItems
               ..clear()
@@ -492,17 +319,11 @@ class HistoryScreenState extends State<HistoryScreen> with RecordCardBuilders {
             }
           });
 
-          if (scrollToTop) {
-            if (shouldRevealAfterJump) {
-              setState(() {
-                _isLoading = false;
-                _isAtTop = true;
-              });
-              _pendingRenderViewportAnchor = null;
-              _pendingAnchorPasses = 0;
-            }
-          } else {
-            _queueRenderViewportAnchorRestore(renderAnchor);
+          if (scrollToTop && shouldRevealAfterJump) {
+            setState(() {
+              _isLoading = false;
+              _isAtTop = true;
+            });
           }
         } else {
           if (_isLoading) {
@@ -530,9 +351,6 @@ class HistoryScreenState extends State<HistoryScreen> with RecordCardBuilders {
       if (!isNewRecord) return;
 
       if (mounted) {
-        final renderAnchor = _isViewingLatest
-            ? null
-            : _currentRenderViewportAnchor();
         List<TrainRecord> allRecords = [];
         Set<String> selectedRecordIds = {};
 
@@ -558,6 +376,7 @@ class HistoryScreenState extends State<HistoryScreen> with RecordCardBuilders {
         );
         final expandedRecordIdGroups = _expandedRecordIdGroups();
 
+        _noteHeadEntrance(mergedItems);
         setState(() {
           _displayItems
             ..clear()
@@ -579,8 +398,6 @@ class HistoryScreenState extends State<HistoryScreen> with RecordCardBuilders {
             }
           }
         });
-
-        _queueRenderViewportAnchorRestore(renderAnchor);
       }
       // ignore: empty_catches
     } catch (e) {}
@@ -663,74 +480,85 @@ class HistoryScreenState extends State<HistoryScreen> with RecordCardBuilders {
     );
   }
 
+  GlobalKey? _subKeyForItem(Object item) {
+    if (item is MergedTrainRecord && item.records.isNotEmpty) {
+      return _subKeyFor('sub:${item.records.first.uniqueId}');
+    }
+    return null;
+  }
+
   Widget _buildHistoryListView() {
-    return NotificationListener<ScrollNotification>(
-      onNotification: (notification) {
-        if (notification is ScrollStartNotification &&
-            notification.dragDetails != null) {
-          _pendingRenderViewportAnchor = null;
-          _pendingAnchorPasses = 0;
+    final topPadding = MediaQuery.paddingOf(context).top + 80;
+    return AnchoredListView(
+      itemCount: _displayItems.length,
+      itemKeyAt: (index) => _displayItemKey(_displayItems[index]),
+      subKeyAt: (index) => _subKeyForItem(_displayItems[index]),
+      scrollController: _scrollController,
+      cacheExtent: 800,
+      itemBuilder: (context, index) {
+        final item = _displayItems[index];
+        Widget child;
+        if (item is MergedTrainRecord) {
+          child = _enterWrap(
+            RepaintBoundary(child: _buildMergedRecordCard(item)),
+            item,
+            index,
+          );
+        } else if (item is TrainRecord) {
+          child = _enterWrap(
+            RepaintBoundary(
+              child: _buildRecordCard(item, key: ValueKey(item.uniqueId)),
+            ),
+            item,
+            index,
+          );
+        } else if (item is FfskAlarmEvent) {
+          child = _enterWrap(
+            RepaintBoundary(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => _toggleEventSelection(item.uniqueId),
+                onLongPress: () => _selectEvent(item.uniqueId),
+                child: buildAlarmCard(
+                  item,
+                  selected:
+                      _isEditMode && _selectedEvents.contains(item.uniqueId),
+                ),
+              ),
+            ),
+            item,
+            index,
+          );
+        } else if (item is LbjSyncEvent) {
+          child = _enterWrap(
+            RepaintBoundary(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => _toggleEventSelection(item.uniqueId),
+                onLongPress: () => _selectEvent(item.uniqueId),
+                child: buildSyncCard(
+                  item,
+                  selected:
+                      _isEditMode && _selectedEvents.contains(item.uniqueId),
+                ),
+              ),
+            ),
+            item,
+            index,
+          );
+        } else {
+          child = const SizedBox.shrink();
         }
-        return false;
-      },
-      child: _ViewportAnchorRestorer(
-        onAfterLayout: _applyPendingRenderViewportAnchorCorrection,
-        child: ListView.builder(
-          scrollCacheExtent: const ScrollCacheExtent.pixels(800),
-          key: _listViewportKey,
-          controller: _scrollController,
+        return Padding(
           padding: EdgeInsets.fromLTRB(
             16.0,
-            MediaQuery.paddingOf(context).top + 80,
+            index == 0 ? topPadding : 0,
             16.0,
-            118.0,
+            index == _displayItems.length - 1 ? 118.0 : 0,
           ),
-          itemCount: _displayItems.length,
-          itemBuilder: (context, index) {
-            final item = _displayItems[index];
-            if (item is MergedTrainRecord) {
-              return RepaintBoundary(
-                key: _keyForDisplayItem(item),
-                child: _buildMergedRecordCard(item),
-              );
-            } else if (item is TrainRecord) {
-              return RepaintBoundary(
-                key: _keyForDisplayItem(item),
-                child: _buildRecordCard(item, key: ValueKey(item.uniqueId)),
-              );
-            } else if (item is FfskAlarmEvent) {
-              return RepaintBoundary(
-                key: _keyForDisplayItem(item),
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: () => _toggleEventSelection(item.uniqueId),
-                  onLongPress: () => _selectEvent(item.uniqueId),
-                  child: buildAlarmCard(
-                    item,
-                    selected:
-                        _isEditMode && _selectedEvents.contains(item.uniqueId),
-                  ),
-                ),
-              );
-            } else if (item is LbjSyncEvent) {
-              return RepaintBoundary(
-                key: _keyForDisplayItem(item),
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: () => _toggleEventSelection(item.uniqueId),
-                  onLongPress: () => _selectEvent(item.uniqueId),
-                  child: buildSyncCard(
-                    item,
-                    selected:
-                        _isEditMode && _selectedEvents.contains(item.uniqueId),
-                  ),
-                ),
-              );
-            }
-            return const SizedBox.shrink();
-          },
-        ),
-      ),
+          child: child,
+        );
+      },
     );
   }
 
@@ -1101,63 +929,6 @@ class HistoryScreenState extends State<HistoryScreen> with RecordCardBuilders {
         ],
       ],
     );
-  }
-}
-
-class _RenderViewportAnchor {
-  final String itemKey;
-  final Set<String> recordIds;
-  final double dy;
-
-  final String? subId;
-
-  final int index;
-
-  const _RenderViewportAnchor({
-    required this.itemKey,
-    required this.recordIds,
-    required this.dy,
-    this.subId,
-    this.index = 0,
-  });
-}
-
-class _ViewportAnchorRestorer extends SingleChildRenderObjectWidget {
-  final bool Function() onAfterLayout;
-
-  const _ViewportAnchorRestorer({
-    required this.onAfterLayout,
-    required super.child,
-  });
-
-  @override
-  RenderObject createRenderObject(BuildContext context) {
-    return _ViewportAnchorRestorerRenderObject(onAfterLayout);
-  }
-
-  @override
-  void updateRenderObject(
-    BuildContext context,
-    covariant _ViewportAnchorRestorerRenderObject renderObject,
-  ) {
-    renderObject.onAfterLayout = onAfterLayout;
-  }
-}
-
-class _ViewportAnchorRestorerRenderObject extends RenderProxyBox {
-  bool Function() onAfterLayout;
-
-  _ViewportAnchorRestorerRenderObject(this.onAfterLayout);
-
-  @override
-  void performLayout() {
-    child?.layout(constraints, parentUsesSize: true);
-    size = child?.size ?? constraints.smallest;
-
-    if (onAfterLayout()) {
-      child?.layout(constraints, parentUsesSize: true);
-      size = child?.size ?? constraints.smallest;
-    }
   }
 }
 
