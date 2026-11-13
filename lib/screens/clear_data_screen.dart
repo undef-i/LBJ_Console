@@ -39,7 +39,7 @@ class _ClearDataScreenState extends State<ClearDataScreen> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('确认清空'),
+            child: const Text('确认'),
           ),
         ],
       ),

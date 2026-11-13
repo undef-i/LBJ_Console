@@ -406,7 +406,10 @@ class MicDemod {
   var _syncBit = 0;
   var _nSamples = 0;
   var _preambleCount = 0;
-  var _pocbit = 0;
+  var _receiving = false;
+  var _powAvg = 0.0;
+  var _noiseFloor = 0.0;
+  var _drySamples = 0;
   var _atbBit = 0;
   var _atbLen = 0;
 
@@ -416,7 +419,10 @@ class MicDemod {
     _syncBit = 0;
     _nSamples = 0;
     _preambleCount = 0;
-    _pocbit = 0;
+    _receiving = false;
+    _powAvg = 0.0;
+    _noiseFloor = 0.0;
+    _drySamples = 0;
     _atbBit = 0;
     _atbLen = 0;
     framing.resetFraming();
@@ -428,12 +434,27 @@ class MicDemod {
 
   void processSamples(Int16List samples) {
     final size = samples.length;
+    if (!framing.gotSC) {
+      for (var j = 0; j < size; j++) {
+        final v = samples[j] >> 8;
+        final p = (v * v).toDouble();
+        if (_powAvg == 0) {
+          _powAvg = p;
+          _noiseFloor = p;
+        } else {
+          _powAvg += (p - _powAvg) * 0.0020833;
+          if (_powAvg < _noiseFloor * 16) {
+            _noiseFloor += (_powAvg - _noiseFloor) * 0.001;
+          }
+        }
+      }
+    }
     final base = _bufferBase;
     var watchCtr = _watchCtr;
     var syncBit = _syncBit;
     var nSamples = _nSamples;
     var preambleCount = _preambleCount;
-    var pocbit = _pocbit;
+    var receiving = _receiving;
     var atbBit = _atbBit;
     var atbLen = _atbLen;
     var i = 0;
@@ -454,12 +475,8 @@ class MicDemod {
         if (watchCtr != -1) {
           final runEnd = base + i;
           while (watchCtr < runEnd) {
-            if (pocbit > 0) {
+            if (receiving) {
               framing.feedBit(atbBit == 1);
-              pocbit--;
-              if (pocbit == 0) {
-                framing.dryUp();
-              }
             }
             watchCtr += _watchStep;
           }
@@ -480,12 +497,12 @@ class MicDemod {
       }
 
       var locked = false;
-      if (crossing && pocbit == 0) {
+      if (crossing && !receiving) {
         if (nSamples > _preambleWindowLo && nSamples < _preambleWindowHi) {
           preambleCount++;
           if (preambleCount > 50) {
             preambleCount = 0;
-            pocbit = 1250;
+            receiving = true;
             locked = true;
           }
         } else {
@@ -515,12 +532,8 @@ class MicDemod {
         }
 
         if (watchCtr - atbCtr < 1 && watchCtr != -1) {
-          if (pocbit > 0) {
+          if (receiving) {
             framing.feedBit(atbBit == 1);
-            pocbit--;
-            if (pocbit == 0) {
-              framing.dryUp();
-            }
           }
           watchCtr += _watchStep;
         }
@@ -531,10 +544,23 @@ class MicDemod {
     _syncBit = syncBit;
     _nSamples = nSamples;
     _preambleCount = preambleCount;
-    _pocbit = pocbit;
+    _receiving = receiving;
     _atbBit = atbBit;
     _atbLen = atbLen;
     _bufferBase += size;
+    if (!framing.gotSC && framing.txOpen && _powAvg < _noiseFloor * 4) {
+      if (framing.splitOnPreamble || framing.batchesInGroup >= 2) {
+        _drySamples = 0;
+        _receiving = false;
+        framing.dryUp();
+      } else if ((_drySamples += size) >= 21760) {
+        _drySamples = 0;
+        _receiving = false;
+        framing.dryUp();
+      }
+    } else {
+      _drySamples = 0;
+    }
     final msg = framing.takeMessage();
     if (msg != null) messages.add(msg);
   }

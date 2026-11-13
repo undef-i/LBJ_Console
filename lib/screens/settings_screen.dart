@@ -37,6 +37,7 @@ class SettingsScreen extends StatefulWidget {
   final ValueChanged<int>? onSampleIntervalChanged;
   final bool splitOnPreamble;
   final ValueChanged<bool>? onSplitOnPreambleChanged;
+  final ValueChanged<bool>? onNotificationsEnabledChanged;
 
   const SettingsScreen({
     super.key,
@@ -47,6 +48,7 @@ class SettingsScreen extends StatefulWidget {
     this.onSampleIntervalChanged,
     this.splitOnPreamble = false,
     this.onSplitOnPreambleChanged,
+    this.onNotificationsEnabledChanged,
   });
 
   @override
@@ -421,6 +423,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             _notificationsEnabled = value;
           });
           _saveSettings();
+          widget.onNotificationsEnabledChanged?.call(value);
         }),
         _toggleRow('隐藏只有时间有效的记录', _hideTimeOnlyRecords, (value) {
           setState(() {

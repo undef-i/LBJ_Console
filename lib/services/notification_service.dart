@@ -10,7 +10,7 @@ class NotificationService {
   final FlutterLocalNotificationsPlugin _notificationsPlugin =
       FlutterLocalNotificationsPlugin();
   int _notificationId = 1000;
-  bool _notificationsEnabled = true;
+  bool enabled = true;
 
   Future<void> initialize() async {
     const AndroidInitializationSettings initializationSettingsAndroid =
@@ -27,8 +27,6 @@ class NotificationService {
     );
 
     await _createNotificationChannel();
-
-    _notificationsEnabled = await isNotificationEnabled();
   }
 
   Future<void> _createNotificationChannel() async {
@@ -48,7 +46,7 @@ class NotificationService {
   }
 
   Future<void> showTrainNotification(TrainRecord record) async {
-    if (!_notificationsEnabled) return;
+    if (!enabled) return;
 
     final text = buildCardText(record);
 
@@ -106,11 +104,6 @@ class NotificationService {
     if (extraLine.isNotEmpty) lines.add(extraLine);
 
     return (title: titleParts.join(' '), body: lines.join('\n'));
-  }
-
-
-  Future<bool> isNotificationEnabled() async {
-    return _notificationsEnabled;
   }
 
 }
