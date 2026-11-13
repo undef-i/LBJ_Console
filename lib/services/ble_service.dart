@@ -34,6 +34,11 @@ class BLEService {
   StreamSubscription<List<int>>? _valueSubscription;
   StreamSubscription<BluetoothConnectionState>? _connectionStateSubscription;
   StreamSubscription<List<ScanResult>>? _scanResultsSubscription;
+  final Set<Function(List<BluetoothDevice>)> _scanListeners =
+      <Function(List<BluetoothDevice>)>{};
+  List<BluetoothDevice> _lastScanDevices = <BluetoothDevice>[];
+
+  String get targetDeviceName => _targetDeviceName;
 
   final StreamController<String> _statusController =
       StreamController<String>.broadcast();
@@ -117,7 +122,7 @@ class BLEService {
       if (settings != null) {
         _targetDeviceName = settings['deviceName'] ?? 'LBJReceiver';
       }
-    // ignore: empty_catches
+      // ignore: empty_catches
     } catch (e) {}
   }
 
@@ -139,10 +144,12 @@ class BLEService {
 
     try {
       final connected = await FlutterBluePlus.systemDevices([serviceUuid]);
-      final matchingDevices =
-          connected.where((d) => d.remoteId.str == _lastKnownDeviceAddress);
-      BluetoothDevice? target =
-          matchingDevices.isNotEmpty ? matchingDevices.first : null;
+      final matchingDevices = connected.where(
+        (d) => d.remoteId.str == _lastKnownDeviceAddress,
+      );
+      BluetoothDevice? target = matchingDevices.isNotEmpty
+          ? matchingDevices.first
+          : null;
 
       if (target == null) {
         startScan();
@@ -156,29 +163,19 @@ class BLEService {
     }
   }
 
-  Future<void> startScan({
-    String? targetName,
-    Duration? timeout,
-    Function(List<BluetoothDevice>)? onScanResults,
-  }) async {
-    if (FlutterBluePlus.isScanningNow) {
+  void _ensureScanListener() {
+    if (_scanResultsSubscription != null) {
       return;
     }
-
-    _targetDeviceName = targetName ?? _targetDeviceName;
-    _statusController.add("正在扫描...");
-
-    _scanResultsSubscription?.cancel();
     _scanResultsSubscription = FlutterBluePlus.scanResults.listen((results) {
       final allFoundDevices = results.map((r) => r.device).toList();
+      _lastScanDevices = allFoundDevices;
 
-      final filteredDevices = allFoundDevices.where((device) {
-        if (_targetDeviceName.isEmpty) return true;
-        return device.platformName.toLowerCase() ==
-            _targetDeviceName.toLowerCase();
-      }).toList();
-
-      onScanResults?.call(filteredDevices);
+      for (final listener in List<Function(List<BluetoothDevice>)>.of(
+        _scanListeners,
+      )) {
+        listener(allFoundDevices);
+      }
 
       if (isConnected ||
           _isConnecting ||
@@ -195,11 +192,34 @@ class BLEService {
         }
       }
     });
+  }
+
+  Future<void> startScan({
+    String? targetName,
+    Duration? timeout,
+    Function(List<BluetoothDevice>)? onScanResults,
+  }) async {
+    _targetDeviceName = targetName ?? _targetDeviceName;
+    _ensureScanListener();
+
+    if (onScanResults != null) {
+      _scanListeners.add(onScanResults);
+      onScanResults(_lastScanDevices);
+    }
 
     try {
-      await FlutterBluePlus.startScan(timeout: timeout);
+      if (!FlutterBluePlus.isScanningNow) {
+        _statusController.add("正在扫描...");
+        await FlutterBluePlus.startScan(timeout: timeout);
+      } else if (timeout != null) {
+        await Future<void>.delayed(timeout);
+      }
     } catch (e) {
       _statusController.add("扫描失败");
+    } finally {
+      if (onScanResults != null) {
+        _scanListeners.remove(onScanResults);
+      }
     }
   }
 
@@ -221,7 +241,6 @@ class BLEService {
 
   Future<void> stopScan() async {
     await FlutterBluePlus.stopScan();
-    _scanResultsSubscription?.cancel();
   }
 
   Future<void> connect(BluetoothDevice device) async {
@@ -270,7 +289,8 @@ class BLEService {
   }
 
   Future<void> _discoverServicesAndSetupNotifications(
-      BluetoothDevice device) async {
+    BluetoothDevice device,
+  ) async {
     try {
       final services = await device.discoverServices();
       for (var service in services) {
@@ -291,8 +311,7 @@ class BLEService {
                 deviceFeatures = capValue[1];
               }
               await cap.setNotifyValue(true);
-              _v2StatusSubscription =
-                  cap.lastValueStream.listen(_onV2Status);
+              _v2StatusSubscription = cap.lastValueStream.listen(_onV2Status);
             }
             await v2.setNotifyValue(true);
             _v2DataSubscription = v2.lastValueStream.listen(_onV2Data);
@@ -439,7 +458,12 @@ class BLEService {
       } else if (msg is FfskTdcs) {
         _tdcsController.add(
           TrainRecord.fromJson(
-            tdcsRecordJson(msg, 'ble_${now}_${_v2Serial++}', now, rssi.toDouble()),
+            tdcsRecordJson(
+              msg,
+              'ble_${now}_${_v2Serial++}',
+              now,
+              rssi.toDouble(),
+            ),
           ),
         );
       } else if (msg is FfskAlarm) {
@@ -478,7 +502,7 @@ class BLEService {
       final data = utf8.decode(value);
       _dataBuffer.write(data);
       _processDataBuffer();
-    // ignore: empty_catches
+      // ignore: empty_catches
     } catch (e) {}
   }
 
@@ -543,7 +567,7 @@ class BLEService {
         _dataController.add(trainRecord);
         DatabaseService.instance.insertRecord(trainRecord);
       }
-    // ignore: empty_catches
+      // ignore: empty_catches
     } catch (e) {}
   }
 
@@ -587,5 +611,3 @@ class BLEService {
     _alarmController.close();
   }
 }
-
-

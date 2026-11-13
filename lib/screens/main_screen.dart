@@ -762,6 +762,9 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
   Future<void> _initializeServices() async {
     await _notificationService.initialize();
+    final settingsMap = await DatabaseService.instance.getAllSettings() ?? {};
+    _notificationService.enabled =
+        (settingsMap['notificationEnabled'] ?? 1) == 1;
 
     _dataSubscription = _bleService.dataStream.listen((record) {
       if (_inputSource == InputSource.bluetooth) {
@@ -1147,6 +1150,8 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         onSampleIntervalChanged: _setSampleIntervalSeconds,
         splitOnPreamble: _splitOnPreamble,
         onSplitOnPreambleChanged: _setSplitOnPreamble,
+        onNotificationsEnabledChanged: (value) =>
+            _notificationService.enabled = value,
       ),
     ];
 
@@ -1292,7 +1297,18 @@ class _PixelPerfectBluetoothDialogState
     await widget.bleService.startScan(
       timeout: const Duration(seconds: 8),
       onScanResults: (devices) {
-        if (mounted) setState(() => _devices = devices);
+        if (!mounted) return;
+        final target = widget.bleService.targetDeviceName.toLowerCase();
+        final sorted = List<BluetoothDevice>.of(devices);
+        sorted.sort((a, b) {
+          final aHit = a.platformName.toLowerCase() == target ? 0 : 1;
+          final bHit = b.platformName.toLowerCase() == target ? 0 : 1;
+          if (aHit != bHit) return aHit - bHit;
+          return a.platformName.toLowerCase().compareTo(
+            b.platformName.toLowerCase(),
+          );
+        });
+        setState(() => _devices = sorted);
       },
     );
     if (mounted) setState(() => _scanState = _ScanState.finished);
@@ -1421,8 +1437,7 @@ class _PixelPerfectBluetoothDialogState
           ),
         ),
         const SizedBox(height: 16),
-        if (_scanState == _ScanState.finished && _devices.isNotEmpty)
-          _buildDeviceListView(),
+        if (_devices.isNotEmpty) _buildDeviceListView(),
       ],
     );
   }
@@ -1499,9 +1514,10 @@ class _PixelPerfectBluetoothDialogState
   }
 
   Widget _buildDeviceListView() {
-    return SizedBox(
-      height: 200,
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxHeight: 200),
       child: ListView.builder(
+        padding: EdgeInsets.zero,
         shrinkWrap: true,
         itemCount: _devices.length,
         itemBuilder: (context, index) {
